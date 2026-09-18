@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>ghspend</AssemblyName>
+    <Version>0.1.0-preview.1</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Description>Native Copilot AI-credit consumption monitor</Description>
+    <PublishAot>true</PublishAot>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\ghspend.ico</ApplicationIcon>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GHSpend.Core\GHSpend.Core.csproj" />
+  </ItemGroup>
+</Project>

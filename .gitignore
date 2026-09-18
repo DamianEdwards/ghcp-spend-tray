@@ -1,0 +1,40 @@
+# .NET build, publish, and test output
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+*.binlog
+*.nupkg
+*.snupkg
+*.exe
+*.dll
+*.pdb
+
+# IDE and machine-local settings
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.DS_Store
+Thumbs.db
+
+# Python icon-generator cache
+__pycache__/
+*.py[cod]
+
+# Local environment and signing material
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+
+# Runtime data must not be committed, including portable-mode data at the root
+.ghspend/
+/config.json*
+/state.json*
+/history/
+/logs/
