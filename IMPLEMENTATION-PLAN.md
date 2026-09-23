@@ -5,6 +5,12 @@
 > client ID and remove user-specified client IDs. Current behavior and validation
 > status are documented in README.md and VALIDATION.md. The original plan follows,
 > with tenant and consumption examples generalized for public distribution.
+>
+> September 23, 2026 update: the user registered the project-owned GHCPSpend
+> OAuth app with Device Flow, expiring tokens, and no redirect URI. Its public
+> client ID now replaces the CLI ID; the UI still does not accept client IDs.
+> A separate registration for msft.ghe.com was subsequently supplied and wired
+> through automatic, exact-host client-ID selection.
 
 ## Outcome and scope
 

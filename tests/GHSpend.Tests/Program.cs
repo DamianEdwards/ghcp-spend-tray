@@ -308,6 +308,67 @@ internal static class Program
                 ServiceException error = await ThrowsAsync<ServiceException>(() => provider.FetchWithTokenAsync(Account, new() { AccessToken = "fixture" }));
                 Equal(expected, error.Status); True(!error.Message.Contains("fake-secret"));
             });
+        foreach (HttpStatusCode status in new[] { HttpStatusCode.NotFound, HttpStatusCode.NotImplemented })
+        {
+            await Test("enterprise device failure identifies authorization stage " + status, async () =>
+            {
+                var handler = new FakeHttp(_ => Response("private-server-body fixture-secret", status));
+                using var client = new HttpClient(handler);
+                var error = await ThrowsAsync<ServiceException>(() => new DeviceFlowClient(client, new Clock(Now))
+                    .BeginAsync(HostResolver.Resolve("tenant.ghe.com"), GitHubOAuth.ClientId));
+                Equal(AccountStatus.Unsupported, error.Status);
+                True(error.Message.Contains("POST /login/device/code"));
+                True(error.Message.Contains("registered and approved"));
+                True(error.Message.Contains("Copilot consumption has not been checked"));
+                True(error.Message.Contains($"HTTP {(int)status}"));
+                True(!error.Message.Contains("fixture-secret"));
+                Equal(1, handler.Requests.Count);
+                Equal("https://tenant.ghe.com/login/device/code", handler.Requests[0].Uri.AbsoluteUri);
+            });
+            await Test("unavailable identity is not a quota failure " + status, async () =>
+            {
+                using var client = new HttpClient(new FakeHttp(_ => Response("private-server-body", status)));
+                var error = await ThrowsAsync<ServiceException>(() => new DeviceFlowClient(client, new Clock(Now))
+                    .GetIdentityAsync(HostResolver.Resolve("tenant.ghe.com"), new() { AccessToken = "fixture" }));
+                True(error.Message.Contains("GET /user"));
+                True(error.Message.Contains("Copilot consumption has not been checked"));
+                True(!error.Message.Contains("private-server-body"));
+            });
+            await Test("unavailable quota identifies consumption endpoint " + status, async () =>
+            {
+                using var client = new HttpClient(new FakeHttp(_ => Response("private-server-body", status)));
+                var flow = new DeviceFlowClient(client, new Clock(Now));
+                var provider = new CopilotUsageProvider(client, new(new MemoryCredentials(), flow), new Clock(Now));
+                var error = await ThrowsAsync<ServiceException>(() => provider.FetchWithTokenAsync(Account, new() { AccessToken = "fixture" }));
+                True(error.Message.Contains("GET /copilot_internal/user"));
+                True(!error.Message.Contains("consumption has not been checked"));
+                True(!error.Message.Contains("private-server-body"));
+            });
+            await Test("unavailable refresh identifies token stage " + status, async () =>
+            {
+                using var client = new HttpClient(new FakeHttp(_ => Response("private-server-body", status)));
+                var error = await ThrowsAsync<ServiceException>(() => new DeviceFlowClient(client, new Clock(Now))
+                    .RefreshAsync(HostResolver.Resolve("tenant.ghe.com"), GitHubOAuth.ClientId,
+                        new() { AccessToken = "fixture", RefreshToken = "fixture-refresh" }));
+                True(error.Message.Contains("OAuth token refresh"));
+                True(error.Message.Contains("POST /login/oauth/access_token"));
+                True(!error.Message.Contains("private-server-body"));
+            });
+            await Test("unavailable token exchange identifies polling stage " + status, async () =>
+            {
+                var clock = new Clock(Now);
+                using var client = new HttpClient(new FakeHttp(_ => Response("private-server-body", status)));
+                var polling = new DeviceFlowClient(client, clock).PollAsync(HostResolver.Resolve("tenant.ghe.com"),
+                    GitHubOAuth.ClientId, new("fixture-device", "CODE", new Uri("https://tenant.ghe.com/login/device"),
+                        Now.AddMinutes(10), 5));
+                await Until(() => clock.TimerCount > 0);
+                clock.Advance(TimeSpan.FromSeconds(5));
+                var error = await ThrowsAsync<ServiceException>(() => polling.WaitAsync(TimeSpan.FromSeconds(5)));
+                True(error.Message.Contains("OAuth token exchange"));
+                True(error.Message.Contains("Copilot consumption has not been checked"));
+                True(!error.Message.Contains("private-server-body"));
+            });
+        }
         await Test("rate limit reset and Retry-After honored", async () =>
         {
             using var client = new HttpClient(new FakeHttp(_ =>

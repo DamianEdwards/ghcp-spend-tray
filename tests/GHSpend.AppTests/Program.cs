@@ -20,7 +20,26 @@ try
     await app.InitializeAsync();
     Check(app.Settings.PollMinutes == 60, "exact one-hour default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
-    Check(GitHubOAuth.ClientId == "178c6fc778ccc68e1d6a", "verified GitHub CLI public client ID");
+    Check(GitHubOAuth.ClientId == "Ov23ctzkXY5CJhfKQo7T", "project-owned GHCPSpend public client ID");
+    Check(GitHubOAuth.ResolveClientId("https://MSFT.ghe.com/") == "Ov23ox38SoD1bIpzU9zZ",
+        "enterprise registration selected after host normalization");
+    Check(GitHubOAuth.ResolveClientId("https://GITHUB.COM:443/") == GitHubOAuth.ClientId,
+        "github.com registration preserved after normalization");
+    await Throws<ServiceException>(() => Task.FromResult(GitHubOAuth.ResolveClientId("msft.ghe.com.other.test")));
+    await Throws<ArgumentException>(() => Task.FromResult(GitHubOAuth.ResolveClientId("msft.ghe.com:8443")));
+    var sampleAccount = new Account { Host = "github.com", UserId = "1", Login = "fixture" };
+    var installedTarget = new VaultCredentials(null).Target(sampleAccount);
+    var portableTarget = new VaultCredentials(root).Target(sampleAccount);
+    Check(installedTarget.StartsWith($"GHSpend/v1/{GitHubOAuth.ClientId}/", StringComparison.Ordinal),
+        "installed credentials isolated from legacy CLI-issued tokens");
+    Check(portableTarget.Contains($"/{GitHubOAuth.ClientId}/", StringComparison.Ordinal) && portableTarget != installedTarget,
+        "portable credentials isolated by registration and data directory");
+    var enterpriseAccount = sampleAccount with { Host = "msft.ghe.com" };
+    var enterpriseTarget = new VaultCredentials(null).Target(enterpriseAccount);
+    Check(enterpriseTarget.StartsWith("GHSpend/v1/Ov23ox38SoD1bIpzU9zZ/", StringComparison.Ordinal) &&
+        enterpriseTarget != installedTarget, "same immutable ID on different hosts has separate registration-scoped credentials");
+    Check(new VaultCredentials(null).Target(enterpriseAccount with { Host = "MSFT.GHE.COM" }) == enterpriseTarget,
+        "credential target normalizes host casing");
     var legacy = JsonSerializer.Deserialize(
         """{"version":1,"hostClientIds":{"github.com":"custom-registration"},"accounts":[{"host":"github.com","userId":"1","login":"test","clientId":"custom-registration"}]}""",
         CoreJsonContext.Default.AppSettings)!;
@@ -32,11 +51,15 @@ try
     Check(!File.Exists(Path.Combine(root, "config.json")), "invalid settings not saved");
     await app.SaveSettingsAsync(new(60, "100, 50, 80, 50", true, false));
     Check(app.Settings.Thresholds == "50, 80, 100", "threshold normalization");
-    Check(app.ResolveHostDescription("EXAMPLE.ghe.com").Contains("https://api.example.ghe.com/"), "GHE API mapping in controller");
+    Check(app.ResolveHostDescription("MSFT.ghe.com").Contains("https://api.msft.ghe.com/"), "GHE API mapping in controller");
+    await Throws<AppOperationException>(() => app.AddAsync("unregistered.ghe.com", false, null,
+        _ => throw new InvalidOperationException("Unregistered host must not return a code."),
+        _ => Task.FromResult(true), default));
+    Check(handler.OAuthRequests == 0, "unregistered host fails visibly without a network request or github.com fallback");
 
     await Add("github.com", "1");
     await Add("github.com", "2");
-    await Add("example.ghe.com", "3");
+    await Add("msft.ghe.com", "3");
     await app.RefreshAsync();
     await Until(() => Volatile.Read(ref view)?.Accounts.Count == 3);
     var config = await Load();
@@ -64,9 +87,21 @@ try
         RefreshToken = "refresh-1"
     };
     await app.RefreshAsync("github.com:1");
-    Check(handler.RefreshRequests == 1, "fixed client ID also used for token refresh");
-    Check(handler.OAuthRequests >= 13 && handler.OAuthClientIds.All(id => id == GitHubOAuth.ClientId),
-        "device authorization, polling, and refresh use the fixed ID on all hosts");
+    Check(handler.RefreshRequests == 1, "github.com client ID also used for token refresh");
+    credentials.Values["msft.ghe.com:3"] = credentials.Values["msft.ghe.com:3"] with
+    {
+        ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+        RefreshToken = "refresh-3"
+    };
+    await app.RefreshAsync("msft.ghe.com:3");
+    Check(handler.RefreshRequests == 2, "enterprise token refreshed with enterprise registration");
+    Check(handler.OAuthRequests >= 14 &&
+        handler.OAuthClientIds.Count(id => id == "Ov23ox38SoD1bIpzU9zZ") == 3 &&
+        handler.OAuthClientIds.All(id => id is "Ov23ctzkXY5CJhfKQo7T" or "Ov23ox38SoD1bIpzU9zZ"),
+        "device authorization, polling, and refresh use the correct ID for each host");
+    await Add("MSFT.GHE.COM", "3", "msft.ghe.com:3");
+    Check((await Load()).Accounts.Length == 3 && credentials.Values.Count == 3,
+        "enterprise reconnect preserves account and credential partition");
     await app.SaveAccountAsync("github.com:2", "Work", "15, 120");
     await app.RefreshAsync("github.com:2");
     Check(notifications == 3, "new override below consumption alerts once");
@@ -88,11 +123,11 @@ try
         catch (T) { assertions++; return; }
         throw new InvalidOperationException("Expected " + typeof(T).Name);
     }
-    async Task Add(string host, string id)
+    async Task Add(string host, string id, string? reconnectKey = null)
     {
         handler.NextIdentity = id;
-        await app.AddAsync(host, false, null,
-            prompt => Check(prompt.VerificationUri.Host == host && prompt.Code == "TEST-CODE", "validated device prompt"),
+        await app.AddAsync(host, false, reconnectKey,
+            prompt => Check(prompt.VerificationUri.Host == host.ToLowerInvariant() && prompt.Code == "TEST-CODE", "validated device prompt"),
             identity => Task.FromResult(identity.UserId > 0), default);
     }
     async Task<AppSettings> Load() => (await new JsonStore(root).LoadSettingsAsync()).Value;
@@ -136,8 +171,14 @@ sealed class FixtureHttp : HttpMessageHandler
             var encoded = await request.Content!.ReadAsStringAsync(cancellationToken);
             form = encoded.Split('&').Select(pair => pair.Split('=', 2))
                 .ToDictionary(pair => pair[0], pair => Uri.UnescapeDataString(pair[1].Replace('+', ' ')));
-            if (form["client_id"] != GitHubOAuth.ClientId || form.ContainsKey("client_secret"))
-                throw new InvalidOperationException("OAuth must use the fixed public ID without a client secret.");
+            var expectedClient = uri.Host switch
+            {
+                "github.com" => "Ov23ctzkXY5CJhfKQo7T",
+                "msft.ghe.com" => "Ov23ox38SoD1bIpzU9zZ",
+                _ => throw new InvalidOperationException("Unexpected OAuth host.")
+            };
+            if (form["client_id"] != expectedClient || form.ContainsKey("client_secret"))
+                throw new InvalidOperationException("OAuth must use its host-specific public ID without a client secret.");
             OAuthClientIds.Add(form["client_id"]);
         }
         string json;
@@ -153,12 +194,14 @@ sealed class FixtureHttp : HttpMessageHandler
             if (refresh) RefreshRequests++;
             string id = refresh ? form["refresh_token"]["refresh-".Length..] :
                 form["device_code"]["synthetic-device-".Length..];
+            if ((id == "3") != (uri.Host == "msft.ghe.com"))
+                throw new InvalidOperationException("Device or refresh token crossed host boundary.");
             json = $$"""{"access_token":"fixture-{{id}}","token_type":"bearer","scope":"read:user"}""";
         }
         else
         {
             string id = request.Headers.Authorization!.Parameter!["fixture-".Length..];
-            if (id == "3" && uri.Host != "api.example.ghe.com" ||
+            if (id == "3" && uri.Host != "api.msft.ghe.com" ||
                 id != "3" && uri.Host != "api.github.com")
                 throw new InvalidOperationException("Credential crossed host boundary.");
             if (uri.AbsolutePath == "/user") json = $$"""{"id":{{id}},"login":"test-{{id}}"}""";

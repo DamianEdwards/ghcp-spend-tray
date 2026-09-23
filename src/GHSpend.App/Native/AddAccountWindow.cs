@@ -17,8 +17,8 @@ internal sealed class AddAccountWindow : NativeWindow
         _hostLabel = Label("GitHub &host (HTTPS only):"); _host = Edit(reconnect?.Host ?? "github.com", 1);
         _offline = Control("BUTTON", "Request &offline_access (only if supported/approved by this host)", 4, Win32.WS_TABSTOP | 3);
         _destination = Label("");
-        _instructions = Label("Sign-in uses the same OAuth application as the gh CLI. GitHub's consent screen will name GitHub CLI, not GHSpend. " +
-            "No client ID or app registration is needed. GHSpend requests read:user, not the CLI's repository scopes. " +
+        _instructions = Label("Sign-in uses our GHCPSpend OAuth application. Check that GitHub's consent screen names GHCPSpend. " +
+            "No client ID or redirect URL needs to be entered. GHSpend requests read:user, not repository access. " +
             "Enterprise policy and consumption API availability still apply.");
         _code = Control("EDIT", "", 5, Win32.WS_TABSTOP | 0x800);
         _status = Label("Sign in in the browser, then confirm the verified identity here before saving.");

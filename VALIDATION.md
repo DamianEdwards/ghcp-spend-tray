@@ -1,6 +1,7 @@
 # GHSpend validation and release gates
 
-Implementation and local verification completed on September 17, 2026.
+Initial implementation and local verification completed on September 17, 2026;
+project-owned OAuth integration and user-reported live verification followed on September 23.
 This is a development build, **not a production-authentication or clean-machine
 certification**. The preserved implementation plan describes intended acceptance,
 not completed evidence.
@@ -11,9 +12,9 @@ not completed evidence.
 |---|---|
 | Exact SDK | `global.json`: `11.0.100-rc.1.26425.128`, no roll-forward |
 | Solution build | Release build, zero warnings and errors |
-| Core fixtures | **125 passed**, under both JIT and executed x64 Native AOT |
+| Core fixtures | **135 passed**, under both JIT and executed x64 Native AOT |
 | Platform fixtures | **24 passed**, under both JIT and executed x64 Native AOT |
-| Application integration | **37 assertions passed**, under both JIT and executed x64 Native AOT |
+| Application integration | **50 assertions passed**, under both JIT and executed x64 Native AOT |
 | Production native publishing | `win-x64` and `win-arm64` both published successfully, AOT warnings treated as errors |
 | Native executable format | PE machine checked against x64/ARM64; CLR runtime header absent |
 | x64 GUI integration | Published executable ran in an isolated portable directory |
@@ -40,7 +41,8 @@ It does not run a real downloaded-to-installed shell handoff.
 
 Application fixtures exercise device-flow onboarding, confirmed identities, two
 accounts on github.com plus a separate enterprise account, consumption totals,
-the fixed GitHub CLI client ID for device requests and refresh on all hosts,
+host-specific project-owned IDs for device requests and refresh, enterprise reconnect,
+registration-scoped credentials, rejection of unregistered hosts before network access,
 ignored legacy client-ID overrides, duplicate/wrong-account/declined-identity handling, account
 settings/removal, notification deduplication, and absence of synthetic tokens
 from files. All HTTP responses and account credentials are synthetic.
@@ -58,21 +60,30 @@ sequentially, not concurrent publishes of the same projects. The smoke script
 removes its unique temporary data directory on success; `-KeepData` retains it.
 Failures retain their isolated directory for inspection.
 
-## Pending: live OAuth compatibility
+## Live OAuth: initial user-confirmed success; broader compatibility pending
 
-At the user's request, the original app-owned registration design was replaced
-with the fixed GitHub CLI public client ID `178c6fc778ccc68e1d6a`, verified against
-[cli/cli's authentication source](https://github.com/cli/cli/blob/trunk/internal/authflow/flow.go).
-Registration/client-ID input is no longer a blocker or a user setting. The consent
-screen names **GitHub CLI**, and onboarding explicitly says so.
+On September 23, 2026, the user registered the project-owned **GHCPSpend** OAuth
+application and supplied public client ID `Ov23ctzkXY5CJhfKQo7T`. This replaces
+the earlier GitHub CLI client ID. The registration has Device Flow and expiring
+access tokens enabled and was accepted without any redirect URI. Onboarding
+identifies GHCPSpend, and there remains no user-configurable client-ID field.
+Credential targets are registration-specific; existing accounts must reconnect.
 
-**No live OAuth or consumption request was performed during implementation.**
-No existing credentials from another application were discovered or borrowed,
-and no client secret was included. Earlier successful probes in the plan do not
-prove that fresh device-flow tokens with the currently requested scopes work.
+**User-reported result, September 23, 2026:** after following the portable
+github.com sign-in walkthrough with the rebuilt application, the user explicitly
+confirmed that sign-in completed and consumption/allocation appeared. This
+establishes initial project-owned device-flow and quota-access compatibility
+for that tested setup, not a guarantee for every host or account.
 
-Remaining input is normal browser consent for the intended github.com and GHE.com
-test identities, plus required enterprise/EMU app approval. Do not supply client
+The agent did not inspect account data, credentials, or live response bodies.
+No account identifiers, consumption amounts, tokens, or device codes are recorded
+in this evidence. Portal-value comparison, the exact granted scopes, and live
+refresh-token rotation were not independently verified.
+
+Remaining checks include additional github.com identities and GHE.com
+test identities, plus required enterprise/EMU app approval. A separate registration
+has now been supplied and wired for the enterprise host, as described below;
+its live authorization and consumption access have not yet been confirmed. Do not supply client
 secrets or paste access/refresh tokens. `read:user` remains the implemented starting
 scope, not an established minimum for the undocumented quota endpoint;
 `offline_access` is optional. The CLI's repository/organization/gist scopes are
@@ -85,6 +96,34 @@ placing real payloads, account data, or tokens in source/logs. Test optional
 refresh rotation and reauthentication; record the minimal successful scopes
 and policy approvals without storing secrets. A host/policy denial remains a
 visible release blocker; there is no alternate client-ID setting or scope escalation.
+
+### Enterprise device authorization blocked
+
+On September 23, the user reported that an enterprise-host attempt failed
+immediately after Start device sign-in, before any device code was displayed.
+The former generic capability error maps to HTTP 404 or 501; the precise status
+was not captured. Given this stage, the failure was in `POST /login/device/code`,
+not `/user` or `/copilot_internal/user`. No conclusion about Copilot quota
+availability follows from this failure.
+
+The client ID used by that failed attempt belonged to the github.com registration. GitHub's
+[enterprise OAuth integration guidance](https://github.com/github/github-mcp-server/blob/main/docs/oauth-login.md#github-enterprise-server-and-ghecom)
+calls for an app registered on the target GHE.com host. An absent/incompatible
+host registration or policy restriction is the likely blocker, not yet
+independently confirmed.
+
+The user subsequently registered GHCPSpend on `msft.ghe.com` and supplied public
+client ID `Ov23ox38SoD1bIpzU9zZ`. The implementation now chooses that ID for this
+exact normalized host in device authorization, token polling, refresh, and
+Credential Manager targets. github.com retains `Ov23ctzkXY5CJhfKQo7T` and its
+existing credential targets. Hosts without a built-in registration fail visibly
+before an OAuth request is sent. No client secret or existing user token was
+supplied or read. Live enterprise sign-in must still be retried by the user.
+
+HTTP 404/501 diagnostics now identify device authorization, token exchange,
+token refresh, identity lookup, or consumption lookup explicitly. They preserve
+the HTTP status without exposing response bodies, credentials, or device codes.
+Synthetic tests cover both statuses at all five stages.
 
 ## Other release acceptance still pending
 

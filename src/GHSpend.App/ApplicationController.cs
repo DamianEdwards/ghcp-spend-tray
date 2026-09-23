@@ -185,8 +185,10 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         try
         {
             var resolved = HostResolver.Resolve(host);
+            _ = GitHubOAuth.ResolveClientId(resolved.Host);
             return $"{resolved.Kind}: auth {resolved.WebBaseUri}\r\nAPI {resolved.ApiBaseUri}";
         }
+        catch (ServiceException ex) { throw new AppOperationException(ex.Message); }
         catch (ArgumentException)
         {
             throw new AppOperationException("Enter an HTTPS host only, without a path, user information, query or fragment. Custom ports are GHES-only.");
@@ -201,9 +203,10 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         try
         {
             var resolved = HostResolver.Resolve(host);
-            var authorization = await _auth.BeginAsync(resolved, GitHubOAuth.ClientId, offlineAccess, token).ConfigureAwait(false);
+            var clientId = GitHubOAuth.ResolveClientId(resolved.Host);
+            var authorization = await _auth.BeginAsync(resolved, clientId, offlineAccess, token).ConfigureAwait(false);
             prompt(new(authorization.UserCode, authorization.VerificationUri, authorization.ExpiresAtUtc));
-            var tokens = await _auth.PollAsync(resolved, GitHubOAuth.ClientId, authorization, token).ConfigureAwait(false);
+            var tokens = await _auth.PollAsync(resolved, clientId, authorization, token).ConfigureAwait(false);
             var identity = await _auth.GetIdentityAsync(resolved, tokens, token).ConfigureAwait(false);
             var account = new Account { Host = resolved.Host, UserId = identity.UserId, Login = identity.Login };
             if (reconnectKey is not null && account.Key != reconnectKey)
@@ -347,7 +350,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);
                 var title = $"{qualification}MTD consumption: {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
-                var status = _storageDiagnostic ?? (states.Count == 0 ? "Add an account to get started. Sign-in uses the GitHub CLI OAuth application." :
+                var status = _storageDiagnostic ?? (states.Count == 0 ? "Add an account to get started. Sign-in uses the GHCPSpend OAuth application." :
                     $"Poll interval: {_settings.PollIntervalMinutes} minutes. Account freshness and errors are shown below.");
                 var tooltip = $"GHSpend | {qualification}MTD {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
                 var last = states.Where(s => s.Snapshot is not null).Select(s => s.Snapshot!.FetchedAtUtc).DefaultIfEmpty().Min();
@@ -412,7 +415,8 @@ internal sealed class VaultCredentials(string? portableDirectory) : ICredentialS
     private readonly CredentialVault _vault = new();
     private readonly string _prefix = portableDirectory is null ? "GHSpend/v1/" :
         "GHSpend/portable/" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(portableDirectory).ToUpperInvariant()))) + "/";
-    private string Target(Account account) => _prefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(account.Key)));
+    internal string Target(Account account) => _prefix + GitHubOAuth.ResolveClientId(account.Host) + "/" +
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(account.Key)));
     public Task<TokenSet?> ReadAsync(Account account, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

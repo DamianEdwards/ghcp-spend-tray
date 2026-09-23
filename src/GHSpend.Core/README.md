@@ -31,7 +31,7 @@ the public metadata for platform Credential Manager payloads.
    `JsonStore.DeleteAccountHistoryAsync` provide optional local-data deletion.
    Local deletion does not revoke the host's OAuth grant.
 
-Onboarding is explicit: resolve host; use the fixed `GitHubOAuth.ClientId`;
+Onboarding is explicit: resolve host; select `GitHubOAuth.ResolveClientId(host)`;
 `BeginAsync`; show user code and validated verification URL; `PollAsync`;
 `GetIdentityAsync`; `FetchWithTokenAsync`; confirm immutable identity; save credentials
 and settings; refresh. Account keys include canonical host and immutable numeric ID,
@@ -42,18 +42,25 @@ Then call `UpdateSettings` with the account still present to resume monitoring.
 
 ## Authentication gate
 
-GHSpend uses the GitHub CLI OAuth app's public ID, `178c6fc778ccc68e1d6a`, through
-`GitHubOAuth.ClientId`. It is not user-configurable; account/configuration models
+GHSpend selects project-owned GHCPSpend registrations with `GitHubOAuth.ResolveClientId`:
+`github.com` uses `Ov23ctzkXY5CJhfKQo7T`, while `msft.ghe.com` uses
+`Ov23ox38SoD1bIpzU9zZ`. Hostnames are normalized and matched exactly; unregistered
+hosts fail before device authorization without falling back to another registration.
+This is not user-configurable; account/configuration models
 do not persist client IDs. The lower-level device-flow protocol methods accept
 an explicit ID for testability, but application onboarding and account refresh
-always use the fixed ID. No client secret is embedded and no existing CLI token
-is read. GitHub's consent screen identifies GitHub CLI rather than GHSpend.
+always select the host-specific ID. No client secret is embedded and no existing CLI token
+is read. GitHub's consent screen should identify GHCPSpend. The application was
+registered with Device Flow and expiring tokens enabled, without a redirect URI.
+Windows credential targets include the selected host's client ID; accounts from the old CLI
+registration must reconnect rather than reusing tokens from that registration.
 
-`read:user` is still an **unverified starting scope**, not a proven minimum for
-the undocumented Copilot endpoint. `offline_access` is explicit opt-in. New
-device-flow tokens must be validated on github.com and an approved GHE.com tenant
-before claiming production authentication support. CLI repository scopes are
-not added. SSO/approval failures are surfaced, not bypassed.
+The user confirmed successful live sign-in and consumption/allocation display
+in the portable github.com walkthrough on September 23, 2026. `read:user` is the
+implemented starting scope, not a proven minimum; the exact granted scopes were
+not independently inspected. `offline_access` is explicit opt-in. Enterprise
+compatibility and live refresh rotation remain unverified. CLI repository scopes
+are not added. SSO/approval failures are surfaced, not bypassed.
 
 ## Accounting and durability
 

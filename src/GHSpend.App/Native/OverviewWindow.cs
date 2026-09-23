@@ -115,7 +115,7 @@ internal sealed class OverviewWindow : NativeWindow
     {
         var account = Selected();
         Win32.SetWindowText(_details, account?.Details ?? "Add an account to monitor consumption.\r\n\r\n" +
-            "Sign-in uses the GitHub CLI OAuth application. No client ID or app registration needs to be entered.");
+            "Sign-in uses our GHCPSpend OAuth application. No client ID or app registration needs to be entered.");
         Win32.SetWindowText(_history, account?.HistoryText ?? "Collecting history");
         Win32.SendMessage(_progress, 0x402, (nuint)Math.Clamp((account?.Percent ?? 0m) * 10m, 0m, 1000m), 0);
         Win32.SetWindowText(_progress, account?.Percent is decimal percent ? $"{percent:F2}% of allocation consumed" : "Allocation percentage not available");

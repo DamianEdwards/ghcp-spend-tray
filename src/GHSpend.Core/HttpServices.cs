@@ -7,6 +7,8 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace GHSpend.Core;
 
+internal enum GitHubOperation { DeviceAuthorization, TokenExchange, TokenRefresh, Identity, Consumption }
+
 public static class HttpTransport
 {
     public static HttpClient CreateClient() => new(new SocketsHttpHandler
@@ -54,7 +56,7 @@ public static class HttpTransport
         }
     }
 
-    internal static void EnsureSuccess(HttpResponseMessage response, DateTimeOffset now)
+    internal static void EnsureSuccess(HttpResponseMessage response, DateTimeOffset now, GitHubOperation operation)
     {
         if (response.IsSuccessStatusCode) return;
         int code = (int)response.StatusCode;
@@ -82,7 +84,31 @@ public static class HttpTransport
                 ? "Enterprise SSO authorization is required. Authorize the app with your organization."
                 : "Access forbidden. Check app approval, scopes, enterprise policy, and IP restrictions.");
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.NotImplemented)
-            throw new ServiceException(AccountStatus.Unsupported, "This host or account does not expose the requested API capability.");
+        {
+            string detail = operation switch
+            {
+                GitHubOperation.DeviceAuthorization =>
+                    "Device authorization could not start (POST /login/device/code). " +
+                    "Check that this OAuth application is registered and approved on the selected host and that Device Flow is enabled. " +
+                    "A github.com registration is not automatically valid on an enterprise host. " +
+                    "Copilot consumption has not been checked.",
+                GitHubOperation.TokenExchange =>
+                    "OAuth token exchange is unavailable (POST /login/oauth/access_token). " +
+                    "Check the host's OAuth registration, Device Flow support, and enterprise policy. " +
+                    "Copilot consumption has not been checked.",
+                GitHubOperation.TokenRefresh =>
+                    "OAuth token refresh is unavailable (POST /login/oauth/access_token). " +
+                    "Check the host's refresh support and OAuth application approval, then reconnect this account.",
+                GitHubOperation.Identity =>
+                    "Account identity could not be read (GET /user). " +
+                    "Check the selected API host and account access. Copilot consumption has not been checked.",
+                _ =>
+                    "Copilot consumption is unavailable (GET /copilot_internal/user). " +
+                    "The endpoint may be unsupported or inaccessible to this account or OAuth application."
+            };
+            throw new ServiceException(AccountStatus.Unsupported,
+                $"HTTP {code.ToString(CultureInfo.InvariantCulture)}: {detail}");
+        }
         throw new ServiceException(code >= 500 ? AccountStatus.NetworkError : AccountStatus.InvalidData,
             "GitHub request failed (HTTP " + code.ToString(CultureInfo.InvariantCulture) + ").", retry);
     }
@@ -113,10 +139,10 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
         using HttpResponseMessage response = await httpClient.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != HttpStatusCode.BadRequest)
-            HttpTransport.EnsureSuccess(response, _time.GetUtcNow());
+            HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), GitHubOperation.DeviceAuthorization);
         DeviceWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.DeviceWire, cancellationToken).ConfigureAwait(false);
         if (wire.Error is not null) throw OAuthError(wire.Error);
-        HttpTransport.EnsureSuccess(response, _time.GetUtcNow());
+        HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), GitHubOperation.DeviceAuthorization);
         if (string.IsNullOrWhiteSpace(wire.DeviceCode) || string.IsNullOrWhiteSpace(wire.UserCode) ||
             wire.ExpiresIn is null or <= 0 or > 86400 || wire.Interval is <= 0 or > 3600 ||
             wire.VerificationUri is null)
@@ -144,7 +170,7 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
             {
                 ["client_id"] = clientId, ["device_code"] = authorization.DeviceCode,
                 ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code"
-            }, cancellationToken).ConfigureAwait(false);
+            }, GitHubOperation.TokenExchange, cancellationToken).ConfigureAwait(false);
             if (wire.Error == "authorization_pending") continue;
             if (wire.Error == "slow_down") { interval = Math.Min(interval + 5, 3600); continue; }
             return ConvertToken(wire);
@@ -159,7 +185,7 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
         using var request = HttpTransport.Request(HttpMethod.Get, host.ApiUri("user"), tokens.AccessToken);
         using HttpResponseMessage response = await httpClient.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        HttpTransport.EnsureSuccess(response, _time.GetUtcNow());
+        HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), GitHubOperation.Identity);
         IdentityWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.IdentityWire, cancellationToken).ConfigureAwait(false);
         if (wire.Id is null or <= 0 || string.IsNullOrWhiteSpace(wire.Login))
             throw new ServiceException(AccountStatus.InvalidData, "GitHub did not return a valid immutable identity.");
@@ -176,7 +202,7 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
         TokenWire wire = await RequestTokenAsync(host, new()
         {
             ["client_id"] = clientId, ["grant_type"] = "refresh_token", ["refresh_token"] = tokens.RefreshToken
-        }, cancellationToken).ConfigureAwait(false);
+        }, GitHubOperation.TokenRefresh, cancellationToken).ConfigureAwait(false);
         TokenSet refreshed = ConvertToken(wire);
         // A host may rotate both tokens or leave the existing refresh token valid.
         return refreshed.RefreshToken is null ? refreshed with
@@ -186,16 +212,16 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
     }
 
     private async Task<TokenWire> RequestTokenAsync(ResolvedHost host, Dictionary<string, string> form,
-        CancellationToken cancellationToken)
+        GitHubOperation operation, CancellationToken cancellationToken)
     {
         using var request = HttpTransport.Request(HttpMethod.Post, host.AuthUri("login/oauth/access_token"));
         request.Content = new FormUrlEncodedContent(form);
         using HttpResponseMessage response = await httpClient.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != HttpStatusCode.BadRequest)
-            HttpTransport.EnsureSuccess(response, _time.GetUtcNow());
+            HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), operation);
         TokenWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.TokenWire, cancellationToken).ConfigureAwait(false);
-        if (wire.Error is null) HttpTransport.EnsureSuccess(response, _time.GetUtcNow());
+        if (wire.Error is null) HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), operation);
         return wire;
     }
 
@@ -240,6 +266,7 @@ public sealed class TokenManager(ICredentialStore credentialStore, DeviceFlowCli
         CancellationToken cancellationToken = default)
     {
         account.Validate();
+        string clientId = GitHubOAuth.ResolveClientId(account.Host);
         SemaphoreSlim gate = _locks.GetOrAdd(account.Key, _ => new(1, 1));
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -254,7 +281,7 @@ public sealed class TokenManager(ICredentialStore credentialStore, DeviceFlowCli
             if (!forceRefresh && (tokens.ExpiresAtUtc is null || tokens.ExpiresAtUtc > _time.GetUtcNow().AddMinutes(2)))
                 return tokens;
             TokenSet refreshed = await deviceFlowClient.RefreshAsync(HostResolver.Resolve(account.Host),
-                GitHubOAuth.ClientId, tokens, cancellationToken).ConfigureAwait(false);
+                clientId, tokens, cancellationToken).ConfigureAwait(false);
             try { await credentialStore.WriteAsync(account, refreshed, cancellationToken).ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OperationCanceledException)
             { throw new ServiceException(AccountStatus.StorageError, "Rotated credentials could not be saved. Reconnect this account."); }
@@ -294,7 +321,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
             HostResolver.Resolve(account.Host).ApiUri("copilot_internal/user"), tokens.AccessToken);
         using HttpResponseMessage response = await httpClient.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        HttpTransport.EnsureSuccess(response, _time.GetUtcNow());
+        HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), GitHubOperation.Consumption);
         UsageWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.UsageWire, cancellationToken).ConfigureAwait(false);
         return Parse(wire, account.Key, _time.GetUtcNow());
     }
