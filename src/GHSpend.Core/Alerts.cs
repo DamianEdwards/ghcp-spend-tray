@@ -15,6 +15,7 @@ public sealed record AlertLedger
                 string.IsNullOrWhiteSpace(entry.PeriodId) || entry.LastSubmittedUtc == default)
                 throw new ArgumentException("Invalid alert ledger entry.");
             AppSettings.ValidateThresholds(entry.SubmittedThresholds);
+            if (entry.SubmittedSpendUsd < 0) throw new ArgumentException("Invalid spend notification ledger.");
         }
     }
 }
@@ -24,10 +25,11 @@ public sealed record AlertLedgerEntry
     [JsonRequired] public string PeriodId { get; init; } = "";
     [JsonRequired] public decimal[] SubmittedThresholds { get; init; } = [];
     [JsonRequired] public DateTimeOffset LastSubmittedUtc { get; init; }
+    public decimal SubmittedSpendUsd { get; init; }
 }
 
 public sealed record UsageAlert(Account Account, UsageSnapshot Snapshot, decimal HighestThreshold,
-    decimal[] ReachedThresholds);
+    decimal[] ReachedThresholds, decimal? SpendMilestoneUsd = null);
 
 public interface INotificationSink
 {
@@ -52,7 +54,7 @@ public sealed class AlertService(JsonStore store, INotificationSink notification
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if ((!settings.NotificationsEnabled || snapshot.PercentConsumed is null) && _pendingLedger is null)
+            if (!settings.NotificationsEnabled && _pendingLedger is null)
                 return false;
             _ledger ??= (await store.LoadAlertLedgerAsync(cancellationToken).ConfigureAwait(false)).Value;
             if (_pendingLedger is { } pending)
@@ -61,18 +63,23 @@ public sealed class AlertService(JsonStore store, INotificationSink notification
                 _ledger = pending;
                 _pendingLedger = null;
             }
-            if (!settings.NotificationsEnabled || snapshot.PercentConsumed is null) return false;
+            if (!settings.NotificationsEnabled) return false;
             _ledger.Accounts.TryGetValue(account.Key, out AlertLedgerEntry? previous);
             // Ignore out-of-order observations: an old sample cannot roll the durable period backwards.
             if (previous is not null && snapshot.FetchedAtUtc < previous.LastSubmittedUtc) return false;
             decimal[] submitted = previous?.PeriodId == snapshot.PeriodId ? previous.SubmittedThresholds : [];
             decimal[] reached = (account.ThresholdOverrides ?? settings.AlertThresholds)
-                .Where(t => t <= snapshot.PercentConsumed.Value && !submitted.Contains(t)).ToArray();
-            if (reached.Length == 0) return false;
+                .Where(t => snapshot.PercentConsumed is { } percent && t <= percent && !submitted.Contains(t)).ToArray();
+            decimal previousSpend = previous?.PeriodId == snapshot.PeriodId ? previous.SubmittedSpendUsd : 0;
+            decimal? increment = account.SpendIncrementUsd ?? settings.SpendIncrementUsd;
+            decimal? milestone = increment > 0
+                ? decimal.Floor(snapshot.ConsumptionUsd / increment.Value) * increment.Value : null;
+            if (milestone <= previousSpend) milestone = null;
+            if (reached.Length == 0 && milestone is null) return false;
             _retries.TryGetValue(account.Key, out SubmissionRetry? retry);
             if (retry?.PeriodId == snapshot.PeriodId && snapshot.FetchedAtUtc < retry.NotBeforeUtc) return false;
             var alert = new UsageAlert(account with { ThresholdOverrides = account.ThresholdOverrides?.ToArray() },
-                snapshot, reached[^1], reached.ToArray());
+                snapshot, reached.Length == 0 ? 0 : reached[^1], reached.ToArray(), milestone);
             bool accepted;
             try { accepted = await notificationSink.SubmitAsync(alert, cancellationToken).ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -91,7 +98,8 @@ public sealed class AlertService(JsonStore store, INotificationSink notification
                 [account.Key] = new()
                 {
                     PeriodId = snapshot.PeriodId, LastSubmittedUtc = snapshot.FetchedAtUtc,
-                    SubmittedThresholds = submitted.Concat(reached).Distinct().Order().ToArray()
+                    SubmittedThresholds = submitted.Concat(reached).Distinct().Order().ToArray(),
+                    SubmittedSpendUsd = milestone ?? previousSpend
                 }
             };
             var updated = _ledger with { Accounts = entries };

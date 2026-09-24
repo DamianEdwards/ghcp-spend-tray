@@ -10,6 +10,7 @@ public sealed record Account
     public string Login { get; init; } = "";
     public string? DisplayName { get; init; }
     public decimal[]? ThresholdOverrides { get; init; }
+    public decimal? SpendIncrementUsd { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
 
     public void Validate()
@@ -20,19 +21,23 @@ public sealed record Account
             throw new ArgumentException("A verified numeric user ID and login are required.");
         if (ThresholdOverrides is not null)
             AppSettings.ValidateThresholds(ThresholdOverrides);
+        AppSettings.ValidateSpendIncrement(SpendIncrementUsd);
     }
 }
 
 public sealed record AppSettings
 {
-    [JsonRequired] public int Version { get; init; } = 1;
-    public int PollIntervalMinutes { get; init; } = 60;
-    public bool NotificationsEnabled { get; init; } = true;
-    public bool StartWithWindows { get; init; } = true;
-    public decimal[] AlertThresholds { get; init; } = [50m, 80m, 100m];
-    public Account[] Accounts { get; init; } = [];
-    public bool RequestOfflineAccess { get; init; }
-    public int HistoryRetentionDays { get; init; } = 90;
+    // Setters preserve omitted-field defaults with .NET 10's generated JSON reader.
+    // MonitorService takes detached copies at its settings boundary.
+    [JsonRequired] public int Version { get; set; } = 1;
+    public int PollIntervalMinutes { get; set; } = 60;
+    public bool NotificationsEnabled { get; set; } = true;
+    public bool StartWithWindows { get; set; }
+    public decimal[] AlertThresholds { get; set; } = [50m, 80m, 100m];
+    public decimal? SpendIncrementUsd { get; set; }
+    public Account[] Accounts { get; set; } = [];
+    public bool RequestOfflineAccess { get; set; }
+    public int HistoryRetentionDays { get; set; } = 90;
 
     public void Validate()
     {
@@ -42,6 +47,7 @@ public sealed record AppSettings
         if (HistoryRetentionDays is < 1 or > 3650)
             throw new ArgumentException("History retention must be between 1 and 3650 days.");
         ValidateThresholds(AlertThresholds);
+        ValidateSpendIncrement(SpendIncrementUsd);
         ArgumentNullException.ThrowIfNull(Accounts);
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (Account account in Accounts)
@@ -58,6 +64,12 @@ public sealed record AppSettings
         if (thresholds.Length > 100 || thresholds.Any(t => t <= 0) ||
             !thresholds.SequenceEqual(thresholds.Distinct().Order()))
             throw new ArgumentException("Thresholds must be sorted, distinct positive percentages (at most 100).");
+    }
+
+    public static void ValidateSpendIncrement(decimal? increment)
+    {
+        if (increment is < 0 || increment is { } amount && decimal.Round(amount, 2) != amount)
+            throw new ArgumentException("Spend increments must be nonnegative USD amounts with at most two decimal places. Zero disables the alert.");
     }
 }
 

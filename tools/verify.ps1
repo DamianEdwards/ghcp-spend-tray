@@ -1,6 +1,9 @@
 param([switch] $NativeTests)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$originalPath = $env:PATH
+$installerTools = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+if (Test-Path (Join-Path $installerTools 'vswhere.exe')) { $env:PATH = "$installerTools;$env:PATH" }
 Push-Location $root
 try {
     dotnet build GHSpend.slnx -c Release --nologo -v:q
@@ -18,4 +21,4 @@ try {
         }
     }
 }
-finally { Pop-Location }
+finally { Pop-Location; $env:PATH = $originalPath }

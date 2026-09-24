@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net11.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
     <OutputType>WinExe</OutputType>
     <AssemblyName>ghspend</AssemblyName>
     <Version>0.1.0-preview.1</Version>
@@ -14,6 +19,22 @@
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Component versions from Windows App SDK 2.5.1; the umbrella also brings AI/ML/Search/Widgets. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.1.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
+    <RuntimeHostConfigurationOption Include="Reactor.DevtoolsSupport" Value="false" Trim="true" />
+    <PackageReference Include="Microsoft.UI.Reactor" Version="0.1.0-preview.16" />
     <ProjectReference Include="..\GHSpend.Core\GHSpend.Core.csproj" />
+    <Content Include="Assets\ghspend.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\ghcpspend-logo.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- WindowsAppSDK#6394: unpackaged AOT publishes must carry the generated WinUI resources. -->
+  <Target Name="CopyWinUIResourcesForAot" AfterTargets="Publish" Condition="'$(PublishAot)' == 'true'">
+    <ItemGroup>
+      <WinUIResources Include="$(OutputPath)**\*.xbf" />
+      <WinUIResources Include="$(OutputPath)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WinUIResources)" DestinationFiles="@(WinUIResources->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
 </Project>

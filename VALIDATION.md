@@ -10,20 +10,90 @@ not completed evidence.
 
 | Check | Evidence |
 |---|---|
-| Exact SDK | `global.json`: `11.0.100-rc.1.26425.128`, no roll-forward |
+| Exact SDK | `global.json`: `10.0.401`, no roll-forward (user-approved migration) |
 | Solution build | Release build, zero warnings and errors |
-| Core fixtures | **135 passed**, under both JIT and executed x64 Native AOT |
+| Core fixtures | **145 passed**, under both JIT and executed x64 Native AOT |
 | Platform fixtures | **24 passed**, under both JIT and executed x64 Native AOT |
-| Application integration | **50 assertions passed**, under both JIT and executed x64 Native AOT |
+| Application integration | **63 assertions passed**, under both JIT and executed x64 Native AOT |
 | Production native publishing | `win-x64` and `win-arm64` both published successfully, AOT warnings treated as errors |
+| ZIP distribution | Extracted x64 ZIP passed the empty-state/accessible-action native smoke test; project license and available dependency notices are included |
 | Native executable format | PE machine checked against x64/ARM64; CLR runtime header absent |
 | x64 GUI integration | Published executable ran in an isolated portable directory |
-| Native UI smoke | Window/message loop, list selection, above-100% text, clamped native progress, graph, settings and onboarding controls |
-| GUI resource lifecycle | 50 cycles creating/disposing three dialog types (150 dialogs), with GDI/USER resource counts checked |
+| Reactor UI smoke | Hidden startup, populated cost flyout, gear/empty-state button invocation through accessibility peers, settings navigation and account-onboarding deep link |
+| Account details disclosure | Compact summary, initially collapsed history/diagnostic expanders, accessible expansion revealing labeled raw credits; warning mapping tested independently |
+| Visual inspection | Published x64 Reactor flyout inspected at 125% DPI, including the rendered cost, allocation meter and custom graph |
 | Windows notification | Shell accepted a synthetic test notification; visual delivery is not claimed |
 | Credential Manager | A unique `GHSpend/test/<random>` synthetic credential was written, read, deleted, and checked absent |
 | Startup isolation | Real GHSpend HKCU Run value compared before/after smoke testing and unchanged |
-| Installation isolation | Only portable mode and isolated/fake install tests were used; no real first-run installation |
+| Installation isolation | ZIP build runs in place; portable tests never register startup or self-install |
+
+## Reactor migration evidence
+
+The application uses `Microsoft.UI.Reactor` `0.1.0-preview.16` with the UI components
+from `Microsoft.WindowsAppSDK` `2.5.1`, the latest stable NuGet release checked on
+September 23, 2026. The initial migration used `2.2.0`; the upgrade to `2.5.1`
+passed all JIT/x64 Native AOT suites, clean x64/ARM64 native publishing, and
+populated/empty Reactor UI smoke tests, including Advanced details expansion.
+Old publish folders were removed before publishing so outdated runtime DLLs
+could not mask packaging problems. No warning suppressions or application
+compatibility workarounds were needed for this package upgrade.
+
+### Component-only distribution
+
+The umbrella package was then replaced with direct WinUI `2.3.9`, Interactive
+Experiences `2.1.9`, and DWrite `2.1.0` references, preserving the component
+versions from SDK `2.5.1`. Base `2.0.4` and Foundation `2.3.12` are transitive.
+AI, ML, Search, Widgets, and the umbrella Runtime package are no longer in the
+resolved dependency graph. The SDK's self-contained build collects the referenced
+components' payloads and registration fragments; files are not pruned after
+publishing to simulate a smaller dependency graph.
+
+Both architectures were clean-published and all suites and x64 native UI smoke
+tests passed again. The headless application test harness disables its own
+duplicate WinAppSDK module initializer: the referenced application executable
+already supplies that initializer. Production initialization remains enabled.
+Publish-time guards reject reintroduced optional packages or their DLL payload.
+The extracted slim x64 ZIP passed both populated and empty-state UI smoke tests.
+Process-module inspection confirmed `Microsoft.UI.Xaml.dll` and
+`Microsoft.WindowsAppRuntime.dll` loaded from that extracted folder, not an
+installed Windows App Runtime.
+
+Measured on September 23, 2026 (MiB; runtime payload excludes debug symbols):
+
+| Architecture | Payload before | Payload after | ZIP before | ZIP after |
+|---|---:|---:|---:|---:|
+| x64 | 131.83 | 75.88 | 52.13 | 29.45 |
+| ARM64 | 138.10 | 81.04 | 50.69 | 28.66 |
+
+Both ZIPs are about **43.5% smaller**. The 86 locale folders remain intact.
+PDBs are still generated but moved to `artifacts\symbols\<runtime>`; their
+relocation is not counted as runtime-payload savings in this table.
+
+### Original Native AOT compatibility investigation
+
+During the initial migration, an isolated .NET 11 RC1
+Native AOT proof failed during IL scanning; the compiler's `--noscan` workaround
+published but failed at WinRT startup. Aligning WinAppSDK versions did not fix
+that path. A .NET 10 Native AOT proof displayed a Reactor window and exited
+successfully after including the documented WindowsAppSDK#6394 resource-copy
+workaround. The user approved the .NET 10 migration; no scanner or warning
+suppression workaround is used in production.
+
+Self-contained ZIPs include the Windows App SDK DLLs, PRI/XBF resources, image
+assets, the project license, and the resolved packages' available license/notice
+files and NuGet metadata. The user approved running from the extracted folder rather than
+self-installing. The root bootstrap now only secures the data directory and
+coordinates the per-user singleton. Legacy installer transaction tests still
+exercise the retained, inactive helper code; they are not the ZIP launch path.
+
+Ten new domain cases cover exact USD milestones, jump coalescing, restart and
+correction deduplication, billing resets, unknown/unlimited allocations,
+combined percentage/dollar notifications, per-account overrides, increment
+changes, failed submissions, legacy state compatibility, and decimal precision.
+Controller fixtures also verify settings persistence and actual notification
+submission paths. Geometry fixtures cover normal and negative-coordinate
+monitors and a top-edge fallback. Mixed-DPI positioning uses Shell icon bounds
+and monitor work areas in physical pixels rather than approximate global DIPs.
 
 The core suite covers exact decimal accounting, missing/invalid fields,
 non-token billing, exhausted/unlimited allocations, host routing, immutable
@@ -53,6 +123,7 @@ Reproduce:
 .\tools\verify.ps1 -NativeTests
 .\tools\publish.ps1
 .\tools\smoke-test.ps1
+.\tools\smoke-test.ps1 -Empty
 ```
 
 Build and test commands share intermediate project directories; run these
@@ -129,10 +200,9 @@ Synthetic tests cover both statuses at all five stages.
 
 - **ARM64 execution on ARM64 Windows hardware.** The ARM64 binary and test
   harnesses cross-publish; they have not executed on ARM64 here.
-- **Clean standard-user Windows VM installation/login test**, including actual
-  downloaded-file handoff, SmartScreen behavior, deletion of the original
-  executable after readiness, login startup, externally disabled startup,
-  failed startup/launch, Unicode paths, and repeated launch. Do not run this
+- **Clean standard-user Windows ZIP/login test**, including extraction,
+  SmartScreen behavior, opt-in login startup, externally disabled startup,
+  moved application folders, Unicode paths, and repeated launch. Do not run this
   on the development user's real profile without approval.
 - **No-.NET-runtime clean-machine execution.** Native PE format is verified;
   absence of runtime prerequisites still needs the clean-machine check.
@@ -146,14 +216,14 @@ Synthetic tests cover both statuses at all five stages.
 - **Signing and binary-distribution notices.** Binaries are unsigned; no
   signing identity was supplied. GHSpend source is licensed under MIT; see
   [LICENSE](LICENSE). Native AOT includes .NET components; include their applicable MIT
-  license and third-party notices when packaging a public release. No third-party
-  NuGet application packages or GitHub logo assets are used.
+  license and third-party notices when packaging a public release. Reactor and
+  Windows App SDK are pinned NuGet dependencies; no GitHub logo assets are used.
 
 ## Current behavior and limits
 
 - Shell notifications report submission, not guaranteed delivery, persistent
   Notification Center history, or activation after exit.
-- Installation and startup are per-user. Portable test instances have independent
+- Data and startup preferences are per-user. Portable test instances have independent
   mutex/pipe, credential-target, and tray-GUID scopes and cannot toggle startup.
 - Removing an account deletes its credential and monitoring configuration.
   Historical observations remain subject to retention; local removal is not

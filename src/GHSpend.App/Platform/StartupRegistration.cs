@@ -21,6 +21,7 @@ public sealed class StartupRegistration
     /// <summary>The app's Run registration, not Windows StartupApproved policy.</summary>
     public bool Enabled => _store.Read() is { Kind: RegistryValueKind.String, Value: string value } &&
         string.Equals(value, _command, StringComparison.OrdinalIgnoreCase);
+    public bool IsRegistered => _store.Read() is not null;
 
     public void SetEnabled(bool enabled)
     {

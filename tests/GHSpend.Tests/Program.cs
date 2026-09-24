@@ -24,6 +24,7 @@ internal static class Program
             await HttpTests();
             await PersistenceTests();
             await AlertTests();
+            await SpendIncrementTests();
             await SchedulerTests();
         }
         finally { Directory.Delete(TestRoot, recursive: true); }
@@ -712,6 +713,120 @@ internal static class Program
             True(!await alerts.EvaluateAsync(Account, Sample(), Settings(Account)));
             Equal(1, sink.Alerts.Count);
             Equal(1, (await store.LoadAlertLedgerAsync()).Value.Accounts.Count);
+        });
+    }
+
+    private static async Task SpendIncrementTests()
+    {
+        await Test("spend increment defaults off and validates decimal cents", () =>
+        {
+            Equal<decimal?>(null, new AppSettings().SpendIncrementUsd);
+            foreach (var amount in new[] { -1m, .001m, 50.001m })
+                Throws<ArgumentException>(() => (Settings(Account) with { SpendIncrementUsd = amount }).Validate());
+            foreach (var amount in new[] { 0m, .01m, 12.50m, 50m })
+                (Settings(Account) with { SpendIncrementUsd = amount }).Validate();
+            Throws<ArgumentException>(() => (Account with { SpendIncrementUsd = -10 }).Validate());
+        });
+        await Test("spend alerts trigger at exact boundaries and coalesce jumps", async () =>
+        {
+            var store = Store(); var sink = new Sink(); var alerts = new AlertService(store, sink);
+            var settings = Settings(Account) with { AlertThresholds = [], SpendIncrementUsd = 50 };
+            True(!await alerts.EvaluateAsync(Account, Sample(4999), settings));
+            True(await alerts.EvaluateAsync(Account, Sample(5000, at: Now.AddMinutes(1)), settings));
+            Equal<decimal?>(50m, sink.Alerts[0].SpendMilestoneUsd);
+            True(await alerts.EvaluateAsync(Account, Sample(17499, at: Now.AddMinutes(2)), settings));
+            Equal(2, sink.Alerts.Count); Equal<decimal?>(150m, sink.Alerts[1].SpendMilestoneUsd);
+            Equal(150m, (await store.LoadAlertLedgerAsync()).Value.Accounts[Account.Key].SubmittedSpendUsd);
+        });
+        await Test("spend dedup survives restart corrections and resets per period", async () =>
+        {
+            var store = Store(); var sink = new Sink();
+            var settings = Settings(Account) with { AlertThresholds = [], SpendIncrementUsd = 50 };
+            var alerts = new AlertService(store, sink);
+            await alerts.EvaluateAsync(Account, Sample(16000), settings);
+            var restarted = new AlertService(new JsonStore(store.RootPath), sink);
+            True(!await restarted.EvaluateAsync(Account, Sample(4000, at: Now.AddMinutes(1)), settings));
+            True(!await restarted.EvaluateAsync(Account, Sample(16000, at: Now.AddMinutes(2)), settings));
+            True(await restarted.EvaluateAsync(Account, Sample(20000, at: Now.AddMinutes(3)), settings));
+            True(await restarted.EvaluateAsync(Account, Sample(5000, at: Now.AddMonths(1)), settings));
+            True(!await restarted.EvaluateAsync(Account, Sample(30000, at: Now.AddMinutes(4)), settings));
+            Equal(3, sink.Alerts.Count);
+        });
+        await Test("spend alerts are independent of missing unlimited allocations", async () =>
+        {
+            foreach (bool unlimited in new[] { false, true })
+            {
+                var sink = new Sink(); var alerts = new AlertService(Store(), sink);
+                await alerts.EvaluateAsync(Account, Sample(7500, entitlement: null, unlimited: unlimited),
+                    Settings(Account) with { SpendIncrementUsd = 50 });
+                Equal(1, sink.Alerts.Count);
+                Equal<decimal?>(50m, sink.Alerts[0].SpendMilestoneUsd);
+                Equal(0, sink.Alerts[0].ReachedThresholds.Length);
+            }
+        });
+        await Test("percentage and spend alerts share one accepted submission", async () =>
+        {
+            var sink = new Sink(); var alerts = new AlertService(Store(), sink);
+            await alerts.EvaluateAsync(Account, Sample(10500), Settings(Account) with { SpendIncrementUsd = 50 });
+            Equal(1, sink.Alerts.Count); Equal(100m, sink.Alerts[0].HighestThreshold);
+            Equal<decimal?>(100m, sink.Alerts[0].SpendMilestoneUsd);
+        });
+        await Test("per account increment overrides inherit and disable explicitly", async () =>
+        {
+            var sink = new Sink(); var alerts = new AlertService(Store(), sink);
+            var inherited = Account;
+            var overridden = Account with { UserId = "43", SpendIncrementUsd = 25 };
+            var disabled = Account with { UserId = "44", SpendIncrementUsd = 0 };
+            var settings = Settings(inherited, overridden, disabled) with { AlertThresholds = [], SpendIncrementUsd = 50 };
+            foreach (var account in settings.Accounts)
+                await alerts.EvaluateAsync(account, Sample(2500, account: account), settings);
+            Equal(1, sink.Alerts.Count);
+            Equal(overridden.Key, sink.Alerts[0].Account.Key);
+            await alerts.EvaluateAsync(inherited, Sample(5000), settings);
+            Equal(2, sink.Alerts.Count);
+        });
+        await Test("changing increments does not rearm an already reported dollar level", async () =>
+        {
+            var sink = new Sink(); var alerts = new AlertService(Store(), sink);
+            var settings = Settings(Account) with { AlertThresholds = [], SpendIncrementUsd = 50 };
+            await alerts.EvaluateAsync(Account, Sample(10500), settings);
+            True(!await alerts.EvaluateAsync(Account, Sample(10500, at: Now.AddMinutes(1)),
+                settings with { SpendIncrementUsd = 25 }));
+            True(await alerts.EvaluateAsync(Account, Sample(12500, at: Now.AddMinutes(2)),
+                settings with { SpendIncrementUsd = 25 }));
+            Equal<decimal?>(125m, sink.Alerts[^1].SpendMilestoneUsd);
+        });
+        await Test("failed spend notification retries without marking milestone", async () =>
+        {
+            var store = Store(); var sink = new Sink { Accept = false }; var alerts = new AlertService(store, sink);
+            var settings = Settings(Account) with { AlertThresholds = [], SpendIncrementUsd = 50 };
+            True(!await alerts.EvaluateAsync(Account, Sample(), settings));
+            Equal(0, (await store.LoadAlertLedgerAsync()).Value.Accounts.Count);
+            sink.Accept = true;
+            True(await alerts.EvaluateAsync(Account, Sample(at: Now.AddMinutes(1)), settings));
+            Equal(50m, (await store.LoadAlertLedgerAsync()).Value.Accounts[Account.Key].SubmittedSpendUsd);
+        });
+        await Test("spend settings round-trip and old ledgers remain compatible", async () =>
+        {
+            var store = Store();
+            var account = Account with { SpendIncrementUsd = 12.50m };
+            await store.SaveSettingsAsync(Settings(account) with { SpendIncrementUsd = 50 });
+            var loaded = (await store.LoadSettingsAsync()).Value;
+            Equal<decimal?>(50m, loaded.SpendIncrementUsd);
+            Equal<decimal?>(12.50m, loaded.Accounts[0].SpendIncrementUsd);
+            var oldLedger = System.Text.Json.JsonSerializer.Deserialize(
+                """{"version":1,"accounts":{"github.com:42":{"periodId":"calendar:2026-09","submittedThresholds":[50],"lastSubmittedUtc":"2026-09-17T12:00:00Z"}}}""",
+                CoreJsonContext.Default.AlertLedger)!;
+            oldLedger.Validate();
+            Equal(0m, oldLedger.Accounts[Account.Key].SubmittedSpendUsd);
+        });
+        await Test("disabled notifications and tiny decimal increment are exact", async () =>
+        {
+            var sink = new Sink(); var alerts = new AlertService(Store(), sink);
+            var settings = Settings(Account) with { AlertThresholds = [], SpendIncrementUsd = .01m };
+            True(!await alerts.EvaluateAsync(Account, Sample(1), settings with { NotificationsEnabled = false }));
+            True(await alerts.EvaluateAsync(Account, Sample(1, at: Now.AddMinutes(1)), settings));
+            Equal<decimal?>(.01m, sink.Alerts[0].SpendMilestoneUsd);
         });
     }
 

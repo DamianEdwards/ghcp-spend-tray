@@ -32,6 +32,29 @@ internal static unsafe partial class Win32
     [StructLayout(LayoutKind.Sequential)]
     internal struct RECT { internal int left, top, right, bottom; }
     [StructLayout(LayoutKind.Sequential)]
+    internal struct NOTIFYICONIDENTIFIER
+    {
+        internal uint cbSize;
+        internal nint hWnd;
+        internal uint uID;
+        internal Guid guidItem;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MONITORINFO
+    {
+        internal uint cbSize;
+        internal RECT monitor, work;
+        internal uint flags;
+    }
+    [LibraryImport("shell32.dll", EntryPoint = "Shell_NotifyIconGetRect")]
+    internal static partial int ShellNotifyIconGetRect(ref NOTIFYICONIDENTIFIER identifier, out RECT rect);
+    [LibraryImport("user32.dll")]
+    internal static partial nint MonitorFromRect(ref RECT rect, uint flags);
+    [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
+    internal static partial int GetMonitorInfo(nint monitor, ref MONITORINFO info);
+    [LibraryImport("shcore.dll")]
+    internal static partial int GetDpiForMonitor(nint monitor, int type, out uint x, out uint y);
+    [StructLayout(LayoutKind.Sequential)]
     internal struct MSG
     {
         internal nint hwnd;

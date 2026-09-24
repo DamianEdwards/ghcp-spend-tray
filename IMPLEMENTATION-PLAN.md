@@ -1,5 +1,12 @@
 # GHSpend implementation plan
 
+> September 23 UI migration: the user superseded direct Win32 controls with
+> Microsoft UI Reactor/WinUI 3, approved .NET 10 to retain working Native AOT,
+> and chose self-contained ZIPs run from the extracted folder (no self-copy;
+> startup is opt-in). The cost-first tray flyout opens above its icon; the gear
+> opens settings. Dollar-increment alerts apply per account, with configurable
+> amounts. README.md and VALIDATION.md describe the current implementation.
+
 > Historical approved plan. On September 17, 2026, the user superseded the
 > app-owned/per-host OAuth registration design: use GitHub CLI's fixed public
 > client ID and remove user-specified client IDs. Current behavior and validation

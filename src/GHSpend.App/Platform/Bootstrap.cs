@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
 
 namespace GHSpend.App.Platform;
 
@@ -26,8 +24,8 @@ public static class Bootstrap
     }
 
     /// <summary>
-    /// Starts an installed or explicitly portable instance. Null means another instance accepted
-    /// activation or the installed child became ready. Call and dispose on the native UI thread.
+    /// Starts from the extracted application folder. Null means another instance accepted
+    /// activation. Call and dispose on the native UI thread. Startup is explicitly opt-in.
     /// </summary>
     public static BootstrapRuntime? Start(string[] args)
     {
@@ -38,10 +36,9 @@ public static class Bootstrap
         if (string.IsNullOrWhiteSpace(profile))
             throw new IOException("Windows did not supply the current user's profile directory.");
         var installDirectory = InstallationPaths.NormalizeAbsolute(Path.Combine(profile, ".ghspend"));
-        var installedExecutable = Path.Combine(installDirectory, "ghspend.exe");
-        var source = InstallationPaths.NormalizeAbsolute(Environment.ProcessPath ??
-            throw new IOException("Windows did not supply the running executable's path."));
         var dataDirectory = options.Portable ? options.DataDirectory! : installDirectory;
+        if (options.Handoff is not null)
+            throw new ArgumentException("ZIP builds run from their extracted folder and do not support installer handoff.");
 
         if (options.Portable)
         {
@@ -53,57 +50,8 @@ public static class Bootstrap
             return StartRuntime(dataDirectory, portable: true, handoff: null);
         }
 
-        if (InstallationPaths.SamePath(source, installedExecutable))
-        {
-            InstallationPaths.EnsurePrivateDirectory(installDirectory);
-            return StartRuntime(dataDirectory, portable: false, options.Handoff);
-        }
-
-        if (options.Handoff is not null)
-            throw new ArgumentException("A readiness handoff is valid only for the installed executable.");
-        if (RuntimeFeature.IsDynamicCodeSupported)
-            throw new InvalidOperationException("Self-installation requires a published Native AOT executable. Use --portable --data-dir <absolute-directory> for development.");
-
-        var scope = InstanceCoordinator.GetScope(null);
-        using var installLock = InstanceCoordinator.CreateMutex(@"Global\GHSpend.Install." + scope);
-        bool acquired;
-        try { acquired = installLock.WaitOne(TimeSpan.FromSeconds(35)); }
-        catch (AbandonedMutexException) { acquired = true; }
-        if (!acquired)
-            throw new IOException("Another GHSpend installation is in progress. Wait for it to finish, then try again.");
-
-        try
-        {
-            InstallationPaths.EnsurePrivateDirectory(installDirectory);
-            InstallationPaths.RejectReparseAncestors(installedExecutable);
-            var files = new WindowsInstallFiles();
-            var exists = files.Exists(installedExecutable);
-            var sameBinary = exists && CryptographicOperations.FixedTimeEquals(files.Hash(source), files.Hash(installedExecutable));
-            if (InstanceCoordinator.IsRunning(scope))
-            {
-                if (!sameBinary)
-                    throw new IOException("A different GHSpend version is running. Exit GHSpend from its tray menu before replacing it.");
-                InstanceCoordinator.Activate(scope);
-                return null;
-            }
-
-            if (sameBinary)
-            {
-                ReadinessHandoff.LaunchAndWait(installedExecutable);
-                return null;
-            }
-
-            if (exists)
-                RejectDowngrade(source, installedExecutable);
-            var registration = new StartupRegistration(installedExecutable);
-            new InstallationTransaction(files, registration).Execute(source, installedExecutable,
-                ReadinessHandoff.LaunchAndWait, enableStartupOnFirstInstall: !options.Startup);
-            return null;
-        }
-        finally
-        {
-            installLock.ReleaseMutex();
-        }
+        InstallationPaths.EnsurePrivateDirectory(installDirectory);
+        return StartRuntime(dataDirectory, portable: false, handoff: null);
     }
 
     private static BootstrapRuntime? StartRuntime(string directory, bool portable, string? handoff)
@@ -112,21 +60,6 @@ public static class Bootstrap
         return instance is null ? null : new BootstrapRuntime(directory, portable, handoff, instance);
     }
 
-    private static void RejectDowngrade(string source, string installed)
-    {
-        var candidate = FileVersionInfo.GetVersionInfo(source);
-        var existing = FileVersionInfo.GetVersionInfo(installed);
-        var incomingVersion = VersionOf(candidate);
-        var installedVersion = VersionOf(existing);
-        if (incomingVersion is null || installedVersion is null)
-            throw new IOException("GHSpend cannot safely compare executable versions. Remove or move the old executable after exiting the app before installing this build.");
-        if (incomingVersion < installedVersion)
-            throw new IOException($"GHSpend will not replace version {installedVersion} with older version {incomingVersion}.");
-    }
-
-    private static Version? VersionOf(FileVersionInfo info) =>
-        string.IsNullOrWhiteSpace(info.FileVersion) ? null :
-            new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
 }
 
 public sealed class BootstrapRuntime : IDisposable

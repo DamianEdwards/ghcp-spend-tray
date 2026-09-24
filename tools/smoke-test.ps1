@@ -1,6 +1,7 @@
 param(
     [string] $Executable = "$PSScriptRoot\..\artifacts\publish\win-x64\ghspend.exe",
-    [switch] $KeepData
+    [switch] $KeepData,
+    [switch] $Empty
 )
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path $Executable).Path
@@ -8,7 +9,9 @@ $folder = Join-Path ([System.IO.Path]::GetTempPath()) ("GHSpend-smoke-" + [Guid]
 $before = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).GHSpend
 $passed = $false
 try {
-    $process = Start-Process -FilePath $exe -ArgumentList @('--portable', '--data-dir', "`"$folder`"", '--smoke-test') -PassThru
+    $arguments = @('--portable', '--data-dir', "`"$folder`"", '--smoke-test')
+    if ($Empty) { $arguments += '--demo-empty' }
+    $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
     if (-not $process.WaitForExit(30000)) {
         Stop-Process -Id $process.Id
         throw "Smoke test timed out. Inspect the application error window or logs."

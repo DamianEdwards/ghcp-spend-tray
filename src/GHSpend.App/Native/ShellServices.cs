@@ -55,6 +55,18 @@ internal sealed unsafe class TrayIcon : IDisposable
     private Win32.NOTIFYICONDATA _data;
     private bool _added;
     private readonly nint _icon;
+    internal Win32.RECT GetBounds()
+    {
+        var id = new Win32.NOTIFYICONIDENTIFIER
+        {
+            cbSize = (uint)sizeof(Win32.NOTIFYICONIDENTIFIER),
+            hWnd = _data.hWnd, uID = _data.uID, guidItem = _data.guidItem
+        };
+        if (Win32.ShellNotifyIconGetRect(ref id, out var rect) == 0) return rect;
+        if (Win32.GetCursorPos(out var point) == 0)
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot locate the tray icon or pointer.");
+        return new() { left = point.x, right = point.x + 1, top = point.y, bottom = point.y + 1 };
+    }
     internal TrayIcon(nint owner, string? portableDirectory = null)
     {
         _icon = Win32.LoadImage(Win32.GetModuleHandle(null), 32512, 1, 32, 32, 0);

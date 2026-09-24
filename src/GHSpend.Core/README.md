@@ -1,6 +1,6 @@
 # GHSpend Core
 
-The core targets .NET 11 and is Native AOT compatible. It has no package dependencies.
+The core targets .NET 10 and is Native AOT compatible. It has no package dependencies.
 All JSON serialization uses generated metadata; `CoreJsonContext.Default.TokenSet` is
 the public metadata for platform Credential Manager payloads.
 
@@ -17,6 +17,11 @@ the public metadata for platform Credential Manager payloads.
    accepts Shell notification submission. `AlertService` persists only accepted
    thresholds. Acceptance is not proof of display or user delivery; a crash between
    submission and ledger persistence can produce a duplicate.
+    Dollar increments are optional global defaults with nullable per-account overrides
+    (`null` inherits, `0` disables). `UsageAlert.SpendMilestoneUsd` carries the highest
+    newly crossed USD level; it may coexist with allocation thresholds in one alert.
+    Persisted dollar high-water marks are per account/period, independent of the
+    selected increment, so changing increments cannot rearm already-reported amounts.
 5. Subscribe to `MonitorService.StateChanged` and marshal to the native UI thread.
    Events run off-thread; their state is detached from mutable configuration.
    Subscribe to `DiagnosticReported` on both monitor and store.

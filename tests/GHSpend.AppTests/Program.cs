@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using GHSpend.App;
 using GHSpend.Core;
+using GHSpend.App.Platform;
 
 var root = Path.Combine(Path.GetTempPath(), "GHSpend-AppTests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -20,6 +21,19 @@ try
     await app.InitializeAsync();
     Check(app.Settings.PollMinutes == 60, "exact one-hour default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
+    foreach (var work in new[] { new PixelRect(0, 0, 1920, 1040), new PixelRect(-1920, -100, 1920, 1080) })
+    {
+        var icon = new PixelRect(work.Right - 80, work.Bottom, 24, 24);
+        var positioned = FlyoutPlacement.AboveIcon(icon, work, 400, 590, 10);
+        Check(positioned.X >= work.X && positioned.Right <= work.Right &&
+            positioned.Y >= work.Y && positioned.Bottom <= icon.Y, "flyout stays above icon and within monitor work area");
+        var topIcon = icon with { Y = work.Y };
+        var below = FlyoutPlacement.AboveIcon(topIcon, work, 400, 590, 10);
+        Check(below.Y >= topIcon.Bottom && below.Bottom <= work.Bottom, "top-edge tray falls back below icon");
+    }
+    var narrow = FlyoutPlacement.AboveIcon(new(1, 20, 1, 1), new(0, 0, 15, 20), 400, 600, 30);
+    Check(narrow.X >= 0 && narrow.Y >= 0 && narrow.Right <= 15 && narrow.Bottom <= 20,
+        "oversized high-DPI flyout clamps safely in a constrained work area");
     Check(GitHubOAuth.ClientId == "Ov23ctzkXY5CJhfKQo7T", "project-owned GHCPSpend public client ID");
     Check(GitHubOAuth.ResolveClientId("https://MSFT.ghe.com/") == "Ov23ox38SoD1bIpzU9zZ",
         "enterprise registration selected after host normalization");
@@ -68,6 +82,16 @@ try
     string persistedSettings = await File.ReadAllTextAsync(Path.Combine(root, "config.json"));
     Check(!persistedSettings.Contains("clientId", StringComparison.OrdinalIgnoreCase), "client ID is not configurable in persisted settings");
     Check(Volatile.Read(ref view)!.Total.Contains("$53.25"), "three-account consumption total");
+    var summary = Volatile.Read(ref view)!.Accounts.Single(account => account.Key == "github.com:1");
+    Check(summary.Details.CreditsUsed == 2625m && summary.Details.ObservedConsumptionUsd == 26.25m,
+        "advanced account data is structured independently of summary text");
+    Check(summary.Details.ResetAtUtc is not null && summary.Details.NextRefreshUtc is not null,
+        "advanced billing and scheduling fields retained");
+    Check(GHSpend.App.UI.UI.AccountWarning(summary) is null, "fresh account has no unnecessary status warning");
+    var stale = summary with { Freshness = "Stale - last-known observation" };
+    Check(GHSpend.App.UI.UI.AccountWarning(stale)!.Contains("Stale"), "stale account warning remains visible outside advanced details");
+    var failed = summary with { Details = summary.Details with { Message = "Current consumption is unsaved." } };
+    Check(GHSpend.App.UI.UI.AccountWarning(failed)!.Contains("unsaved"), "storage failures remain visible outside advanced details");
     Check(notifications == 2, "independent account threshold alerts");
     await app.RefreshAsync();
     Check(notifications == 2, "refresh does not duplicate notifications");
@@ -108,6 +132,14 @@ try
     Check((await Load()).Accounts.Single(a => a.Key == "github.com:2").DisplayName == "Work", "display name persisted");
     await app.RemoveAsync("github.com:2");
     Check(!credentials.Values.ContainsKey("github.com:2") && (await Load()).Accounts.Length == 2, "local removal deletes credential and configuration");
+    await app.SaveSettingsAsync(app.Settings with { SpendIncrementUsd = 50 });
+    await app.SaveAccountAsync("github.com:1", "Personal", "", 25m);
+    Check(app.Settings.SpendIncrementUsd == 50m && app.AccountSettings("github.com:1").SpendIncrementUsd == 25m,
+        "global and per-account spend increment settings persist");
+    await app.RefreshAsync("github.com:1");
+    Check(notifications == 4, "new spend increment below current consumption submits once");
+    await app.RefreshAsync("github.com:1");
+    Check(notifications == 4, "spend increment notification is deduplicated");
     foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         Check(!(await File.ReadAllTextAsync(file)).Contains("fixture-", StringComparison.Ordinal), "no token in persisted files");
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");

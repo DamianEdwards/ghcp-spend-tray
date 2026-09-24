@@ -43,12 +43,14 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         _auth = new DeviceFlowClient(_http);
         _usage = new CopilotUsageProvider(_http, new TokenManager(_credentials, _auth));
         _alerts = new AlertService(_store, this);
-        if (!portable) _startup = new StartupRegistration(Path.Combine(directory, "ghspend.exe"));
+        if (!portable) _startup = new StartupRegistration(Environment.ProcessPath ??
+            throw new InvalidOperationException("Windows did not provide the executable path."));
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
     }
 
     public SettingsView Settings => new(_settings.PollIntervalMinutes,
-        FormatThresholds(_settings.AlertThresholds), _settings.NotificationsEnabled, _startup?.Enabled ?? false);
+        FormatThresholds(_settings.AlertThresholds), _settings.NotificationsEnabled, _startup?.IsRegistered ?? false,
+        _settings.SpendIncrementUsd);
 
     public Task InitializeAsync()
     {
@@ -106,11 +108,12 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 PollIntervalMinutes = settings.PollMinutes,
                 AlertThresholds = ParseThresholds(settings.Thresholds),
                 NotificationsEnabled = settings.Notifications,
+                SpendIncrementUsd = settings.SpendIncrementUsd,
                 StartWithWindows = Portable ? _settings.StartWithWindows : settings.Startup
             };
             next.Validate();
             var previousStartup = _startup?.Capture();
-            bool changedStartup = _startup is not null && _startup.Enabled != settings.Startup;
+            bool changedStartup = _startup is not null && (settings.Startup ? !_startup.Enabled : _startup.IsRegistered);
             if (changedStartup) _startup!.SetEnabled(settings.Startup);
             try { await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false); }
             catch
@@ -125,13 +128,14 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         finally { _mutations.Release(); }
         await PublishAsync().ConfigureAwait(false);
     }
-    public (string DisplayName, string Thresholds) AccountSettings(string key)
+    public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key)
     {
         var account = _settings.Accounts.SingleOrDefault(a => a.Key == key)
             ?? throw new AppOperationException("That account is no longer configured.");
-        return (account.DisplayName ?? "", account.ThresholdOverrides is null ? "" : FormatThresholds(account.ThresholdOverrides));
+        return (account.DisplayName ?? "", account.ThresholdOverrides is null ? "" : FormatThresholds(account.ThresholdOverrides),
+            account.SpendIncrementUsd);
     }
-    public async Task SaveAccountAsync(string key, string displayName, string thresholds)
+    public async Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null)
     {
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
@@ -141,11 +145,13 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             if (displayName.Length > 128 || displayName.Any(char.IsControl))
                 throw new AppOperationException("Display names must be at most 128 characters and contain no control characters.");
             var overrides = string.IsNullOrWhiteSpace(thresholds) ? null : ParseThresholds(thresholds);
+            AppSettings.ValidateSpendIncrement(spendIncrementUsd);
             if (!_settings.Accounts.Any(a => a.Key == key)) throw new AppOperationException("That account is no longer configured.");
             var next = _settings with
             {
                 Accounts = _settings.Accounts.Select(a => a.Key == key ? a with
-                    { DisplayName = displayName.Length == 0 ? null : displayName, ThresholdOverrides = overrides } : a).ToArray()
+                    { DisplayName = displayName.Length == 0 ? null : displayName, ThresholdOverrides = overrides,
+                      SpendIncrementUsd = spendIncrementUsd } : a).ToArray()
             };
             await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
             _settings = next;
@@ -227,7 +233,8 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                     throw new AppOperationException("This account was removed while sign-in was in progress. Add it again.");
                 if (previous is not null)
                 {
-                    account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides };
+                    account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides,
+                        SpendIncrementUsd = previous.SpendIncrementUsd };
                     await _monitor!.PauseAccountAsync(account.Key, token).ConfigureAwait(false);
                 }
                 TokenSet? oldTokens = null;
@@ -265,9 +272,12 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     public async Task<bool> SubmitAsync(UsageAlert alert, CancellationToken cancellationToken = default)
     {
         var notify = _notify ?? throw new AppOperationException("The notification surface is not initialized.");
-        return await notify(alert.Account.Key, "GHSpend allocation alert",
-            $"{alert.Account.DisplayName ?? alert.Account.Login}: {Money(alert.Snapshot.ConsumptionUsd)} consumed of " +
-            $"{Money(alert.Snapshot.AllocationUsd!.Value)}; {alert.HighestThreshold:0.##}% threshold reached.")
+        var message = $"{alert.Account.DisplayName ?? alert.Account.Login}: {Money(alert.Snapshot.ConsumptionUsd)} consumed.";
+        if (alert.ReachedThresholds.Length > 0)
+            message += $" {alert.HighestThreshold:0.##}% of {Money(alert.Snapshot.AllocationUsd!.Value)} allocation reached.";
+        if (alert.SpendMilestoneUsd is { } milestone)
+            message += $" Passed the {Money(milestone)} spending milestone.";
+        return await notify(alert.Account.Key, "GHSpend consumption alert", message)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
     private void StateChanged(AccountState state) => _ = PublishAsync();
@@ -326,26 +336,15 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                         state.Status == AccountStatus.Fresh && snapshot is not null &&
                         now - snapshot.FetchedAtUtc > TimeSpan.FromMinutes(_settings.PollIntervalMinutes)
                             ? "Stale - last-known observation" : state.Status.ToString();
-                    var details = new StringBuilder()
-                        .AppendLine($"{state.Account.Login} | {state.Account.Host}")
-                        .AppendLine($"Status: {visibleStatus}" + (state.Diagnostic is null ? "" : " - " + state.Diagnostic));
-                    if (snapshot is not null)
-                    {
-                        details.AppendLine($"Consumption{(current ? "" : " (previous period, excluded from total)")}: " +
-                            $"{Money(snapshot.ConsumptionUsd)} | {snapshot.CreditsUsed:0.####} AI credits")
-                            .AppendLine("Allocation: " + (snapshot.Unlimited ? "Unlimited" :
-                                snapshot.AllocationUsd is { } allocation ? Money(allocation) : "N/A") +
-                                " | consumed: " + (snapshot.PercentConsumed is { } percentage ? $"{percentage:0.##}%" : "N/A"))
-                            .AppendLine($"Last fetched: {snapshot.FetchedAtUtc.ToLocalTime():g} | source: " +
-                                (snapshot.SourceTimestampUtc?.ToLocalTime().ToString("g") ?? "not supplied"))
-                            .AppendLine("Billing reset: " + (snapshot.ResetAtUtc?.ToLocalTime().ToString("g") ?? "calendar-month fallback"));
-                    }
-                    else details.AppendLine("Consumption unavailable (not zero).");
-                    details.Append("Next refresh: " + (state.NextRefreshUtc?.ToLocalTime().ToString("g") ?? "pending"));
+                    var details = new AccountDiagnostics(snapshot?.CreditsUsed, snapshot?.ConsumptionUsd,
+                        snapshot?.AllocationUsd, snapshot?.PercentConsumed, snapshot?.Unlimited ?? false, snapshot?.SourceTimestampUtc,
+                        snapshot?.ResetAtUtc, state.NextRefreshUtc, snapshot?.PeriodId, current, state.Diagnostic);
                     accountViews.Add(new(state.Account.Key, state.Account.DisplayName ?? state.Account.Login,
-                        state.Account.Login, state.Account.Host, details.ToString().ReplaceLineEndings("\r\n"),
+                        state.Account.Login, state.Account.Host, details,
                         current ? snapshot?.PercentConsumed : null, history,
-                        graph.Points.Select(p => new GraphPoint(p.ToUtc, p.UsdPerHour)).ToArray()));
+                        graph.Points.Select(p => new GraphPoint(p.ToUtc, p.UsdPerHour)).ToArray(),
+                        current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
+                        visibleStatus, snapshot?.FetchedAtUtc));
                 }
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);
@@ -355,7 +354,8 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 var tooltip = $"GHSpend | {qualification}MTD {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
                 var last = states.Where(s => s.Snapshot is not null).Select(s => s.Snapshot!.FetchedAtUtc).DefaultIfEmpty().Min();
                 if (last != default) tooltip += $"\nOldest update {last.ToLocalTime():HH:mm}";
-                Changed?.Invoke(new(title, status, tooltip, accountViews));
+                Changed?.Invoke(new(title, status, tooltip, accountViews,
+                    total.IncludedAccounts == 0 ? null : total.ConsumptionUsd, total.IsComplete, total.IsLastKnown));
             }
             finally { _render.Release(); }
         }
