@@ -33,7 +33,7 @@ __pycache__/
 *.key
 
 # Runtime data must not be committed, including portable-mode data at the root
-.ghspend/
+.GHCPSpendTray/
 /config.json*
 /state.json*
 /history/

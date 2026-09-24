@@ -1,12 +1,12 @@
 param(
-    [string] $Executable = "$PSScriptRoot\..\artifacts\publish\win-x64\ghspend.exe",
+    [string] $Executable = "$PSScriptRoot\..\artifacts\publish\win-x64\GHCPSpendTray.exe",
     [switch] $KeepData,
     [switch] $Empty
 )
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path $Executable).Path
-$folder = Join-Path ([System.IO.Path]::GetTempPath()) ("GHSpend-smoke-" + [Guid]::NewGuid().ToString('N'))
-$before = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).GHSpend
+$folder = Join-Path ([System.IO.Path]::GetTempPath()) ("GHCPSpendTray-smoke-" + [Guid]::NewGuid().ToString('N'))
+$before = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).GHCPSpendTray
 $passed = $false
 try {
     $arguments = @('--portable', '--data-dir', "`"$folder`"", '--smoke-test')
@@ -20,8 +20,8 @@ try {
     if (-not (Test-Path $result)) { throw "The native app exited without a smoke-test result (exit $($process.ExitCode))." }
     $content = Get-Content $result -Raw
     if ($process.ExitCode -ne 0 -or -not $content.StartsWith('PASS:')) { throw $content }
-    $after = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).GHSpend
-    if ($before -cne $after) { throw 'The GHSpend startup entry changed during the test.' }
+    $after = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).GHCPSpendTray
+    if ($before -cne $after) { throw 'The GHCPSpendTray startup entry changed during the test.' }
     $passed = $true
     $content
     'Startup registration unchanged.'

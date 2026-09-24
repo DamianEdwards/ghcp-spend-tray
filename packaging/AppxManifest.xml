@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap10 desktop rescap">
+  <Identity Name="GHCPSpendTray.Development" Publisher="CN=GHCPSpendTray Development"
+            Version="0.1.0.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>GHCPSpendTray</DisplayName>
+    <PublisherDisplayName>GHCPSpendTray</PublisherDisplayName>
+    <Description>GitHub Copilot AI-credit consumption, at a glance.</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22621.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="GHCPSpendTray.exe" EntryPoint="Windows.FullTrustApplication"
+                 uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+      <uap:VisualElements DisplayName="GHCPSpendTray"
+                          Description="GitHub Copilot AI-credit consumption, at a glance."
+                          BackgroundColor="transparent"
+                          Square150x150Logo="Assets\Square150x150Logo.png"
+                          Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="GHCPSpendTray.exe"
+                           EntryPoint="Windows.FullTrustApplication" uap10:Parameters="--startup">
+          <desktop:StartupTask TaskId="GHCPSpendTrayStartup" Enabled="false" DisplayName="GHCPSpendTray" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

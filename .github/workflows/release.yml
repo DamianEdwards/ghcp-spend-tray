@@ -1,0 +1,214 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Increasing three-part version (e.g. 0.2.0); package revision is always zero
+        required: true
+        type: string
+      prerelease:
+        description: Mark this GitHub release as a preview
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcpspendtray-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign and publish
+    runs-on: windows-2025
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+      MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+      MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+    steps:
+      - name: Checkout pinned main commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate source, version, identity and signing configuration
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Release must be dispatched from main.' }
+          $release = .\tools\get-release-version.ps1 -Version $env:RELEASE_VERSION
+          foreach ($name in @('MSIX_IDENTITY_NAME', 'MSIX_PUBLISHER', 'MSIX_PUBLISHER_DISPLAY_NAME',
+              'AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID',
+              'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_CERT_PROFILE')) {
+              if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+                  throw "Configure $name on the production environment. Unsigned releases are not allowed."
+              }
+          }
+          if ($env:MSIX_IDENTITY_NAME -eq 'GHCPSpendTray.Development' -or $env:MSIX_PUBLISHER -eq 'CN=GHCPSpendTray Development') {
+              throw 'Development identity cannot be published.'
+          }
+          .\tools\test-release-source.ps1 -Repository $env:GITHUB_REPOSITORY -SourceCommit $env:GITHUB_SHA
+          $existing = @(git tag --list 'v*')
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read release tags.' }
+          foreach ($tag in $existing) {
+              if ($tag -eq $release.Tag) {
+                  $commit = git rev-list -n 1 $tag
+                  if ($LASTEXITCODE -ne 0 -or $commit -ne $env:GITHUB_SHA) { throw 'Existing tag has a different source commit.' }
+              } elseif ($tag -match '^v([0-9]+\.[0-9]+\.[0-9]+)$' -and [version]$Matches[1] -ge [version]$release.Version) {
+                  throw "Release version must exceed $tag."
+              }
+          }
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not query releases.' }
+          $existingRelease = @($json | ConvertFrom-Json) | Where-Object tag_name -eq $release.Tag
+          if ($existingRelease -and -not $existingRelease.draft) { throw 'This release is already public; published assets are immutable.' }
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Verify release source
+        shell: pwsh
+        run: .\tools\verify.ps1 -NativeTests
+      - name: Build native bundle
+        shell: pwsh
+        run: |
+          .\tools\package.ps1 -Version $env:RELEASE_VERSION `
+            -IdentityName $env:MSIX_IDENTITY_NAME -Publisher $env:MSIX_PUBLISHER `
+            -PublisherDisplayName $env:MSIX_PUBLISHER_DISPLAY_NAME
+
+      - name: Azure login using federation
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign MSIX bundle
+        uses: azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\artifacts\release
+          files-folder-filter: msixbundle
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify signature and stage release metadata
+        shell: pwsh
+        run: |
+          $bundle = ".\artifacts\release\GHCPSpendTray-$env:RELEASE_VERSION.msixbundle"
+          .\tools\test-package.ps1 -Bundle $bundle -Version $env:RELEASE_VERSION `
+            -IdentityName $env:MSIX_IDENTITY_NAME -Publisher $env:MSIX_PUBLISHER -RequireSigned
+          Compress-Archive -Path .\artifacts\symbols\* `
+            -DestinationPath ".\artifacts\release\GHCPSpendTray-$env:RELEASE_VERSION-symbols.zip"
+          @{
+              version = $env:RELEASE_VERSION
+              packageVersion = "$env:RELEASE_VERSION.0"
+              sourceCommit = $env:GITHUB_SHA
+              identityName = $env:MSIX_IDENTITY_NAME
+              publisher = $env:MSIX_PUBLISHER
+              signed = $true
+          } | ConvertTo-Json | Set-Content .\artifacts\release\release.json -Encoding utf8NoBOM
+          Get-ChildItem .\artifacts\release -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name | ForEach-Object {
+              "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content .\artifacts\release\SHA256SUMS -Encoding ascii
+      - name: Attest signed bundle and symbols
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        with:
+          subject-path: |
+            ./artifacts/release/*.msixbundle
+            ./artifacts/release/*-symbols.zip
+
+      - name: Tag source and stage draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:RELEASE_VERSION"
+          $remote = @(git ls-remote --tags origin "refs/tags/$tag")
+          if ($LASTEXITCODE -ne 0) { throw 'Could not query remote tag.' }
+          if ($remote.Count -eq 0) {
+              git tag $tag $env:GITHUB_SHA
+              if ($LASTEXITCODE -ne 0) { throw 'Could not tag source.' }
+              git push origin "refs/tags/$tag"
+              if ($LASTEXITCODE -ne 0) { throw 'Could not publish source tag.' }
+          } else {
+              $remoteCommit = ($remote[0] -split '\s+')[0]
+              if ($remoteCommit -ne $env:GITHUB_SHA) { throw 'Release tag changed during build.' }
+          }
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not query releases.' }
+          $existing = @($json | ConvertFrom-Json) | Where-Object tag_name -eq $tag
+          if ($existing -and -not $existing.draft) { throw 'Refusing to overwrite a public release.' }
+          if (-not $existing) {
+              $arguments = @('release', 'create', $tag, '--verify-tag', '--draft', '--generate-notes', '--title', "GHCPSpendTray $env:RELEASE_VERSION")
+              if ($env:PRERELEASE -eq 'true') { $arguments += @('--prerelease', '--latest=false') }
+              & gh @arguments
+              if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release.' }
+          }
+          $assets = @(Get-ChildItem .\artifacts\release -File | ForEach-Object FullName)
+          gh release upload $tag @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload draft assets.' }
+
+      - name: Verify downloaded release before publication
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $directory = '.\artifacts\downloaded-release'
+          gh release download "v$env:RELEASE_VERSION" --dir $directory
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download draft assets.' }
+          if (@(Get-ChildItem $directory -File).Count -ne @(Get-ChildItem .\artifacts\release -File).Count) {
+              throw 'Draft release contains unexpected assets; inspect it before retrying.'
+          }
+          foreach ($original in Get-ChildItem .\artifacts\release -File) {
+              $downloaded = Join-Path $directory $original.Name
+              if ((Get-FileHash -LiteralPath $original.FullName).Hash -ne (Get-FileHash -LiteralPath $downloaded).Hash) {
+                  throw "Downloaded asset differs: $($original.Name)"
+              }
+          }
+          $bundle = Join-Path $directory "GHCPSpendTray-$env:RELEASE_VERSION.msixbundle"
+          .\tools\test-package.ps1 -Bundle $bundle -Version $env:RELEASE_VERSION `
+            -IdentityName $env:MSIX_IDENTITY_NAME -Publisher $env:MSIX_PUBLISHER -RequireSigned
+          gh attestation verify $bundle --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release attestation verification failed.' }
+      - name: Publish verified release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $arguments = @('release', 'edit', "v$env:RELEASE_VERSION", '--draft=false')
+          if ($env:PRERELEASE -eq 'true') { $arguments += @('--prerelease', '--latest=false') }
+          else { $arguments += @('--prerelease=false', '--latest') }
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+          "Published signed GHCPSpendTray $env:RELEASE_VERSION from $env:GITHUB_SHA." >> $env:GITHUB_STEP_SUMMARY

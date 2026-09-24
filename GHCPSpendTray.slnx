@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src\GHCPSpendTray.App\GHCPSpendTray.App.csproj" />
+    <Project Path="src\GHCPSpendTray.Core\GHCPSpendTray.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests\GHCPSpendTray.Tests\GHCPSpendTray.Tests.csproj" />
+    <Project Path="tests\GHCPSpendTray.PlatformTests\GHCPSpendTray.PlatformTests.csproj" />
+    <Project Path="tests\GHCPSpendTray.AppTests\GHCPSpendTray.AppTests.csproj" />
+  </Folder>
+</Solution>

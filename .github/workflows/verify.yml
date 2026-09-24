@@ -1,0 +1,40 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verification
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Verify managed and Native AOT tests
+        shell: pwsh
+        run: .\tools\verify.ps1 -NativeTests
+      - name: Build and validate both MSIX architectures
+        shell: pwsh
+        run: .\tools\package.ps1
+      - name: Retain unsigned development bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-development-msix
+          path: artifacts/release/*.msixbundle
+          if-no-files-found: error
+          retention-days: 7
