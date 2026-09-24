@@ -77,11 +77,58 @@ internal static class Program
             await OnUI(shell, () =>
             {
                 if (shell.Flyout is not null) throw new InvalidOperationException("Hidden startup unexpectedly opened a window.");
-                shell.ShowFlyout();
+                SendTraySelection(shell, 0x400);
             });
             await Task.Delay(500);
+            // Exercise the actual tray HWND callback, not just ShowFlyout directly.
+            // Duplicate selections must never toggle an already-open window closed.
+            foreach (int selection in new[] { 0x400, 0x401, 0x400 })
+            {
+                await OnUI(shell, () =>
+                {
+                    AssertFlyoutVisible(shell, $"before selection {selection:X}");
+                    SendTraySelection(shell, selection);
+                    SendTraySelection(shell, selection);
+                });
+                await Task.Delay(150);
+                await OnUI(shell, () =>
+                {
+                    AssertFlyoutVisible(shell, $"after duplicate selection {selection:X}");
+                    shell.Flyout!.Hide();
+                });
+                await Task.Delay(150);
+                await OnUI(shell, () =>
+                {
+                    if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
+                        throw new InvalidOperationException("Flyout did not hide.");
+                    SendTraySelection(shell, selection);
+                });
+                await Task.Delay(150);
+            }
             await OnUI(shell, () =>
             {
+                AssertFlyoutVisible(shell, "after hide/reopen cycles");
+                shell.ShowSettings(SettingsPage.General);
+            });
+            await Task.Delay(250);
+            await OnUI(shell, () =>
+            {
+                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
+                    throw new InvalidOperationException("Settings did not dismiss the flyout.");
+                SendTraySelection(shell, 0x400);
+            });
+            await Task.Delay(250);
+            await OnUI(shell, () =>
+            {
+                AssertFlyoutVisible(shell, "after opening from settings");
+                // Queue a deactivation, then reactivate before its deferred dismissal runs.
+                shell.SettingsWindow!.Activate();
+                shell.ShowFlyout();
+            });
+            await Task.Delay(250);
+            await OnUI(shell, () =>
+            {
+                AssertFlyoutVisible(shell, "after rapid focus transition");
                 if (!shell.Session.Initialized) throw new InvalidOperationException("Controller did not initialize.");
                 var flyout = shell.Flyout ?? throw new InvalidOperationException("Flyout did not open.");
                 if (shell.Session.Dashboard.Accounts.Count == 0)
@@ -146,7 +193,8 @@ internal static class Program
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
-                    "PASS: Reactor cost flyout, settings navigation, add-account deep link, native controls, " +
+                    "PASS: mouse/keyboard tray callbacks, duplicate activation, hide/reopen and focus transitions, " +
+                    "Reactor cost flyout, settings navigation, add-account deep link, native controls, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -159,6 +207,22 @@ internal static class Program
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
     }
+    private static nint FlyoutHwnd(ReactorShell shell) =>
+        WinRT.Interop.WindowNative.GetWindowHandle((shell.Flyout ??
+            throw new InvalidOperationException("Flyout has not been created.")).NativeWindow);
+
+    private static void AssertFlyoutVisible(ReactorShell shell, string stage)
+    {
+        var hwnd = FlyoutHwnd(shell);
+        // Synthetic Shell callbacks do not carry Explorer's foreground permission.
+        // Assert actual visibility even when Windows legitimately refuses focus.
+        if (Win32.IsWindowVisible(hwnd) == 0)
+            throw new InvalidOperationException($"Tray activation failed {stage}: native visible={Win32.IsWindowVisible(hwnd) != 0}, foreground={Win32.GetForegroundWindow() == hwnd}.");
+    }
+
+    private static void SendTraySelection(ReactorShell shell, int notification) =>
+        Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((1 << 16) | notification));
+
     private static void InvokeButton(Button button)
     {
         if (new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)

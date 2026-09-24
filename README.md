@@ -152,6 +152,8 @@ requests do not automatically follow redirects.
 ## Daily use
 
 Left-click or keyboard-activate the tray icon for a flyout directly above it.
+Activation always opens or focuses the flyout; repeated or duplicate tray
+notifications do not toggle it closed.
 The flyout centers on the icon where space permits and stays within the monitor's
 work area, falling below a top-edge icon when needed. Click elsewhere or press
 Escape to dismiss it. The gear opens a separate settings window with General,

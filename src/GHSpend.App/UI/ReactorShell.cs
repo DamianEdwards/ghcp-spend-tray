@@ -14,10 +14,12 @@ internal sealed class ReactorShell : IDisposable
     private readonly AppSession _session;
     private ReactorWindow? _flyout, _settings;
     private bool _exiting;
+    private long _flyoutPresentation;
     private string? _notificationAccount;
     internal AppSession Session => _session;
     internal ReactorWindow? Flyout => _flyout;
     internal ReactorWindow? SettingsWindow => _settings;
+    internal nint TrayHandle => _tray.Handle;
 
     internal ReactorShell(IApplicationController controller)
     {
@@ -30,7 +32,7 @@ internal sealed class ReactorShell : IDisposable
         _session.OpenSettings = ShowSettings;
         _session.HideFlyout = () => _flyout?.Hide();
         _session.TestNotification = () => _tray.Icon.Notify("GHSpend test", "Windows accepted this test notification request.");
-        _tray.OpenRequested += ToggleFlyout;
+        _tray.OpenRequested += () => _session.Post(ShowFlyout);
         _tray.SettingsRequested += () => ShowSettings(SettingsPage.General);
         _tray.RefreshRequested += () => _session.Refresh();
         _tray.ExitRequested += Exit;
@@ -57,14 +59,10 @@ internal sealed class ReactorShell : IDisposable
         _session.Initialize();
         if (show) ShowFlyout();
     }
-    private void ToggleFlyout()
-    {
-        if (_flyout?.IsVisible == true) _flyout.Hide();
-        else ShowFlyout();
-    }
     internal void ShowFlyout()
     {
         if (_exiting) return;
+        _flyoutPresentation++;
         if (_flyout is null)
         {
             _flyout = ReactorApp.OpenWindow(new WindowSpec
@@ -75,7 +73,7 @@ internal sealed class ReactorShell : IDisposable
                 Backdrop = BackdropChoice.Of(BackdropKind.DesktopAcrylic),
                 Icon = WindowIcon.FromPath(Path.Combine(AppContext.BaseDirectory, "Assets", "ghspend.ico"))
             }, () => new FlyoutComponent(_session));
-            _flyout.Deactivated += (_, _) => _flyout?.Hide();
+            _flyout.Deactivated += (_, _) => DismissAfterDeactivation();
             _flyout.Closing += (_, e) =>
             {
                 if (!_exiting) { e.Cancel = true; _flyout?.Hide(); }
@@ -92,6 +90,25 @@ internal sealed class ReactorShell : IDisposable
         var placement = FlyoutPlacement.AboveIcon(anchor, work, (int)(400 * scale), (int)(height * scale), (int)(10 * scale));
         _flyout.AppWindow.MoveAndResize(new RectInt32(placement.X, placement.Y, placement.Width, placement.Height));
         _flyout.Show(); _flyout.Activate();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_flyout.NativeWindow);
+        if (Win32.SetForegroundWindow(hwnd) == 0 && Win32.GetForegroundWindow() != hwnd)
+            Diagnostics.Record("Windows declined foreground activation of the tray flyout.");
+        // Invalidate dismissals raised before or reentrantly during this presentation.
+        _flyoutPresentation++;
+    }
+    private void DismissAfterDeactivation()
+    {
+        var window = _flyout;
+        var presentation = _flyoutPresentation;
+        // Showing/activating and Shell focus changes can reenter deactivation. Check the
+        // settled native foreground window, not Reactor's cached activation/visibility flags.
+        _session.Post(() =>
+        {
+            if (_exiting || window is null || !ReferenceEquals(window, _flyout) ||
+                presentation != _flyoutPresentation) return;
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow);
+            if (Win32.GetForegroundWindow() != hwnd) window.Hide();
+        });
     }
     internal void ShowSettings(SettingsPage page)
     {

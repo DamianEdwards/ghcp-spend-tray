@@ -167,6 +167,10 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     internal static partial int SetForegroundWindow(nint hwnd);
     [LibraryImport("user32.dll")]
+    internal static partial nint GetForegroundWindow();
+    [LibraryImport("user32.dll")]
+    internal static partial int IsWindowVisible(nint hwnd);
+    [LibraryImport("user32.dll")]
     internal static partial nint SetFocus(nint hwnd);
     [LibraryImport("user32.dll")]
     internal static partial int EnableWindow(nint hwnd, int enable);

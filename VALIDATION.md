@@ -20,6 +20,7 @@ not completed evidence.
 | Native executable format | PE machine checked against x64/ARM64; CLR runtime header absent |
 | x64 GUI integration | Published executable ran in an isolated portable directory |
 | Reactor UI smoke | Hidden startup, populated cost flyout, gear/empty-state button invocation through accessibility peers, settings navigation and account-onboarding deep link |
+| Tray activation regression | Synthetic version-4 mouse/keyboard callbacks through the Shell HWND, duplicate selections, repeated hide/reopen, and Settings/flyout activation ordering checked against native window visibility |
 | Account details disclosure | Compact summary, initially collapsed history/diagnostic expanders, accessible expansion revealing labeled raw credits; warning mapping tested independently |
 | Visual inspection | Published x64 Reactor flyout inspected at 125% DPI, including the rendered cost, allocation meter and custom graph |
 | Windows notification | Shell accepted a synthetic test notification; visual delivery is not claimed |
@@ -28,6 +29,29 @@ not completed evidence.
 | Installation isolation | ZIP build runs in place; portable tests never register startup or self-install |
 
 ## Reactor migration evidence
+
+### Tray activation correction (September 24, 2026)
+
+The user reported intermittent left-click failure while the tray menu's Open
+command worked. The previous handler toggled using Reactor's cached `IsVisible`.
+In the pinned Reactor source, `OnNativeActivated` sets that cache to true even
+for deactivation, so it is not a reliable toggle predicate after hiding.
+The flyout also synchronously hid itself from `Deactivated`, allowing focus
+transitions during presentation to undo the open request.
+
+Tray selection now queues an idempotent open operation. Focus-loss dismissal
+is deferred, checks the actual foreground HWND, and ignores callbacks belonging
+to a superseded presentation. Foreground activation is explicitly requested;
+Windows may refuse it, which produces a redacted diagnostic rather than a
+focus-stealing workaround. Repeated tray activation leaves the flyout open;
+outside focus changes and Escape remain dismissal mechanisms.
+
+The smoke harness sends `NIN_SELECT` and `NIN_KEYSELECT` to its own Shell HWND
+with version-4 icon-ID packing instead of calling only `ShowFlyout` directly.
+It checks native visibility after duplicate activation, hidden-window reopening,
+opening from Settings, and a queued deactivation followed by a newer open.
+Synthetic callbacks do not grant Explorer's foreground permission, so these
+checks do not claim to reproduce every real Explorer/taskbar input sequence.
 
 The application uses `Microsoft.UI.Reactor` `0.1.0-preview.16` with the UI components
 from `Microsoft.WindowsAppSDK` `2.5.1`, the latest stable NuGet release checked on
