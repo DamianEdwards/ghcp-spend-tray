@@ -6,9 +6,10 @@ $installerTools = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
 if (Test-Path (Join-Path $installerTools 'vswhere.exe')) { $env:PATH = "$installerTools;$env:PATH" }
 Push-Location $root
 try {
-    dotnet build GHSpend.slnx -c Release --nologo -v:q
+    & "$PSScriptRoot\test-release-tooling.ps1"
+    dotnet build GHCPSpendTray.slnx -c Release --nologo -v:q
     if ($LASTEXITCODE -ne 0) { throw 'Solution build failed.' }
-    foreach ($name in @('GHSpend.Tests', 'GHSpend.PlatformTests', 'GHSpend.AppTests')) {
+    foreach ($name in @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.AppTests')) {
         $project = "tests\$name\$name.csproj"
         dotnet run --project $project -c Release --no-build | Select-Object -Last 1
         if ($LASTEXITCODE -ne 0) { throw "$name failed." }

@@ -1,4 +1,4 @@
-"""Generate the original GHSpend rising-bars/coin icon using only the standard library."""
+"""Generate the original GHCPSpendTray rising-bars/coin icon using only the standard library."""
 import pathlib
 import struct
 
@@ -25,6 +25,6 @@ for size, data in zip(sizes, images):
     output += struct.pack("<BBBBHHII", size, size, 0, 0, 1, 32, len(data), offset)
     offset += len(data)
 output += b"".join(images)
-destination = root / "src" / "GHSpend.App" / "Assets" / "ghspend.ico"
+destination = root / "src" / "GHCPSpendTray.App" / "Assets" / "GHCPSpendTray.ico"
 destination.parent.mkdir(parents=True, exist_ok=True)
 destination.write_bytes(output)
