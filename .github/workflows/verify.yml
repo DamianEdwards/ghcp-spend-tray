@@ -32,9 +32,18 @@ jobs:
         shell: pwsh
         run: .\tools\package.ps1
       - name: Retain unsigned development bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: unsigned-development-msix
           path: artifacts/release/*.msixbundle
           if-no-files-found: error
           retention-days: 7
+      - name: Exercise Store packaging without credentials or submission
+        shell: pwsh
+        run: |
+          $publisher = 'CN=11111111-1111-1111-1111-111111111111'
+          .\tools\package.ps1 -SkipPublish -Version 0.1.0 `
+            -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
+          .\tools\stage-store-package.ps1 -Bundle .\artifacts\release\GHCPSpendTray-0.1.0.msixbundle `
+            -Version 0.1.0 -SourceCommit $env:GITHUB_SHA -StoreId 000000000000 `
+            -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'

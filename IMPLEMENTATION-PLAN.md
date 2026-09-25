@@ -40,6 +40,9 @@ acceptance. See [VALIDATION.md](VALIDATION.md) for evidence and open gates.
 - Signed bundle, symbols archive, checksums and source/identity metadata.
 - GitHub attestations and draft upload/download verification before publication.
 - Never overwrite public release assets or move an existing tag.
+- Build-only Store Package workflow rebuilds an immutable release's exact source
+  with Partner Center identity for the first manual Store submission. It does not
+  contact Partner Center or alter pending submissions.
 - Direct-distribution publisher must match the signing certificate subject.
 - Store identity is assigned in Partner Center and may be a different package
   family from direct distribution. No automatic transition is assumed.
