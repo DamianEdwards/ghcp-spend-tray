@@ -1,0 +1,111 @@
+name: Store Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing immutable GitHub release version (e.g. 0.1.0, without v)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcpspendtray-store-package
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build Store submission package
+    runs-on: windows-2025
+    timeout-minutes: 40
+    environment: production
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      STORE_ID: ${{ vars.STORE_ID }}
+      STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+      STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+      STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
+    steps:
+      - name: Checkout packaging automation
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate Store configuration and select immutable release
+        id: source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Store Package must be dispatched from main.' }
+          foreach ($name in @('STORE_ID', 'STORE_IDENTITY_NAME', 'STORE_PUBLISHER', 'STORE_PUBLISHER_DISPLAY_NAME')) {
+              if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+                  throw "Configure $name on the production environment."
+              }
+          }
+          $release = .\tools\get-store-release.ps1 -Version $env:RELEASE_VERSION -Repository $env:GITHUB_REPOSITORY
+          "source_commit=$($release.SourceCommit)" >> $env:GITHUB_OUTPUT
+          "release_url=$($release.ReleaseUrl)" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout exact released application source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ steps.source.outputs.source_commit }}
+          path: release-source
+          persist-credentials: false
+
+      - name: Install the released source's SDK
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: release-source/global.json
+
+      - name: Build with the Partner Center identity
+        shell: pwsh
+        working-directory: release-source
+        run: |
+          .\tools\package.ps1 -Version $env:RELEASE_VERSION `
+            -IdentityName $env:STORE_IDENTITY_NAME -Publisher $env:STORE_PUBLISHER `
+            -PublisherDisplayName $env:STORE_PUBLISHER_DISPLAY_NAME
+
+      - name: Validate and stage Store artifacts
+        shell: pwsh
+        env:
+          RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
+        run: |
+          .\tools\stage-store-package.ps1 `
+            -Bundle ".\release-source\artifacts\release\GHCPSpendTray-$env:RELEASE_VERSION.msixbundle" `
+            -Version $env:RELEASE_VERSION -SourceCommit $env:RELEASE_SOURCE_COMMIT `
+            -Repository $env:GITHUB_REPOSITORY -StoreId $env:STORE_ID `
+            -IdentityName $env:STORE_IDENTITY_NAME -Publisher $env:STORE_PUBLISHER `
+            -PublisherDisplayName $env:STORE_PUBLISHER_DISPLAY_NAME
+
+      - name: Upload Store submission artifacts
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GHCPSpendTray-${{ inputs.version }}-store
+          path: artifacts/store/${{ inputs.version }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Explain the manual submission step
+        shell: pwsh
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          RELEASE_URL: ${{ steps.source.outputs.release_url }}
+          RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
+        run: |
+          @"
+          ## Store package ready for manual submission
+          - Source release: $env:RELEASE_URL
+          - Source commit: ``$env:RELEASE_SOURCE_COMMIT``
+          - Store product: ``$env:STORE_ID``
+          - Download: $env:ARTIFACT_URL
+          - Extract the artifact ZIP and upload only ``GHCPSpendTray-$env:RELEASE_VERSION-store.msixbundle`` to Partner Center.
+          - This package uses the Store publisher and is intentionally unsigned. Microsoft signs it during Store publication.
+          - No Partner Center draft was created or changed, and nothing was submitted or published.
+          "@ >> $env:GITHUB_STEP_SUMMARY

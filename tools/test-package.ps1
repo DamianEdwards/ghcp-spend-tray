@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][string] $Version,
     [Parameter(Mandatory)][string] $IdentityName,
     [Parameter(Mandatory)][string] $Publisher,
+    [string] $PublisherDisplayName,
     [switch] $RequireSigned
 )
 $ErrorActionPreference = 'Stop'
@@ -43,6 +44,9 @@ try {
         try {
             [xml]$manifest = Read-ZipText $app 'AppxManifest.xml'
             Assert-Identity $manifest.Package.Identity
+            if ($PublisherDisplayName -and $manifest.Package.Properties.PublisherDisplayName -cne $PublisherDisplayName) {
+                throw 'Unexpected publisher display name.'
+            }
             if ($manifest.Package.Identity.ProcessorArchitecture -ne $package.Architecture) { throw 'Architecture mismatch.' }
             $ns = [Xml.XmlNamespaceManager]::new($manifest.NameTable)
             $ns.AddNamespace('f', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')

@@ -28,4 +28,5 @@ Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' | ForEach-Object {
     $errors += $parseErrors
 }
 if ($errors.Count) { throw ($errors | Out-String) }
+& "$PSScriptRoot\test-store-tooling.ps1"
 Write-Output 'PASS: release version boundaries, development identity and PowerShell syntax.'

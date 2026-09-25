@@ -37,6 +37,11 @@ Do not bypass Windows trust or policy warnings.
 
 For maintainer setup, Azure Artifact Signing, release automation, and reserving
 the Store name, see [RELEASING.md](RELEASING.md).
+The **Store Package** workflow prepares a separate unsigned, Store-identity bundle
+from an immutable GitHub release for manual Partner Center upload. It does not
+submit or publish the app; Partner Center submission remains manual.
+
+See the [privacy policy](PRIVACY.md) for data handling, retention and removal.
 
 ## Build
 
