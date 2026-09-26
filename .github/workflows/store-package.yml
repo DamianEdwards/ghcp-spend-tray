@@ -29,7 +29,7 @@ jobs:
       STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
     steps:
       - name: Checkout packaging automation
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -51,14 +51,14 @@ jobs:
           "release_url=$($release.ReleaseUrl)" >> $env:GITHUB_OUTPUT
 
       - name: Checkout exact released application source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           ref: ${{ steps.source.outputs.source_commit }}
           path: release-source
           persist-credentials: false
 
       - name: Install the released source's SDK
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: release-source/global.json
 
