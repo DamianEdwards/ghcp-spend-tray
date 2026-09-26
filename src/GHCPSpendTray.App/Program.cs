@@ -92,43 +92,61 @@ internal static class Program
                 if (shell.Flyout is not null) throw new InvalidOperationException("Hidden startup unexpectedly opened a window.");
                 SendTraySelection(shell, 0x400);
             });
-            await Task.Delay(500);
-            // Exercise the actual tray HWND callback, not just ShowFlyout directly.
-            // Duplicate selections must never toggle an already-open window closed.
-            foreach (int selection in new[] { 0x400, 0x401, 0x400 })
-            {
-                await OnUI(shell, () =>
-                {
-                    AssertFlyoutVisible(shell, $"before selection {selection:X}");
-                    SendTraySelection(shell, selection);
-                    SendTraySelection(shell, selection);
-                });
-                await Task.Delay(150);
-                await OnUI(shell, () =>
-                {
-                    AssertFlyoutVisible(shell, $"after duplicate selection {selection:X}");
-                    shell.Flyout!.Hide();
-                });
-                await Task.Delay(150);
-                await OnUI(shell, () =>
-                {
-                    if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
-                        throw new InvalidOperationException("Flyout did not hide.");
-                    SendTraySelection(shell, selection);
-                });
-                await Task.Delay(150);
-            }
+            await WaitForFlyoutVisibility(shell, true, "after mouse single-click");
             await OnUI(shell, () =>
             {
-                AssertFlyoutVisible(shell, "after hide/reopen cycles");
-                shell.ShowSettings(SettingsPage.General);
+                AssertFlyoutVisible(shell, "after mouse single-click");
+                SendTraySelection(shell, 0x400);
             });
-            await Task.Delay(250);
+            await WaitForFlyoutVisibility(shell, false, "after mouse click on open flyout");
+            await OnUI(shell, () => SendTraySelection(shell, 0x401));
+            await WaitForFlyoutVisibility(shell, true, "after keyboard selection");
+            await OnUI(shell, () => SendTraySelection(shell, 0x401));
+            await WaitForFlyoutVisibility(shell, false, "after keyboard selection toggled closed");
+            await OnUI(shell, () =>
+            {
+                SendTraySelection(shell, 0x400);
+                SendTraySelection(shell, 0x203);
+                SendTraySelection(shell, 0x400);
+                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0 || shell.SettingsWindow is null)
+                    throw new InvalidOperationException("Double-click flashed the flyout instead of opening settings.");
+            });
+            await Task.Delay(checked((int)Win32.GetDoubleClickTime()) + 150);
+            await OnUI(shell, () =>
+            {
+                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
+                    throw new InvalidOperationException("Double-click's pending single click opened the flyout.");
+                shell.Session.Navigate(SettingsPage.Notifications);
+                SendTraySelection(shell, 0x400);
+                SendTraySelection(shell, 0x400);
+                if (shell.Session.Page != SettingsPage.Usage ||
+                    Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
+                    throw new InvalidOperationException("Two mouse selections did not open usage settings.");
+                shell.ShowSettings(SettingsPage.Usage);
+            });
+            await Task.Delay(checked((int)Win32.GetDoubleClickTime()) + 150);
             await OnUI(shell, () =>
             {
                 if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
                     throw new InvalidOperationException("Settings did not dismiss the flyout.");
-                SendTraySelection(shell, 0x400);
+                if (shell.Session.Page != SettingsPage.Usage || Find(shell.SettingsWindow!, "UsagePage") is null)
+                    throw new InvalidOperationException("Settings did not open on the usage page.");
+                if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
+                    throw new InvalidOperationException("Usage refresh control did not render.");
+                if (shell.Session.Dashboard.Accounts.Count == 0)
+                {
+                    if (Find(shell.SettingsWindow!, "UsageAddAccount") is not Button)
+                        throw new InvalidOperationException("Usage empty state did not offer account setup.");
+                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "Unavailable" })
+                        throw new InvalidOperationException("Empty usage was shown as zero.");
+                }
+                else if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" } ||
+                    Find(shell.SettingsWindow!, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" })
+                    throw new InvalidOperationException("Usage summary and account diagnostics did not render.");
+                if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
+                    throw new InvalidOperationException("Usage page still displayed sampled spending history.");
+                InvokeButton(refresh);
+                SendTraySelection(shell, 0x401);
             });
             await Task.Delay(250);
             await OnUI(shell, () =>
@@ -154,6 +172,8 @@ internal static class Program
                     throw new InvalidOperationException("Reactor cost display did not render.");
                 else
                 {
+                    if (Find(flyout, "AccountAvatar-" + shell.Session.Dashboard.Accounts[0].Key) is not PersonPicture)
+                        throw new InvalidOperationException("Flyout account picture did not render.");
                     if (Find(flyout, "OpenSettings") is not Button settings) throw new InvalidOperationException("Settings gear is missing.");
                     InvokeButton(settings);
                 }
@@ -162,13 +182,21 @@ internal static class Program
             await OnUI(shell, () =>
             {
                 if (shell.SettingsWindow is null) throw new InvalidOperationException("Settings action did not open a window.");
-                if (shell.Session.Dashboard.Accounts.Count != 0) shell.Session.AddAccount();
+                if (shell.Session.Dashboard.Accounts.Count != 0) shell.Session.Navigate(SettingsPage.Accounts);
+            });
+            await Task.Delay(500);
+            await OnUI(shell, () =>
+            {
+                if (shell.Session.Dashboard.Accounts.Count == 0) return;
+                if (Find(shell.SettingsWindow!, "AccountAvatar-" + shell.Session.Dashboard.Accounts[0].Key) is not PersonPicture)
+                    throw new InvalidOperationException("Settings account picture did not render.");
+                shell.Session.AddAccount();
             });
             await Task.Delay(500);
             await OnUI(shell, () =>
             {
                 var settings = shell.SettingsWindow ?? throw new InvalidOperationException("Settings did not open.");
-                if (Find(settings, "AccountOnboarding") is null || Find(settings, "AccountHost") is not TextBox)
+                if (Find(settings, "AccountOnboarding") is null || Find(settings, "AccountHostSelection") is not ComboBox)
                     throw new InvalidOperationException("Add-account deep link did not render.");
                 shell.Session.Navigate(SettingsPage.Notifications);
             });
@@ -182,9 +210,12 @@ internal static class Program
                     var settings = shell.SettingsWindow!;
                     if (Find(settings, "AccountConsumption") is not TextBlock { Text: "$26.25" })
                         throw new InvalidOperationException("Account summary did not render.");
-                    if (Find(settings, "AdvancedAccountDetails") is not Expander { IsExpanded: false } advanced ||
-                        Find(settings, "AccountHistory") is not Expander { IsExpanded: false })
-                        throw new InvalidOperationException("Account disclosures must start collapsed.");
+                    if (Find(settings, "AccountAvatar-" + shell.Session.Dashboard.Accounts[0].Key) is not PersonPicture)
+                        throw new InvalidOperationException("Account detail picture did not render.");
+                    if (Find(settings, "AdvancedAccountDetails") is not Expander { IsExpanded: false } advanced)
+                        throw new InvalidOperationException("Advanced account details must start collapsed.");
+                    if (Find(settings, "AccountHistory") is not null)
+                        throw new InvalidOperationException("Sampled spending history must not appear as a chart.");
                     if (Find(settings, "AccountDiagnosticsTable") is not null)
                         throw new InvalidOperationException("Advanced data is displayed before disclosure.");
                     if (new ExpanderAutomationPeer(advanced).GetPattern(PatternInterface.ExpandCollapse) is not IExpandCollapseProvider expand)
@@ -206,8 +237,8 @@ internal static class Program
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
-                    "PASS: mouse/keyboard tray callbacks, duplicate activation, hide/reopen and focus transitions, " +
-                    "Reactor cost flyout, settings navigation, add-account deep link, native controls, " +
+                    "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
+                    "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, native controls, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -231,6 +262,18 @@ internal static class Program
         // Assert actual visibility even when Windows legitimately refuses focus.
         if (Win32.IsWindowVisible(hwnd) == 0)
             throw new InvalidOperationException($"Tray activation failed {stage}: native visible={Win32.IsWindowVisible(hwnd) != 0}, foreground={Win32.GetForegroundWindow() == hwnd}.");
+    }
+
+    private static async Task WaitForFlyoutVisibility(ReactorShell shell, bool expected, string stage)
+    {
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            bool visible = false;
+            await OnUI(shell, () => visible = shell.Flyout is not null && Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0);
+            if (visible == expected) return;
+            await Task.Delay(50);
+        }
+        throw new InvalidOperationException($"Tray flyout did not become {(expected ? "visible" : "hidden")} {stage}.");
     }
 
     private static void SendTraySelection(ReactorShell shell, int notification) =>

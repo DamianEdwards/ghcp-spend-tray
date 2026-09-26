@@ -119,7 +119,7 @@ public sealed record DeviceAuthorization(string DeviceCode, string UserCode, Uri
 {
     public override string ToString() => "DeviceAuthorization [redacted]";
 }
-public sealed record GitHubIdentity(string UserId, string Login);
+public sealed record GitHubIdentity(string UserId, string Login, string? AvatarUrl = null);
 
 public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timeProvider = null)
 {
@@ -189,7 +189,8 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
         IdentityWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.IdentityWire, cancellationToken).ConfigureAwait(false);
         if (wire.Id is null or <= 0 || string.IsNullOrWhiteSpace(wire.Login))
             throw new ServiceException(AccountStatus.InvalidData, "GitHub did not return a valid immutable identity.");
-        return new(wire.Id.Value.ToString(CultureInfo.InvariantCulture), wire.Login);
+        return new(wire.Id.Value.ToString(CultureInfo.InvariantCulture), wire.Login,
+            AccountAvatar.Validate(host, wire.AvatarUrl));
     }
 
     public async Task<TokenSet> RefreshAsync(ResolvedHost host, string clientId, TokenSet tokens,
@@ -266,7 +267,7 @@ public sealed class TokenManager(ICredentialStore credentialStore, DeviceFlowCli
         CancellationToken cancellationToken = default)
     {
         account.Validate();
-        string clientId = GitHubOAuth.ResolveClientId(account.Host);
+        string clientId = GitHubOAuth.ResolveClientId(account.Host, account.OAuthClientId);
         SemaphoreSlim gate = _locks.GetOrAdd(account.Key, _ => new(1, 1));
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

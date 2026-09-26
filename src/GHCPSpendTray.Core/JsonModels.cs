@@ -28,6 +28,7 @@ internal sealed class IdentityWire
 {
     [JsonPropertyName("id")] public long? Id { get; set; }
     [JsonPropertyName("login")] public string? Login { get; set; }
+    [JsonPropertyName("avatar_url")] public string? AvatarUrl { get; set; }
 }
 
 internal sealed class UsageWire

@@ -201,6 +201,8 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     internal static partial int KillTimer(nint hwnd, nuint id);
     [LibraryImport("user32.dll")]
+    internal static partial uint GetDoubleClickTime();
+    [LibraryImport("user32.dll")]
     internal static partial nint CreatePopupMenu();
     [LibraryImport("user32.dll", EntryPoint = "AppendMenuW", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial int AppendMenu(nint menu, uint flags, nuint id, string? text);

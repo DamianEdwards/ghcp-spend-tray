@@ -15,17 +15,15 @@ internal sealed class DemoController(string directory, bool empty = false) : IAp
             Changed?.Invoke(new("No accounts", "Synthetic demonstration only.", "GHCPSpendTray DEMO | No accounts", []));
             return Task.CompletedTask;
         }
-        var points = Enumerable.Range(0, 24).Select(i =>
-            new GraphPoint(now.AddHours(i - 23), i is 8 or 9 ? null : (decimal?)(1m + i % 5 * .75m))).ToArray();
         Changed?.Invoke(new("DEMO - MTD consumption: $42.75 | 2/2 accounts",
             "Synthetic demonstration only. No network, real account data, installation, or startup changes.",
             "GHCPSpendTray DEMO | MTD $42.75 | 2 accounts", [
             new("github.com:1", "Personal (demo)", "demo-user", "github.com",
                 new(2625m, 26.25m, 25m, 105m, false, now, null, now.AddHours(1), "synthetic", true, null), 105m,
-                "Observed +$12.40 over the last 24 hours (synthetic). Gaps are shown.", points, 26.25m, 25m, "Fresh", now),
+                26.25m, 25m, "Fresh", now),
             new("example.ghe.com:2", "Work (demo)", "demo-work", "example.ghe.com",
                 new(1650m, 16.5m, 100m, 16.5m, false, now, null, now.AddHours(1), "synthetic", true, null),
-                16.5m, "Collecting history", [], 16.5m, 100m, "Fresh", now)
+                16.5m, 16.5m, 100m, "Fresh", now)
         ], 42.75m, true));
         return Task.CompletedTask;
     }
@@ -38,8 +36,10 @@ internal sealed class DemoController(string directory, bool empty = false) : IAp
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key) => ("Demonstration", "", null);
     public Task RemoveAsync(string key) => throw new AppOperationException("Synthetic accounts cannot be removed in demonstration mode.");
     public Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken) =>
+        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        string? clientId = null) =>
         throw new AppOperationException("Authentication is disabled in demonstration mode. Start normal portable mode to sign in.");
+    public string? AccountClientId(string key) => throw new AppOperationException("Authentication is disabled in demonstration mode.");
     public string ResolveHostDescription(string host)
     {
         try

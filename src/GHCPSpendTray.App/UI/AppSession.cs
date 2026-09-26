@@ -1,9 +1,10 @@
 using System.Globalization;
 using GHCPSpendTray.App.Native;
+using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.App.UI;
 
-internal enum SettingsPage { General, Accounts, Notifications, About }
+internal enum SettingsPage { Usage, General, Accounts, Notifications, About }
 
 internal sealed class AppSession : IDisposable
 {
@@ -15,7 +16,7 @@ internal sealed class AppSession : IDisposable
     private bool _disposed;
     internal IApplicationController Controller { get; }
     internal DashboardView Dashboard { get; private set; } = new("Loading", "Loading accounts...", "GHCPSpendTray | Loading", []);
-    internal SettingsPage Page { get; private set; } = SettingsPage.General;
+    internal SettingsPage Page { get; private set; } = SettingsPage.Usage;
     internal event Action? Changed;
     internal Action<SettingsPage>? OpenSettings { get; set; }
     internal Action? HideFlyout { get; set; }
@@ -30,10 +31,11 @@ internal sealed class AppSession : IDisposable
     internal bool ShowAddForm { get; private set; }
     internal bool ConfirmRemove { get; set; }
     internal bool ShowAdvancedDetails { get; set; }
-    internal bool ShowAccountHistory { get; set; }
     internal DevicePrompt? Prompt { get; private set; }
     internal PendingIdentity? Identity { get; private set; }
     internal string Host { get; set; } = "github.com";
+    internal bool CustomHost { get; private set; }
+    internal string ClientId { get; private set; } = "";
     internal bool OfflineAccess { get; set; }
     internal string? ReconnectKey { get; private set; }
     internal string PollMinutes { get; set; } = "60";
@@ -81,7 +83,8 @@ internal sealed class AppSession : IDisposable
     {
         CancelSignIn();
         Page = SettingsPage.Accounts; ShowAddForm = true; SelectedAccount = null;
-        ReconnectKey = null; Host = "github.com"; Prompt = null; Identity = null;
+        ReconnectKey = null; Host = "github.com"; CustomHost = false; ClientId = "";
+        Prompt = null; Identity = null;
         Error = null; Notice = null;
         OpenSettings?.Invoke(SettingsPage.Accounts);
         Notify();
@@ -93,7 +96,7 @@ internal sealed class AppSession : IDisposable
             CancelSignIn();
             var account = Controller.AccountSettings(key);
             SelectedAccount = key; ShowAddForm = false; ConfirmRemove = false;
-            ShowAdvancedDetails = false; ShowAccountHistory = false;
+            ShowAdvancedDetails = false;
             DisplayName = account.DisplayName; AccountThresholds = account.Thresholds;
             InheritIncrement = account.SpendIncrementUsd is null;
             AccountIncrement = account.SpendIncrementUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
@@ -105,9 +108,34 @@ internal sealed class AppSession : IDisposable
     internal void Reconnect(AccountView account)
     {
         CancelSignIn();
-        Host = account.Host; ReconnectKey = account.Key; SelectedAccount = null;
+        Host = account.Host; CustomHost = account.Host != "github.com";
+        ClientId = CustomHost ? Controller.AccountClientId(account.Key) ?? "" : "";
+        ReconnectKey = account.Key; SelectedAccount = null;
         ShowAddForm = true; Prompt = null; Identity = null; Error = null; Notify();
     }
+    internal void SelectHost(bool custom)
+    {
+        if (ReconnectKey is not null || CustomHost == custom) return;
+        CustomHost = custom;
+        Host = custom ? "" : "github.com";
+        ClientId = "";
+        Notify();
+    }
+    internal void SetHost(string host)
+    {
+        if (ReconnectKey is not null) return;
+        if (Host == host) return;
+        Host = host;
+        ClientId = "";
+        try
+        {
+            if (HostResolver.Resolve(host).Host == "msft.ghe.com")
+                ClientId = GitHubOAuth.MicrosoftEnterpriseClientId;
+        }
+        catch (ArgumentException) { /* Incomplete hostname while typing. */ }
+        Notify();
+    }
+    internal void SetClientId(string value) { ClientId = value; Notify(); }
     internal void Run(Func<Task> operation, Action? success = null, Action? failure = null)
     {
         if (Busy) return;
@@ -164,15 +192,24 @@ internal sealed class AppSession : IDisposable
     }
     internal string HostDescription()
     {
+        if (CustomHost && string.IsNullOrWhiteSpace(Host))
+            return "Enter the web hostname and its OAuth app's client ID.";
         try { return Controller.ResolveHostDescription(Host); }
         catch (AppOperationException ex) { return ex.Message; }
     }
     internal void StartSignIn()
     {
         if (SigningIn || Busy) return;
+        if (CustomHost)
+        {
+            try { _ = GitHubOAuth.ResolveClientId(Host, ClientId); }
+            catch (Exception ex) when (ex is ArgumentException or ServiceException)
+            { SetError(ex.Message); return; }
+        }
         var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _signIn = cancel; Prompt = null; Identity = null; Error = null; Notice = null;
         string host = Host; bool offline = OfflineAccess; string? reconnect = ReconnectKey;
+        string? clientId = CustomHost ? ClientId : null;
         Notify();
         _ = Task.Run(async () =>
         {
@@ -189,7 +226,7 @@ internal sealed class AppSession : IDisposable
                             _confirmation = completion; Identity = identity; Prompt = null; Notify();
                         });
                         return completion.Task.WaitAsync(cancel.Token);
-                    }, cancel.Token).ConfigureAwait(false);
+                    }, cancel.Token, clientId).ConfigureAwait(false);
                 Post(() =>
                 {
                     if (_signIn != cancel) return;

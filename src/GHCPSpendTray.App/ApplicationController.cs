@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.NetworkInformation;
 using System.Security.Cryptography;
@@ -21,7 +20,6 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     private readonly SemaphoreSlim _mutations = new(1, 1);
     private readonly SemaphoreSlim _render = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
-    private readonly ConcurrentDictionary<string, (DateTimeOffset? Sample, UsageSnapshot[] History)> _history = new();
     private readonly object _initializationLock = new();
     private AppSettings _settings = new();
     private MonitorService? _monitor;
@@ -172,12 +170,13 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             try
             {
                 // Keep configuration when credential deletion fails, so removal can be retried visibly.
-                await _credentials.DeleteAsync(account, _stop.Token).ConfigureAwait(false);
+                if (account.OAuthClientId is not null ||
+                    HostResolver.Resolve(account.Host).Host is "github.com" or "msft.ghe.com")
+                    await _credentials.DeleteAsync(account, _stop.Token).ConfigureAwait(false);
                 var next = _settings with { Accounts = _settings.Accounts.Where(a => a.Key != key).ToArray() };
                 await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
                 _settings = next;
                 await _alerts.RemoveAccountAsync(key, _stop.Token).ConfigureAwait(false);
-                _history.TryRemove(key, out _);
             }
             finally { _monitor!.UpdateSettings(_settings); }
         }
@@ -190,7 +189,6 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         try
         {
             var resolved = HostResolver.Resolve(host);
-            _ = GitHubOAuth.ResolveClientId(resolved.Host);
             return $"{resolved.Kind}: auth {resolved.WebBaseUri}\r\nAPI {resolved.ApiBaseUri}";
         }
         catch (ServiceException ex) { throw new AppOperationException(ex.Message); }
@@ -199,8 +197,18 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             throw new AppOperationException("Enter an HTTPS host only, without a path, user information, query or fragment. Custom ports are GHES-only.");
         }
     }
+    public string? AccountClientId(string key)
+    {
+        var account = _settings.Accounts.SingleOrDefault(a => a.Key == key)
+            ?? throw new AppOperationException("That account is no longer configured.");
+        if (account.OAuthClientId is null &&
+            HostResolver.Resolve(account.Host).Host is not ("github.com" or "msft.ghe.com"))
+            return null;
+        return GitHubOAuth.ResolveClientId(account.Host, account.OAuthClientId);
+    }
     public async Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken)
+        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        string? clientId = null)
     {
         await InitializeAsync().ConfigureAwait(false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
@@ -208,12 +216,22 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         try
         {
             var resolved = HostResolver.Resolve(host);
-            var clientId = GitHubOAuth.ResolveClientId(resolved.Host);
-            var authorization = await _auth.BeginAsync(resolved, clientId, offlineAccess, token).ConfigureAwait(false);
+            string selectedClientId = GitHubOAuth.ResolveClientId(resolved.Host, clientId);
+            if (reconnectKey is not null)
+            {
+                var existing = _settings.Accounts.SingleOrDefault(a => a.Key == reconnectKey)
+                    ?? throw new AppOperationException("That account is no longer configured.");
+                string? originalClientId = AccountClientId(reconnectKey);
+                if (HostResolver.Resolve(existing.Host).Host != resolved.Host ||
+                    originalClientId is not null && originalClientId != selectedClientId)
+                    throw new AppOperationException("Reconnect using the original host and OAuth client ID.");
+            }
+            var authorization = await _auth.BeginAsync(resolved, selectedClientId, offlineAccess, token).ConfigureAwait(false);
             prompt(new(authorization.UserCode, authorization.VerificationUri, authorization.ExpiresAtUtc));
-            var tokens = await _auth.PollAsync(resolved, clientId, authorization, token).ConfigureAwait(false);
+            var tokens = await _auth.PollAsync(resolved, selectedClientId, authorization, token).ConfigureAwait(false);
             var identity = await _auth.GetIdentityAsync(resolved, tokens, token).ConfigureAwait(false);
-            var account = new Account { Host = resolved.Host, UserId = identity.UserId, Login = identity.Login };
+            var account = new Account { Host = resolved.Host, UserId = identity.UserId, Login = identity.Login,
+                AvatarUrl = identity.AvatarUrl, OAuthClientId = resolved.Kind == HostKind.GitHub ? null : clientId };
             if (reconnectKey is not null && account.Key != reconnectKey)
                 throw new AppOperationException("The browser selected a different account. Nothing was saved; select the original identity and reconnect again.");
             if (reconnectKey is null && _settings.Accounts.Any(a => a.Key == account.Key))
@@ -233,7 +251,8 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 if (previous is not null)
                 {
                     account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides,
-                        SpendIncrementUsd = previous.SpendIncrementUsd };
+                        SpendIncrementUsd = previous.SpendIncrementUsd,
+                        OAuthClientId = previous.OAuthClientId ?? account.OAuthClientId };
                     await _monitor!.PauseAccountAsync(account.Key, token).ConfigureAwait(false);
                 }
                 TokenSet? oldTokens = null;
@@ -311,25 +330,6 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 foreach (var state in states)
                 {
                     var snapshot = state.Snapshot;
-                    if (!_history.TryGetValue(state.Account.Key, out var cache) || cache.Sample != snapshot?.FetchedAtUtc)
-                    {
-                        try
-                        {
-                            var loaded = await _store.LoadHistoryAsync(state.Account.Key, now.AddHours(-48), _stop.Token).ConfigureAwait(false);
-                            cache = (snapshot?.FetchedAtUtc, loaded.Value);
-                            _history[state.Account.Key] = cache;
-                        }
-                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-                        {
-                            _storageDiagnostic = "History could not be loaded. Check storage permissions or corruption before continuing.";
-                            cache = (snapshot?.FetchedAtUtc, []);
-                        }
-                    }
-                    var graph = HistoryAnalysis.Build(cache.History, now);
-                    string history = graph.CollectingHistory ? "Collecting history" :
-                        $"Observed +{Money(graph.ObservedIncreaseUsd)} over the last 24 hours (sampled intervals). Graph: USD/hour.";
-                    int gaps = graph.Points.Count(p => p.Kind != RatePointKind.Segment);
-                    if (gaps > 0) history += $" {gaps} gap/reset/correction interval(s).";
                     bool current = snapshot is not null && BillingPeriods.IsCurrent(snapshot, now);
                     var visibleStatus = snapshot is not null && !current ? "Previous billing period - awaiting current data" :
                         state.Status == AccountStatus.Fresh && snapshot is not null &&
@@ -340,10 +340,9 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                         snapshot?.ResetAtUtc, state.NextRefreshUtc, snapshot?.PeriodId, current, state.Diagnostic);
                     accountViews.Add(new(state.Account.Key, state.Account.DisplayName ?? state.Account.Login,
                         state.Account.Login, state.Account.Host, details,
-                        current ? snapshot?.PercentConsumed : null, history,
-                        graph.Points.Select(p => new GraphPoint(p.ToUtc, p.UsdPerHour)).ToArray(),
+                        current ? snapshot?.PercentConsumed : null,
                         current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
-                        visibleStatus, snapshot?.FetchedAtUtc));
+                        visibleStatus, snapshot?.FetchedAtUtc, AccountAvatar.Resolve(state.Account)));
                 }
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);
@@ -415,7 +414,7 @@ internal sealed class VaultCredentials(string? portableDirectory) : ICredentialS
     private readonly CredentialVault _vault = new();
     private readonly string _prefix = portableDirectory is null ? "GHCPSpendTray/v1/" :
         "GHCPSpendTray/portable/" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(portableDirectory).ToUpperInvariant()))) + "/";
-    internal string Target(Account account) => _prefix + GitHubOAuth.ResolveClientId(account.Host) + "/" +
+    internal string Target(Account account) => _prefix + GitHubOAuth.ResolveClientId(account.Host, account.OAuthClientId) + "/" +
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(account.Key)));
     public Task<TokenSet?> ReadAsync(Account account, CancellationToken cancellationToken = default)
     {
