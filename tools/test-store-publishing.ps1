@@ -8,7 +8,8 @@ $testDirectory = Join-Path ([IO.Path]::GetTempPath()) "ghcpspendtray-store-test-
 New-Item -ItemType Directory -Path $testDirectory | Out-Null
 $bundle = Join-Path $testDirectory 'GHCPSpendTray-0.2.0-store.msixbundle'
 Set-Content -LiteralPath $bundle -Value 'Synthetic package; not an installable bundle.' -Encoding ascii
-$state = @{ Pending = $false; LastVersion = '0.1.0.0'; LastStatus = 'Published'; ChangedDraft = $false
+$state = @{ Pending = $false; OmitPending = $true; OmitLastPublished = $false
+    LastVersion = '0.1.0.0'; LastStatus = 'Published'; ChangedDraft = $false
     FailUpload = $false; TokenFailure = $false; Created = 0; Updated = 0; Uploaded = 0; Committed = 0 }
 Set-Item Function:\az -Value ({
     if (($args -join ' ') -ne 'account get-access-token --resource https://manage.devcenter.microsoft.com --query accessToken --output tsv') {
@@ -26,9 +27,16 @@ Set-Item Function:\Invoke-RestMethod -Value ({
     if ($Headers.Authorization -ne 'Bearer synthetic-token') { throw 'Missing Store API authorization.' }
     $base = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$storeId"
     if ($Uri -eq $base -and $Method -eq 'Get') {
-        return [pscustomobject]@{ id = $storeId; packageIdentityName = $identity; publisherName = $subject
+        $app = [pscustomobject]@{ id = $storeId; packageIdentityName = $identity; publisherName = $subject
             pendingApplicationSubmission = $(if ($state.Pending) { [pscustomobject]@{ id = '22' } } else { $null })
             lastPublishedApplicationSubmission = [pscustomobject]@{ id = '11' } }
+        if ($state.OmitPending -and -not $state.Pending) {
+            $app.PSObject.Properties.Remove('pendingApplicationSubmission')
+        }
+        if ($state.OmitLastPublished) {
+            $app.PSObject.Properties.Remove('lastPublishedApplicationSubmission')
+        }
+        return $app
     }
     if ($Uri -eq "$base/submissions/11" -and $Method -eq 'Get') {
         return [pscustomobject]@{ status = $state.LastStatus
@@ -100,6 +108,9 @@ try {
     $state.Pending = $true
     Assert-Rejected 'existing draft'
     $state.Pending = $false
+    $state.OmitLastPublished = $true
+    Assert-Rejected 'no published submission'
+    $state.OmitLastPublished = $false
     $state.LastVersion = '0.2.0.0'
     Assert-Rejected 'same version'
     $state.LastVersion = '0.3.0.0'

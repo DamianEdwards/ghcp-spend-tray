@@ -17,7 +17,7 @@
 | Portable UI smoke | Populated and empty synthetic scenarios pass with the renamed Native AOT executable |
 | Production signing/release | v0.1.0 preview published successfully by Release run 36073933389; public immutable release, trusted timestamped MSIX signature, downloaded checksums, source metadata and GitHub attestations verified |
 | First Store package | v0.1.0 rebuilt from immutable released source for x64/ARM64 using Partner Center identity; unsigned bundle, publisher display name and payload validation pass. The user confirmed the initial release was published in the Store |
-| Store update tooling | Offline guards cover release selection, token acquisition failure, read-only access checks, pending drafts, published-version ordering, listing preservation, upload failure and commit. Live OIDC access to the Store API, submission and certification for v0.2.0 remain unverified |
+| Store update tooling | Offline guards cover release selection, token acquisition failure, read-only access checks, omitted optional submission references, pending drafts, published-version ordering, listing preservation, upload failure and commit. A read-only 0.2.0 Actions run successfully built and authenticated through OIDC; its Store API response omitted `pendingApplicationSubmission` when no draft existed, causing the first access check to fail. The guard has been corrected; a successful rerun and Store submission/certification remain unverified |
 
 The platform suite checks explicit portable arguments, protected paths, private
 portable-directory ACLs, junction rejection, singleton readiness/activation and
