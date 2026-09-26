@@ -84,7 +84,8 @@ Left-click the tray icon to toggle the flyout or double-click it to open
 current total, per-account consumption and diagnostics, availability status,
 and a manual refresh action. **Accounts** manages connections and
 per-account preferences; **General** and **Notifications** configure refresh
-and alerts. The default refresh interval
+and alerts. **About** shows the running app's version, including preview labels.
+The default refresh interval
 is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
 
