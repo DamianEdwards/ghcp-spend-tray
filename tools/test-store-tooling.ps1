@@ -6,6 +6,7 @@ $state = @{ ExitCode = 0; Fixture = $null }
 function Reset-Fixture {
     $state.Fixture = @{
         release = @{ tag_name = 'v0.1.0'; draft = $false; immutable = $true; prerelease = $true
+            body = "## What's Changed`n* Improve tray behavior by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/1`n* Update packages by @dependabot[bot] in https://github.com/DamianEdwards/ghcp-spend-tray/pull/2`n`n## New Contributors`n* @dependabot[bot]`n**Full Changelog**: https://github.com/DamianEdwards/ghcp-spend-tray/compare/v0.0.1...v0.1.0"
             assets = @(@{ id = 1; name = 'release.json' }, @{ id = 2; name = 'GHCPSpendTray-0.1.0.msixbundle' }) }
         metadata = @{ version = '0.1.0'; packageVersion = '0.1.0.0'; sourceCommit = $sha; signed = $true }
         commit = @{ sha = $sha }
@@ -32,12 +33,16 @@ try {
     Reset-Fixture
     $release = & $selector -Version '0.1.0'
     if ($release.SourceCommit -cne $sha -or $release.PackageVersion -ne '0.1.0.0' -or
+        $release.StoreReleaseNotes -cne "What's new in 0.1.0`n- Improve tray behavior`n- Update packages" -or
         $release.ReleaseUrl -ne 'https://github.com/DamianEdwards/ghcp-spend-tray/releases/tag/v0.1.0') {
         throw 'Incorrect Store source selection.'
     }
     Assert-Rejected { $state.Fixture.release.draft = $true }
     Assert-Rejected { $state.Fixture.release.immutable = $false }
     Assert-Rejected { $state.Fixture.release.tag_name = 'v0.2.0' }
+    Assert-Rejected { $state.Fixture.release.body = 'No changes' }
+    Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n* Unknown entry" }
+    Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n* $(-join ('A' * 1510)) by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/1" }
     Assert-Rejected { $state.Fixture.release.assets = @($state.Fixture.release.assets[0]) }
     Assert-Rejected { $state.Fixture.release.assets = @($state.Fixture.release.assets[1]) }
     Assert-Rejected { $state.Fixture.release.assets += $state.Fixture.release.assets[0] }

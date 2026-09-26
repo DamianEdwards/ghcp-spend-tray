@@ -32,10 +32,12 @@ if ($metadata.sourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or $metadata.sourceCom
     $metadata.signed -ne $true) {
     throw 'The release metadata must match its immutable tag, version and signed GitHub distribution.'
 }
+$storeReleaseNotes = & "$PSScriptRoot\format-store-release-notes.ps1" -Body $release.body -Version $Version
 [pscustomobject]@{
     Version = $versionInfo.Version
     PackageVersion = $versionInfo.PackageVersion
     Tag = $versionInfo.Tag
     SourceCommit = $commit.sha
     ReleaseUrl = "https://github.com/$Repository/releases/tag/$($versionInfo.Tag)"
+    StoreReleaseNotes = $storeReleaseNotes
 }

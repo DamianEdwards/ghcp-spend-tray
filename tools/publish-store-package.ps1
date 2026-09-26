@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)][ValidatePattern('\A[A-Z0-9]{12}\z')][string] $StoreId,
     [Parameter(Mandatory)][string] $IdentityName,
     [Parameter(Mandatory)][string] $Publisher,
+    [Parameter(Mandatory)][string] $ReleaseNotesFile,
     [switch] $ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,23 @@ $versionInfo = & "$PSScriptRoot\get-release-version.ps1" -Version $Version
 $bundlePath = (Resolve-Path -LiteralPath $Bundle -ErrorAction Stop).Path
 if ((Split-Path $bundlePath -Leaf) -cne "GHCPSpendTray-$Version-store.msixbundle") {
     throw 'Publish only the validated, staged Store bundle for this version.'
+}
+$releaseNotes = Get-Content -LiteralPath $ReleaseNotesFile -Raw -ErrorAction Stop
+if ([string]::IsNullOrWhiteSpace($releaseNotes) -or $releaseNotes.Length -gt 1500 -or
+    -not $releaseNotes.StartsWith("What's new in $Version`n", [StringComparison]::Ordinal)) {
+    throw 'Store release notes must be nonempty, version-matched, and at most 1500 characters.'
+}
+function Get-OnlyEnglishListing([object] $Submission) {
+    if ($null -eq $Submission.PSObject.Properties['listings'] -or
+        $null -eq $Submission.listings) {
+        throw 'The Store submission has no listings; release notes cannot be updated.'
+    }
+    $locales = @($Submission.listings.PSObject.Properties.Name)
+    if ($locales.Count -ne 1 -or $locales[0] -ine 'en-us' -or
+        $null -eq $Submission.listings.PSObject.Properties[$locales[0]].Value.baseListing) {
+        throw 'Store release notes require a single en-us listing; review localized listings manually.'
+    }
+    $Submission.listings.PSObject.Properties[$locales[0]].Value.baseListing
 }
 $accessToken = & az account get-access-token --resource 'https://manage.devcenter.microsoft.com' `
     --query accessToken --output tsv
@@ -46,8 +64,9 @@ foreach ($package in $last.applicationPackages) {
         throw "Store package version must exceed every published package version ($($package.version))."
     }
 }
+Get-OnlyEnglishListing $last | Out-Null
 if ($ValidateOnly) {
-    Write-Output "Federated Store API access and package version verified for $StoreId; no submission created."
+    Write-Output "Federated Store API access, package version and release notes verified for $StoreId; no submission created."
     return
 }
 
@@ -63,6 +82,12 @@ $uploadUrl = $draft.fileUploadUrl
 Write-Output "Created Store submission $draftId for $StoreId."
 $zip = Join-Path ([IO.Path]::GetTempPath()) "ghcpspendtray-store-$([guid]::NewGuid().ToString('N')).zip"
 try {
+    $baseListing = Get-OnlyEnglishListing $draft
+    if ($null -eq $baseListing.PSObject.Properties['releaseNotes']) {
+        $baseListing | Add-Member -NotePropertyName releaseNotes -NotePropertyValue $releaseNotes
+    } else {
+        $baseListing.releaseNotes = $releaseNotes
+    }
     $fileName = Split-Path $bundlePath -Leaf
     $draft.applicationPackages = @(@{
         fileName = $fileName
@@ -78,8 +103,9 @@ try {
         -ContentType 'application/json' -Body ($draft | ConvertTo-Json -Depth 100 -Compress)
     if ([string]$updated.id -cne [string]$draftId -or $updated.status -cne 'PendingCommit' -or
         @($updated.applicationPackages).Count -ne 1 -or
-        $updated.applicationPackages[0].fileName -cne $fileName) {
-        throw "Submission $draftId did not retain the requested package; inspect the draft."
+        $updated.applicationPackages[0].fileName -cne $fileName -or
+        (Get-OnlyEnglishListing $updated).releaseNotes -cne $releaseNotes) {
+        throw "Submission $draftId did not retain the requested package and release notes; inspect the draft."
     }
     Compress-Archive -LiteralPath $bundlePath -DestinationPath $zip -CompressionLevel NoCompression
     try {
@@ -97,7 +123,8 @@ try {
     }
     $ready = Invoke-RestMethod -Uri "$url/submissions/$draftId" -Headers $headers
     if ($ready.status -cne 'PendingCommit' -or @($ready.applicationPackages).Count -ne 1 -or
-        $ready.applicationPackages[0].fileName -cne $fileName) {
+        $ready.applicationPackages[0].fileName -cne $fileName -or
+        (Get-OnlyEnglishListing $ready).releaseNotes -cne $releaseNotes) {
         throw "Store draft $draftId changed while uploading; inspect it before committing."
     }
     $commit = Invoke-RestMethod -Method Post -Uri "$url/submissions/$draftId/commit" -Headers $headers

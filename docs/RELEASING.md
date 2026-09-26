@@ -218,7 +218,11 @@ Microsoft currently supports automated updates for free products.
    upload artifact without using the Store publishing identity.
 2. Approve the `microsoft-store` environment. The workflow verifies the release
    metadata and immutable tag, checks out that exact application commit
-   separately from the packaging automation, and installs its pinned SDK.
+   separately from the packaging automation, and installs its pinned SDK. It
+   derives the Store notes from the same immutable GitHub release's **What's
+   Changed** PR titles, dropping contributor credits and the full-changelog
+   link. Unexpected formatting, empty notes or more than 1500 characters stop
+   the workflow before any Store draft is created.
 3. Both architectures are rebuilt with the Partner Center identity, not the
    Azure certificate's publisher. The workflow validates the unsigned bundle,
    including publisher display name, and uploads the
@@ -228,9 +232,12 @@ Microsoft currently supports automated updates for free products.
    an existing pending draft,
    an unpublished predecessor, or a package with an equal or higher version.
    It creates a new submission copying the published listing and availability,
-   replaces the package list with this bundle, uploads the bundle in a ZIP
-   through the Store API, and commits the update for certification. Publish
-   mode is **Immediate**, so an approved update goes live without a second
+   sets the `en-us` release notes to the derived plain text, replaces the
+   package list with this bundle, verifies the Store retained both the notes
+   and package, uploads the bundle in a ZIP through the Store API, and commits
+   the update for certification. A single `en-us` listing is required; other
+   locales need reviewed translations rather than silently reusing English.
+   Publish mode is **Immediate**, so an approved update goes live without a second
    manual release action. Check Partner Center for certification and publication.
    A successful workflow run means the commit started, **not** that the update
    was approved or is live.
@@ -265,8 +272,10 @@ Actions artifacts expire after 30 days. Rerun with **publish** disabled to
 regenerate a package from the same immutable source. Each subsequent Store
 update needs a higher numeric package version; a prerelease label alone does
 not increase it. The Store submission API copies the previously published
-listing: review existing listing text and release notes before automating an
-update, since this workflow only changes the package and publish mode.
+listing: review existing listing text before automating an update. Only the
+`en-us` release notes, package and publish mode are changed. For version 0.2.0,
+the five GitHub **What's Changed** titles become the Store release notes;
+review the release body before submission.
 
 The **Verification** CI job exercises both development and Store-shaped packaging,
 using a synthetic Store identity without production credentials or API calls.
