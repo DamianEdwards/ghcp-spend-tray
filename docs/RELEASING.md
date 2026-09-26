@@ -54,9 +54,12 @@ Environment **variables**:
 | `MSIX_PUBLISHER` | Exact Azure signing certificate subject, including all DN components |
 | `MSIX_PUBLISHER_DISPLAY_NAME` | Human-readable publisher name |
 
-The production environment also retains `STORE_IDENTITY_NAME`, `STORE_PUBLISHER`,
-`STORE_PUBLISHER_DISPLAY_NAME`, and `STORE_ID` from Partner Center. **Store Package**
-uses these values to build upload artifacts; **Release** does not consume them.
+**Store Package and Publish** uses a separate protected GitHub environment named
+**microsoft-store**. It already requires reviewer approval; restrict its
+deployment branches to `main` before using it. Set its environment **variables**
+to `STORE_ID`, `STORE_IDENTITY_NAME`, `STORE_PUBLISHER`, and
+`STORE_PUBLISHER_DISPLAY_NAME` from Partner Center (copy the previously
+configured Store variables from `production`). **Release** does not consume them.
 Both channels use the name `DamianEdwards.GHCPSpendTray`, but their configured
 publishers differ; they therefore have separate package families.
 
@@ -91,6 +94,28 @@ Grant that identity the certificate-profile signer role at the necessary signing
 profile/account scope (Azure may display **Trusted Signing Certificate Profile
 Signer**). This is distinct from subscription Contributor. Reusing an account
 does not automatically authorize this repository's OIDC subject.
+
+For Store publishing, set these **microsoft-store environment secrets**:
+
+| Name | Value |
+|---|---|
+| `STORE_TENANT_ID` | Tenant ID of the Partner Center-associated Entra tenant |
+| `STORE_CLIENT_ID` | Client ID of the Store publishing app, assigned the Manager role in Partner Center |
+
+Create a separate federated credential on that Store app registration:
+
+```text
+Issuer:   https://token.actions.githubusercontent.com
+Subject:  repo:DamianEdwards@249088/ghcp-spend-tray@1375200120:environment:microsoft-store
+Audience: api://AzureADTokenExchange
+```
+
+`azure/login` uses this credential without a subscription or client secret,
+and the workflow requests a token for `https://manage.devcenter.microsoft.com`
+via Azure CLI. The Store publishing identity is distinct from the signing
+identity used by **Release**. Store submission API documentation illustrates
+client-secret authentication, but Entra supports federated client credentials.
+Use the read-only access check below before the first Store submission.
 
 No Azure client secret, PFX, or private key is needed. The workflow grants
 `id-token: write`, logs in with `azure/login`, and signs through
@@ -176,31 +201,49 @@ preferences. Production signing, clean signed installation/upgrading, login
 startup, ARM64 execution and Store certification require separate release checks.
 See [VALIDATION.md](VALIDATION.md).
 
-## Build a Store submission package
+## Submit an update to the Microsoft Store
 
-The first submission has been sent for certification; Store publication has not
-yet been confirmed. The **Store Package** workflow
-automates artifact preparation only. It never calls Partner Center, modifies a
-draft, submits certification, signs with Azure, or publishes a GitHub release.
-It needs no additional credentials beyond the existing `production` variables.
+Version 0.1.0 was published manually in the Store. For subsequent updates,
+configure the Partner Center-associated Entra application with the Manager role
+and the federated credential above; do not create a client secret for this
+workflow. The app must be live and support the Store submission API.
+Microsoft currently supports automated updates for free products.
 
-1. Merge this workflow to `main`, then choose **Actions > Store Package > Run
-   workflow** from `main`.
-2. Enter an existing immutable GitHub release version without the `v` prefix,
-   such as `0.1.0`. A preview release is allowed when explicitly selected.
-3. Approve the `production` environment. The workflow verifies the published
-   release's source metadata against its immutable tag, checks out that exact
-   application commit separately from the packaging automation, and installs
-   the SDK pinned by that released source.
-4. Both architectures are rebuilt with the Partner Center identity, not the
+1. Merge the workflow to `main`, then choose **Actions > Store Package and
+   Publish > Run workflow** from `main`. Enter an existing immutable GitHub
+   release version without the `v` prefix, such as `0.2.0`. For the first run,
+   turn **publish** off and **verify_access** on to test OIDC and read the live
+   Store product without creating a draft. After that succeeds, run again with
+   **publish** on to submit the update. Turn both inputs off to build a manual
+   upload artifact without using the Store publishing identity.
+2. Approve the `microsoft-store` environment. The workflow verifies the release
+   metadata and immutable tag, checks out that exact application commit
+   separately from the packaging automation, and installs its pinned SDK.
+3. Both architectures are rebuilt with the Partner Center identity, not the
    Azure certificate's publisher. The workflow validates the unsigned bundle,
-   including the publisher display name, and uploads an Actions artifact named
-   `GHCPSpendTray-<version>-store`.
-5. Download and extract that artifact. Upload only
-   **`GHCPSpendTray-<version>-store.msixbundle`** to the **Packages** section of
-   your Partner Center submission. The artifact also includes
-   `store-package.json` (Store identity and source commit) and `SHA256SUMS`
-   for traceability; do not upload the outer Actions ZIP as an app package.
+   including publisher display name, and uploads the
+   `GHCPSpendTray-<version>-store` Actions artifact before submission.
+4. With **publish** enabled, the workflow signs in via GitHub OIDC and verifies
+   the live Store product and published package version. It refuses to replace
+   an existing pending draft,
+   an unpublished predecessor, or a package with an equal or higher version.
+   It creates a new submission copying the published listing and availability,
+   replaces the package list with this bundle, uploads the bundle in a ZIP
+   through the Store API, and commits the update for certification. Publish
+   mode is **Immediate**, so an approved update goes live without a second
+   manual release action. Check Partner Center for certification and publication.
+   A successful workflow run means the commit started, **not** that the update
+   was approved or is live.
+
+If a submission/upload fails after draft creation, inspect and resolve that
+draft in Partner Center before rerunning; automation does not delete drafts or
+retry a partial submission. Do not edit an API-created draft in Partner Center
+and then try to commit it with the API: Microsoft warns that mixing methods can
+leave the draft unusable. Resolve or delete it manually, then start a new run.
+Store API authentication and product validation failures stop before draft
+creation. If **publish** is disabled, download and extract the artifact, then
+upload only `GHCPSpendTray-<version>-store.msixbundle` to Partner Center;
+`store-package.json` and `SHA256SUMS` are traceability files, not app packages.
 
 The Store bundle is intentionally unsigned and is **not a direct-install
 download**. Microsoft signs it during Store publication. The signed bundle on
@@ -218,16 +261,19 @@ No compliance declarations or listing claims are filled automatically.
 Run the Windows App Certification Kit and resolve package/listing issues before
 submitting. A successful package build does not establish Store certification.
 
-Actions artifacts expire after 30 days. Rerun the workflow to regenerate a package
-from the same immutable source. Each *subsequent Store update* needs a higher
-numeric package version; a prerelease label alone does not increase it.
+Actions artifacts expire after 30 days. Rerun with **publish** disabled to
+regenerate a package from the same immutable source. Each subsequent Store
+update needs a higher numeric package version; a prerelease label alone does
+not increase it. The Store submission API copies the previously published
+listing: review existing listing text and release notes before automating an
+update, since this workflow only changes the package and publish mode.
 
 The **Verification** CI job exercises both development and Store-shaped packaging,
 using a synthetic Store identity without production credentials or API calls.
 The offline release-selection tests reject drafts, mutable releases, missing or
 duplicate assets, mismatched source/version metadata, and GitHub API failures.
 
-## Updates and eventual Store submission automation
+## Updates
 
 A GitHub-hosted `.appinstaller` feed is possible: a stable HTTPS descriptor can
 reference versioned release URLs for the bundle and request App Installer update
@@ -236,28 +282,15 @@ long-running-process update testing. It is deliberately not implemented now.
 GitHub releases are manually installed/upgraded; no updater or update prompt runs.
 
 For Store publishing, the Store signs the submitted MSIX packages and manages
-updates; Azure signing remains for direct GitHub distribution. Store API access is
-not an Azure Artifact Signing key. It uses a separate Partner Center-associated
-Entra application, tenant/client ID and credential with the required submission
-permissions. Microsoft's documented flow assigns that application the Manager
-role and obtains a client key. Keep such credentials in a protected environment,
-never in the repository or chat.
-
-Microsoft's current
-[Store GitHub Actions guidance](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/github-actions)
-requires the application to be published and live before automating updates.
-Complete the first submission above before enabling later Store API automation.
-Future setup requires a Partner Center-associated Entra application and Store
-credentials, separately from the Azure signing identity. Do not paste a client
-secret into chat; configure it directly in a protected GitHub environment.
-
-Store submission is not wired into these workflows yet. The Store CLI's `publish`
-command can delete and recreate a pending draft, losing staged metadata; the
-future update workflow must explicitly safeguard existing submissions rather
-than running that command blindly. Reserving a name alone does not authorize publication.
+updates; Azure signing remains for direct GitHub distribution. Store API access
+is separate from Azure Artifact Signing. The workflow uses the submission API
+directly rather than the Store CLI's `publish` command, which can delete an
+existing pending draft and discard staged metadata.
 The undocumented consumption API and host-specific OAuth support also remain
 product/review risks independent of packaging.
 
 References:
 [MSIX signing](https://learn.microsoft.com/windows/msix/package/signing-package-overview),
-[Store submission API prerequisites](https://learn.microsoft.com/windows/uwp/monetize/create-and-manage-submissions-using-windows-store-services).
+[Store submission API prerequisites](https://learn.microsoft.com/windows/uwp/monetize/create-and-manage-submissions-using-windows-store-services),
+[Store submission API process](https://learn.microsoft.com/windows/uwp/monetize/manage-app-submissions),
+[Store update prerequisites](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/github-actions).
