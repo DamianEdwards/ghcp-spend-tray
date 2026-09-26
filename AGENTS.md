@@ -20,9 +20,9 @@ they share intermediate directories.
 Preserve Native AOT compatibility and the component-only Windows App SDK
 dependency graph; avoid adding the umbrella `Microsoft.WindowsAppSDK` package.
 Local `.\tools\package.ps1` output is an unsigned development bundle, not a
-public release. See `RELEASING.md` for production packaging and signing.
+public release. See `docs/RELEASING.md` for production packaging and signing.
 
 Use synthetic accounts and data in tests and issue reports. Do not commit
 tokens, device codes, or real account/consumption data. Keep authentication
 host-specific and treat unsupported or stale consumption as unavailable, not
-zero. See `VALIDATION.md` for current evidence and limitations.
+zero. See `docs/VALIDATION.md` for current evidence and limitations.
