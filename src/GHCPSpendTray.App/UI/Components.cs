@@ -3,7 +3,6 @@ using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using static Microsoft.UI.Reactor.Factories;
 
 namespace GHCPSpendTray.App.UI;
@@ -16,6 +15,10 @@ internal static class UI
     internal static TextBlockElement Copy(string text) => TextBlock(text).TextWrapping().Foreground(Theme.SecondaryText);
     internal static Element Logo(double size) => Image(Path.Combine(AppContext.BaseDirectory, "Assets", "ghcpspendtray-logo.png"))
         .Width(size).Height(size).AutomationName("GHCPSpendTray");
+    internal static Element AccountPicture(AccountView account, double size) =>
+        (PersonPicture().DisplayName(account.Login) with { ProfilePicture = account.AvatarUrl })
+            .Width(size).Height(size).AutomationName($"Account {account.Login}")
+            .AutomationId("AccountAvatar-" + account.Key);
     internal static ButtonElement Glyph(string glyph, string label, Action action) =>
         Button(Icon(FontIcon(glyph, "Segoe Fluent Icons", 18)), action)
             .Width(40).Height(40).Padding(0).AutomationName(label).ToolTip(label);
@@ -23,9 +26,9 @@ internal static class UI
         Card(Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
             VStack(5, TextBlock(title).SemiBold(), Copy(description)).Grid(column: 0).Margin(0, 0, 24, 0),
             control.Grid(column: 1).VAlign(VerticalAlignment.Center)));
-    internal static Element? Feedback(AppSession state) => state.Error is { } error
+    internal static Element? Feedback(AppSession state, bool showNotice = true) => state.Error is { } error
         ? InfoBar("Unable to complete", error).Error().IsClosable(false)
-        : state.Notice is { } notice ? InfoBar("", notice).Informational().IsClosable(false) : null;
+        : showNotice && state.Notice is { } notice ? InfoBar("", notice).Informational().IsClosable(false) : null;
     internal static string? AccountWarning(AccountView account)
     {
         if (account.Freshness == "Fresh") return account.Details.Message;
@@ -39,29 +42,6 @@ internal static class UI
                 .AutomationId(id).LabeledBy(id + "Label"));
     internal static string Timestamp(DateTimeOffset? value, string missing = "Not available") =>
         value?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? missing;
-    internal static Element Graph(AccountView account)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var start = now.AddHours(-24);
-        var points = account.Graph.Where(p => p.Time >= start).ToArray();
-        var maximum = Math.Max(.01m, points.Where(p => p.Rate.HasValue).Select(p => p.Rate!.Value).DefaultIfEmpty().Max());
-        var lines = new List<Element>();
-        GraphPoint? previous = null;
-        var brush = new SolidColorBrush(Microsoft.UI.Colors.SeaGreen);
-        foreach (var point in points)
-        {
-            if (point.Rate is null) { previous = null; continue; }
-            double x = (point.Time - start).TotalHours / 24 * 320;
-            double y = 50 - (double)(point.Rate.Value / maximum) * 44;
-            var segment = previous is { Rate: { } prior } ? Line(
-                (previous.Time - start).TotalHours / 24 * 320, 50 - (double)(prior / maximum) * 44, x, y) :
-                Line(x - 2, y, x + 2, y);
-            lines.Add(segment.Stroke(brush).StrokeThickness(2).WithKey(lines.Count.ToString(CultureInfo.InvariantCulture)));
-            previous = point;
-        }
-        return Viewbox(Canvas(lines.ToArray()).Width(320).Height(56)).Height(56)
-            .AutomationName("Observed consumption rate in USD per hour; textual summary follows");
-    }
 }
 
 internal abstract class SessionComponent(AppSession session) : Component
@@ -111,10 +91,10 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
             Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Logo(28).Grid(column: 0).Margin(0, 0, 10, 0),
                 TextBlock("GHCPSpendTray").FontSize(18).SemiBold().VAlign(VerticalAlignment.Center).Grid(column: 1),
-                UI.Glyph("\uE713", "Settings", () => Session.OpenSettings?.Invoke(SettingsPage.General))
+                UI.Glyph("\uE713", "Settings", () => Session.OpenSettings?.Invoke(SettingsPage.Usage))
                     .AutomationId("OpenSettings").Grid(column: 2)
             ).Grid(row: 0).Padding(20, 14),
-            ScrollView(VStack(12, UI.Feedback(Session), body)).Grid(row: 1).Padding(20, 0),
+            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), body)).Grid(row: 1).Padding(20, 0),
             Border(VStack(10,
                 Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                     UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12).Grid(column: 0).VAlign(VerticalAlignment.Center),
@@ -126,16 +106,15 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
     }
     private Element AccountCard(AccountView account) =>
         Card(VStack(10,
-            Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
-                VStack(2, TextBlock(account.Name).SemiBold(), UI.Copy(account.Host).FontSize(12)).Grid(column: 0),
+            Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                UI.AccountPicture(account, 36).Grid(column: 0).Margin(0, 0, 10, 0),
+                VStack(2, TextBlock(account.Name).SemiBold(), UI.Copy(account.Host).FontSize(12)).Grid(column: 1),
                 TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(21).SemiBold()
-                    .VAlign(VerticalAlignment.Center).Grid(column: 1)),
+                    .VAlign(VerticalAlignment.Center).Grid(column: 2)),
             account.Percent is { } percent
                 ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
                     UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation").FontSize(12))
                 : UI.Copy("Allocation percentage not available").FontSize(12),
-            account.Graph.Count > 1 ? UI.Graph(account) : null,
-            UI.Copy(account.HistoryText).FontSize(12),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
                 Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")
@@ -157,6 +136,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         nint hwnd = owner is null ? 0 : WinRT.Interop.WindowNative.GetWindowHandle(owner.NativeWindow);
         Element content = Session.Page switch
         {
+            SettingsPage.Usage => Usage(),
             SettingsPage.Accounts => Accounts(hwnd),
             SettingsPage.Notifications => Notifications(),
             SettingsPage.About => About(),
@@ -164,6 +144,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         };
         var navigation = NavigationView(
             [
+                NavItem("Usage", "Home", "Usage"),
                 NavItem("General", "Setting", "General"),
                 NavItem("Accounts", "Contact", "Accounts"),
                 NavItem("Notifications", "Message", "Notifications"),
@@ -183,6 +164,44 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 .BackButtonVisible(false).Grid(row: 1)
         ).AutomationId("SettingsRoot");
     }
+    private Element Usage()
+    {
+        var model = Session.Dashboard;
+        return VStack(18,
+            Card(VStack(10,
+                UI.Copy("This month's consumption"),
+                TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId("UsageTotal"),
+                UI.Copy(model.Accounts.Count == 0 ? "No current consumption to display." :
+                    model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
+                    model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable"),
+                UI.Copy(model.Status).FontSize(12),
+                UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12),
+                Button(Session.Busy ? "Refreshing..." : "Refresh consumption", () => Session.Refresh())
+                    .AutomationName("Refresh consumption").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Left)
+                    .IsEnabled(Session.Initialized && !Session.Busy))),
+            !Session.Initialized
+                ? Session.Error is null
+                    ? UI.Copy("Loading your accounts...")
+                    : Button("Try loading again", Session.Initialize).HAlign(HorizontalAlignment.Left)
+                : model.Accounts.Count == 0
+                    ? Button("Add account", Session.AddAccount).AutomationId("UsageAddAccount")
+                        .HAlign(HorizontalAlignment.Left)
+                    : VStack(16, model.Accounts.Select(UsageAccount).ToArray())
+        ).AutomationId("UsagePage");
+    }
+    private Element UsageAccount(AccountView account) => Card(VStack(12,
+        Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+            UI.AccountPicture(account, 44).Grid(column: 0).Margin(0, 0, 12, 0),
+            VStack(2, TextBlock(account.Name).FontSize(20).SemiBold(),
+                UI.Copy($"{account.Login} - {account.Host}").FontSize(12)).Grid(column: 1),
+            Button("Manage account", () => Session.EditAccount(account.Key))
+                .AutomationName($"Manage {account.Login} on {account.Host}")
+                .Grid(column: 2).VAlign(VerticalAlignment.Center)),
+        UI.AccountWarning(account) is { Length: > 0 } warning
+            ? InfoBar("Account needs attention", warning).Warning().IsClosable(false) : null,
+        UsageSummary(account, account.Key + "_"),
+        AdvancedDetails(account, account.Key + "_")
+    )).WithKey(account.Key);
     private Element General(nint owner) => VStack(18,
         UI.Section("Start with Windows", Session.Controller.Settings.StartupDescription,
             ToggleSwitch(Session.Startup, value => { Session.Startup = value; Session.Notify(); })
@@ -224,12 +243,13 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 .AutomationName("Add account").AutomationId("AddAccount").HAlign(HorizontalAlignment.Left).IsEnabled(Session.Initialized),
             Session.Dashboard.Accounts.Count == 0 ? UI.Copy("No accounts connected yet.") :
                 VStack(10, Session.Dashboard.Accounts.Select(account =>
-                    Card(Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                    Card(Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                        UI.AccountPicture(account, 40).Grid(column: 0).Margin(0, 0, 12, 0),
                         VStack(4, TextBlock(account.Name).SemiBold(), UI.Copy($"{account.Login} - {account.Host}"),
-                            UI.Copy(account.Freshness).FontSize(12)).Grid(column: 0),
+                            UI.Copy(account.Freshness).FontSize(12)).Grid(column: 1),
                         Button("Manage", () => Session.EditAccount(account.Key))
                             .AutomationName($"Manage {account.Login} on {account.Host}")
-                            .VAlign(VerticalAlignment.Center).Grid(column: 1))).WithKey(account.Key)).ToArray())
+                            .VAlign(VerticalAlignment.Center).Grid(column: 2))).WithKey(account.Key)).ToArray())
         );
     }
     private Element AddForm(nint owner)
@@ -238,10 +258,22 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ? Math.Max(0, (int)(prompt.Expires - DateTimeOffset.UtcNow).TotalSeconds).ToString(CultureInfo.InvariantCulture) : "";
         return VStack(18,
             TextBlock(Session.ReconnectKey is null ? "Connect an account" : "Reconnect account").FontSize(22).SemiBold(),
-            UI.Copy("Authorize our GHCPSpendTray application in your browser. No password or token needs to be pasted here."),
-            TextBox(Session.Host, value => { Session.Host = value; Session.Notify(); }, "github.com")
-                .AutomationName("GitHub host").AutomationId("AccountHost")
+            UI.Copy("Authorize the OAuth application registered for this host in your browser. No password or token needs to be pasted here."),
+            TextBlock("GitHub host").SemiBold(),
+            ComboBox(["github.com", "Custom..."], Session.CustomHost ? 1 : 0,
+                index => Session.SelectHost(index == 1))
+                .AutomationName("GitHub host").AutomationId("AccountHostSelection")
                 .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
+            Session.CustomHost
+                ? VStack(8,
+                    TextBox(Session.Host, Session.SetHost, "sample.ghe.com")
+                        .AutomationName("Custom GitHub hostname").AutomationId("AccountHost")
+                        .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
+                    TextBlock("OAuth Client ID").SemiBold(),
+                    TextBox(Session.ClientId, Session.SetClientId, "Host-specific OAuth Client ID")
+                        .AutomationName("Host-specific OAuth Client ID").AutomationId("AccountClientId")
+                        .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null))
+                : null,
             UI.Copy(Session.HostDescription()).FontSize(12),
             CheckBox(Session.OfflineAccess, value => { Session.OfflineAccess = value; Session.Notify(); },
                 "Request offline_access where supported").IsEnabled(!Session.SigningIn),
@@ -271,26 +303,12 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     }
     private Element AccountDetails(AccountView account, nint owner) => VStack(18,
         HStack(10, Button("Back", () => { Session.CloseSettings(); Session.Navigate(SettingsPage.Accounts); }),
+            UI.AccountPicture(account, 48),
             VStack(2, TextBlock(account.Name).FontSize(22).SemiBold(), UI.Copy(account.Host).FontSize(12))
                 .VAlign(VerticalAlignment.Center)),
         UI.AccountWarning(account) is { Length: > 0 } warning
             ? InfoBar("Account needs attention", warning).Warning().IsClosable(false).AutomationId("AccountWarning") : null,
-        Card(VStack(12,
-            VStack(2, UI.Copy("This month's consumption"),
-                TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId("AccountConsumption")),
-            account.Percent is { } percent
-                ? VStack(6,
-                    Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
-                    UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation"))
-                : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available"),
-            UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
-        )).AutomationId("AccountSummary"),
-        Expander("Spending history", Session.ShowAccountHistory
-                ? VStack(12, UI.Graph(account), UI.Copy(account.HistoryText),
-                    UI.Copy("Observed USD/hour between refreshes. Gaps and corrections are not treated as zero.").FontSize(12))
-                : VStack(),
-            Session.ShowAccountHistory, expanded => { Session.ShowAccountHistory = expanded; Session.Notify(); })
-            .HAlign(HorizontalAlignment.Stretch).AutomationId("AccountHistory"),
+        UsageSummary(account),
         Expander("Advanced details", Session.ShowAdvancedDetails ? AdvancedDetails(account) : VStack(),
             Session.ShowAdvancedDetails, expanded => { Session.ShowAdvancedDetails = expanded; Session.Notify(); })
             .HAlign(HorizontalAlignment.Stretch).AutomationId("AdvancedAccountDetails"),
@@ -316,25 +334,36 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             : Button("Remove account...", () => { Session.ConfirmRemove = true; Session.Notify(); })
                 .HAlign(HorizontalAlignment.Left)
     );
-    private static Element AdvancedDetails(AccountView account) => VStack(12,
-        UI.DetailRow("GitHub login", account.Login, "DetailLogin"),
-        UI.DetailRow("Host", account.Host, "DetailHost"),
-        UI.DetailRow("Status", account.Freshness, "DetailStatus"),
+    private static Element UsageSummary(AccountView account, string idPrefix = "") => Card(VStack(12,
+        VStack(2, UI.Copy("This month's consumption"),
+            TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId(idPrefix + "AccountConsumption")),
+        account.Percent is { } percent
+            ? VStack(6,
+                Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
+                UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation"))
+            : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available"),
+        UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
+    )).AutomationId(idPrefix + "AccountSummary");
+
+    private static Element AdvancedDetails(AccountView account, string idPrefix = "") => VStack(12,
+        UI.DetailRow("GitHub login", account.Login, idPrefix + "DetailLogin"),
+        UI.DetailRow("Host", account.Host, idPrefix + "DetailHost"),
+        UI.DetailRow("Status", account.Freshness, idPrefix + "DetailStatus"),
         UI.DetailRow("AI credits", account.Details.CreditsUsed?.ToString("#,0.############################",
-            CultureInfo.CurrentCulture) ?? "Not available", "DetailCredits"),
-        UI.DetailRow("Recorded consumption", UI.Money(account.Details.ObservedConsumptionUsd), "DetailRecordedConsumption"),
+            CultureInfo.CurrentCulture) ?? "Not available", idPrefix + "DetailCredits"),
+        UI.DetailRow("Recorded consumption", UI.Money(account.Details.ObservedConsumptionUsd), idPrefix + "DetailRecordedConsumption"),
         UI.DetailRow("Recorded allocation", account.Details.Unlimited ? "Unlimited" :
-            UI.Money(account.Details.ObservedAllocationUsd), "DetailRecordedAllocation"),
+            UI.Money(account.Details.ObservedAllocationUsd), idPrefix + "DetailRecordedAllocation"),
         UI.DetailRow("Allocation consumed", account.Details.ObservedPercentConsumed is { } percent ?
-            $"{percent:0.####}%" : "Not available", "DetailRecordedPercent"),
-        UI.DetailRow("Last fetched", UI.Timestamp(account.UpdatedAt), "DetailFetched"),
-        UI.DetailRow("Source timestamp", UI.Timestamp(account.Details.SourceTimestampUtc, "Not supplied"), "DetailSource"),
-        UI.DetailRow("Billing reset", UI.Timestamp(account.Details.ResetAtUtc, "Calendar-month fallback"), "DetailReset"),
-        UI.DetailRow("Next refresh", UI.Timestamp(account.Details.NextRefreshUtc, "Pending"), "DetailNextRefresh"),
+            $"{percent:0.####}%" : "Not available", idPrefix + "DetailRecordedPercent"),
+        UI.DetailRow("Last fetched", UI.Timestamp(account.UpdatedAt), idPrefix + "DetailFetched"),
+        UI.DetailRow("Source timestamp", UI.Timestamp(account.Details.SourceTimestampUtc, "Not supplied"), idPrefix + "DetailSource"),
+        UI.DetailRow("Billing reset", UI.Timestamp(account.Details.ResetAtUtc, "Calendar-month fallback"), idPrefix + "DetailReset"),
+        UI.DetailRow("Next refresh", UI.Timestamp(account.Details.NextRefreshUtc, "Pending"), idPrefix + "DetailNextRefresh"),
         UI.Copy("Times are shown in your local time zone.").FontSize(12),
         !account.Details.IsCurrentPeriod && account.Details.CreditsUsed is not null
             ? UI.Copy("This observation is from a previous billing period and is excluded from current consumption.") : null
-    ).AutomationId("AccountDiagnosticsTable");
+    ).AutomationId(idPrefix + "AccountDiagnosticsTable");
 
     private static Element About() => VStack(16, UI.Logo(64).HAlign(HorizontalAlignment.Left),
         TextBlock("GHCPSpendTray").FontSize(28).SemiBold(),

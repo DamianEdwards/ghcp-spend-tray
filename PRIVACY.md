@@ -13,10 +13,11 @@ You authorize access on the GitHub host's website; you do not enter your GitHub
 password into GHCPSpendTray. The app receives access tokens and, where supported
 and requested, refresh tokens.
 
-The app retrieves account information such as your login, account ID and host,
-and Copilot consumption information such as credits used, allocation, billing
-period, reset dates and observation timestamps. It also stores preferences you
-choose, including account display names, refresh intervals and alert thresholds.
+The app retrieves account information such as your login, account ID, host and
+avatar URL, as well as Copilot consumption information such as credits used,
+allocation, billing period, reset dates and observation timestamps. It also
+stores preferences you choose, including account display names, refresh
+intervals and alert thresholds.
 This information is used to display consumption, maintain history and generate
 alerts on your device.
 
@@ -49,8 +50,11 @@ information such as your IP address.
 
 GHCPSpendTray does not operate a developer-hosted account or consumption backend,
 and the app does not send account information, consumption history or diagnostic
-logs to the developer automatically. It does not include app-operated advertising
-or analytics tracking.
+logs to the developer automatically. Showing an avatar loads an image over HTTPS
+from the connected GitHub host or its avatar service (for github.com,
+`avatars.githubusercontent.com`); that service receives the image request and
+ordinary network information such as your IP address. The app does not include
+app-operated advertising or analytics tracking.
 
 GitHub's handling of information is governed by its
 [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)

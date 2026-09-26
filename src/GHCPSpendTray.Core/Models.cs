@@ -8,7 +8,9 @@ public sealed record Account
     public string Host { get; init; } = "github.com";
     public string UserId { get; init; } = "";
     public string Login { get; init; } = "";
+    public string? OAuthClientId { get; init; }
     public string? DisplayName { get; init; }
+    public string? AvatarUrl { get; init; }
     public decimal[]? ThresholdOverrides { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
@@ -16,12 +18,47 @@ public sealed record Account
     public void Validate()
     {
         _ = HostResolver.Resolve(Host);
+        if (OAuthClientId is not null)
+            _ = GitHubOAuth.ResolveClientId(Host, OAuthClientId);
         if (string.IsNullOrWhiteSpace(UserId) || UserId.StartsWith('0') || UserId.Any(c => !char.IsAsciiDigit(c)) ||
             !UserId.Any(c => c != '0') || string.IsNullOrWhiteSpace(Login))
             throw new ArgumentException("A verified numeric user ID and login are required.");
         if (ThresholdOverrides is not null)
             AppSettings.ValidateThresholds(ThresholdOverrides);
         AppSettings.ValidateSpendIncrement(SpendIncrementUsd);
+    }
+}
+
+public static class AccountAvatar
+{
+    public static string? Resolve(Account account)
+    {
+        ResolvedHost host = HostResolver.Resolve(account.Host);
+        return Validate(host, account.AvatarUrl) ??
+            (host.Kind == HostKind.GitHub && account.UserId.Length is > 0 and <= 20 &&
+             account.UserId.All(char.IsAsciiDigit) && account.UserId.Any(c => c != '0')
+                ? "https://avatars.githubusercontent.com/u/" + account.UserId
+                : null);
+    }
+
+    public static string? Validate(ResolvedHost host, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 2048 ||
+            !Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) ||
+            uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+            return null;
+        bool sameHost = uri.IdnHost.Equals(host.WebBaseUri.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+            uri.Port == host.WebBaseUri.Port;
+        bool sameApi = uri.IdnHost.Equals(host.ApiBaseUri.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+            uri.Port == host.ApiBaseUri.Port;
+        bool githubAvatars = host.Kind == HostKind.GitHub &&
+            uri.IdnHost.Equals("avatars.githubusercontent.com", StringComparison.OrdinalIgnoreCase) &&
+            uri.IsDefaultPort;
+        bool enterpriseAvatars = host.Kind == HostKind.EnterpriseCloud &&
+            uri.IdnHost.Equals("avatars." + host.WebBaseUri.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+            uri.IsDefaultPort;
+        return sameHost || sameApi || githubAvatars || enterpriseAvatars ? uri.AbsoluteUri : null;
     }
 }
 
@@ -198,41 +235,5 @@ public static class UsageAggregation
             now - s.Snapshot!.FetchedAtUtc > freshness);
         return new(included.Sum(s => s.Snapshot!.ConsumptionUsd), included.Length, all.Length,
             included.Length == all.Length && !stale, stale);
-    }
-}
-
-public enum RatePointKind { Segment, BillingReset, Gap, Correction, DuplicateTime }
-public sealed record RatePoint(DateTimeOffset FromUtc, DateTimeOffset ToUtc, decimal? UsdPerHour,
-    decimal? ObservedUsd, RatePointKind Kind);
-public sealed record SparklineData(RatePoint[] Points, decimal ObservedIncreaseUsd, bool CollectingHistory);
-
-public static class HistoryAnalysis
-{
-    public static SparklineData Build(IEnumerable<UsageSnapshot> snapshots, DateTimeOffset now,
-        TimeSpan? window = null, TimeSpan? maximumGap = null)
-    {
-        DateTimeOffset since = now - (window ?? TimeSpan.FromHours(24));
-        TimeSpan gap = maximumGap ?? TimeSpan.FromHours(6);
-        UsageSnapshot[] all = snapshots.Where(s => s.FetchedAtUtc <= now)
-            .OrderBy(s => s.FetchedAtUtc).ToArray();
-        var points = new List<RatePoint>();
-        decimal increase = 0;
-        for (int i = 1; i < all.Length; i++)
-        {
-            UsageSnapshot before = all[i - 1], after = all[i];
-            if (after.FetchedAtUtc < since) continue;
-            TimeSpan elapsed = after.FetchedAtUtc - before.FetchedAtUtc;
-            decimal delta = after.ConsumptionUsd - before.ConsumptionUsd;
-            RatePointKind kind = after.AccountKey != before.AccountKey || after.PeriodId != before.PeriodId
-                ? RatePointKind.BillingReset : elapsed <= TimeSpan.Zero ? RatePointKind.DuplicateTime
-                : elapsed > gap || before.FetchedAtUtc < since ? RatePointKind.Gap
-                : delta < 0 ? RatePointKind.Correction : RatePointKind.Segment;
-            decimal? rate = kind == RatePointKind.Segment
-                ? delta / ((decimal)elapsed.Ticks / TimeSpan.TicksPerHour) : null;
-            points.Add(new(before.FetchedAtUtc, after.FetchedAtUtc, rate,
-                kind == RatePointKind.Segment ? delta : null, kind));
-            if (kind == RatePointKind.Segment) increase += delta;
-        }
-        return new(points.ToArray(), increase, all.Count(s => s.FetchedAtUtc >= since) < 2);
     }
 }

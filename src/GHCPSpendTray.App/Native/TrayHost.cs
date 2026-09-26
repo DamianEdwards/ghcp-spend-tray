@@ -5,7 +5,10 @@ namespace GHCPSpendTray.App.Native;
 // Shell callbacks require a hidden top-level HWND even though all visible UI is Reactor.
 internal sealed class TrayHost : ShellWindow
 {
+    private const nuint SelectionTimer = 1;
     private readonly uint _taskbarCreated;
+    private bool _pendingSelection;
+    private long _lastDoubleClick = long.MinValue;
     private string _tooltip = "GHCPSpendTray | Starting";
     internal TrayIcon Icon { get; }
     internal event Action? OpenRequested, SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
@@ -34,12 +37,46 @@ internal sealed class TrayHost : ShellWindow
     {
         if (message == _taskbarCreated) { Icon.Add(); Icon.Update(_tooltip); return 0; }
         if (message == Win32.WM_POWERBROADCAST && wParam is 7 or 18) { ResumeRequested?.Invoke(); return 1; }
+        if (message == Win32.WM_TIMER && wParam == SelectionTimer)
+        {
+            if (!_pendingSelection) return 0;
+            CancelSelection();
+            OpenRequested?.Invoke();
+            return 0;
+        }
         if (message != Win32.WM_TRAY) return null;
         var action = (int)((nuint)lParam & 0xFFFF);
-        if (action is 0x400 or 0x401) OpenRequested?.Invoke();
+        if (action == 0x400)
+        {
+            if (_lastDoubleClick != long.MinValue &&
+                Environment.TickCount64 - _lastDoubleClick < Win32.GetDoubleClickTime()) return 0;
+            if (_pendingSelection) { DoubleClick(); return 0; }
+            // Shell sends the first selection before it can report a double-click.
+            if (Win32.SetTimer(Handle, SelectionTimer, Win32.GetDoubleClickTime(), 0) == 0)
+                throw new InvalidOperationException("Cannot schedule the tray selection.");
+            _pendingSelection = true;
+        }
+        else if (action == 0x203)
+        {
+            if (_lastDoubleClick == long.MinValue ||
+                Environment.TickCount64 - _lastDoubleClick >= Win32.GetDoubleClickTime()) DoubleClick();
+        }
+        else if (action == 0x401) { CancelSelection(); OpenRequested?.Invoke(); }
         else if (action == 0x405) NotificationClicked?.Invoke();
-        else if (action == 0x7B) ContextMenu();
+        else if (action == 0x7B) { CancelSelection(); ContextMenu(); }
         return 0;
+    }
+    private void DoubleClick()
+    {
+        CancelSelection();
+        _lastDoubleClick = Environment.TickCount64;
+        SettingsRequested?.Invoke();
+    }
+    private void CancelSelection()
+    {
+        if (!_pendingSelection) return;
+        _pendingSelection = false;
+        Win32.KillTimer(Handle, SelectionTimer);
     }
     private void ContextMenu()
     {
@@ -66,5 +103,5 @@ internal sealed class TrayHost : ShellWindow
         }
         finally { Win32.DestroyMenu(menu); }
     }
-    protected override void ReleaseResources() => Icon.Dispose();
+    protected override void ReleaseResources() { CancelSelection(); Icon.Dispose(); }
 }

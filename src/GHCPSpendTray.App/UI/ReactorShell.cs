@@ -32,8 +32,8 @@ internal sealed class ReactorShell : IDisposable
         _session.OpenSettings = ShowSettings;
         _session.HideFlyout = () => _flyout?.Hide();
         _session.TestNotification = () => _tray.Icon.Notify("GHCPSpendTray test", "Windows accepted this test notification request.");
-        _tray.OpenRequested += () => _session.Post(ShowFlyout);
-        _tray.SettingsRequested += () => ShowSettings(SettingsPage.General);
+        _tray.OpenRequested += () => _session.Post(ToggleFlyout);
+        _tray.SettingsRequested += () => ShowSettings(SettingsPage.Usage);
         _tray.RefreshRequested += () => _session.Refresh();
         _tray.ExitRequested += Exit;
         _tray.ResumeRequested += () => _session.Run(controller.ResumeAsync);
@@ -96,10 +96,18 @@ internal sealed class ReactorShell : IDisposable
         // Invalidate dismissals raised before or reentrantly during this presentation.
         _flyoutPresentation++;
     }
+    private void ToggleFlyout()
+    {
+        if (_flyout is { } window &&
+            Win32.IsWindowVisible(WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow)) != 0)
+            window.Hide();
+        else ShowFlyout();
+    }
     private void DismissAfterDeactivation()
     {
         var window = _flyout;
         var presentation = _flyoutPresentation;
+        var trayClick = _tray.Icon.ContainsCursor();
         // Showing/activating and Shell focus changes can reenter deactivation. Check the
         // settled native foreground window, not Reactor's cached activation/visibility flags.
         _session.Post(() =>
@@ -107,7 +115,7 @@ internal sealed class ReactorShell : IDisposable
             if (_exiting || window is null || !ReferenceEquals(window, _flyout) ||
                 presentation != _flyoutPresentation) return;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow);
-            if (Win32.GetForegroundWindow() != hwnd) window.Hide();
+            if (Win32.GetForegroundWindow() != hwnd && !trayClick && !_tray.Icon.ContainsCursor()) window.Hide();
         });
     }
     internal void ShowSettings(SettingsPage page)

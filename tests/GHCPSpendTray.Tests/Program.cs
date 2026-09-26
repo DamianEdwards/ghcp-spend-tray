@@ -106,6 +106,31 @@ internal static class Program
             AppSettings.ValidateThresholds([50, 100, 200]);
             AppSettings.ValidateThresholds([]);
         });
+        await Test("avatar URLs are host-scoped with an existing-account fallback", () =>
+        {
+            Equal("https://avatars.githubusercontent.com/u/42", AccountAvatar.Resolve(Account));
+            Equal("https://avatars.githubusercontent.com/u/42",
+                AccountAvatar.Resolve(Account with { AvatarUrl = "https://other.test/u/42" }));
+            Equal("https://avatars.githubusercontent.com/u/42?v=4",
+                AccountAvatar.Resolve(Account with { AvatarUrl = "https://avatars.githubusercontent.com/u/42?v=4" }));
+            Equal<string?>(null, AccountAvatar.Resolve(Account with { Host = "tenant.ghe.com" }));
+            Equal("https://tenant.ghe.com/avatars/u/42",
+                AccountAvatar.Resolve(Account with { Host = "tenant.ghe.com",
+                    AvatarUrl = "https://tenant.ghe.com/avatars/u/42" }));
+            Equal("https://avatars.tenant.ghe.com/u/42",
+                AccountAvatar.Resolve(Account with { Host = "tenant.ghe.com",
+                    AvatarUrl = "https://avatars.tenant.ghe.com/u/42" }));
+            Equal<string?>(null, AccountAvatar.Resolve(Account with { Host = "tenant.ghe.com",
+                AvatarUrl = "https://avatars.githubusercontent.com/u/42" }));
+            Equal<string?>(null, AccountAvatar.Resolve(Account with { Host = "tenant.ghe.com",
+                AvatarUrl = "https://avatars.other.ghe.com/u/42" }));
+            Equal<string?>(null, AccountAvatar.Resolve(Account with { Host = "git.example.test:8443",
+                AvatarUrl = "https://git.example.test/avatars/u/42" }));
+            foreach (string bad in new[] { "http://tenant.ghe.com/u/42", "file:///C:/private",
+                "https://tenant.ghe.com.evil.test/u/42", "https://user@tenant.ghe.com/u/42",
+                "https://tenant.ghe.com/u/42#fragment" })
+                Equal<string?>(null, AccountAvatar.Resolve(Account with { Host = "tenant.ghe.com", AvatarUrl = bad }));
+        });
         foreach ((string host, string expected, HostKind kind) in new[]
         {
             ("GitHub.Com", "https://api.github.com/copilot_internal/user", HostKind.GitHub),
@@ -141,7 +166,11 @@ internal static class Program
             Equal(Account.Key, (Account with { Host = "GITHUB.COM", Login = "renamed" }).Key);
             True(Account.Key != (Account with { Host = "tenant.ghe.com" }).Key);
             Throws<ArgumentException>(() => Settings(Account, Account with { Login = "renamed" }).Validate());
-            Settings(Account, Account with { UserId = "43" }, Account with { Host = "tenant.ghe.com" }).Validate();
+            Settings(Account, Account with { UserId = "43" },
+                Account with { Host = "tenant.ghe.com", OAuthClientId = "tenant-registration" }).Validate();
+            (Account with { Host = "tenant.ghe.com" }).Validate();
+            Throws<ServiceException>(() => GitHubOAuth.ResolveClientId("tenant.ghe.com"));
+            Throws<ArgumentException>(() => (Account with { Host = "tenant.ghe.com", OAuthClientId = "bad id" }).Validate());
         });
         await Test("strict decimal conversion fixture", () =>
         {
@@ -202,25 +231,6 @@ internal static class Program
             s.Validate();
             True(BillingPeriods.IsCurrent(s, new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero)));
             True(!BillingPeriods.IsCurrent(s, s.ResetAtUtc!.Value));
-        });
-        await Test("sparkline actual time handles interval changes", () =>
-        {
-            SparklineData data = HistoryAnalysis.Build([Sample(0, at: Now.AddHours(-2)),
-                Sample(100, at: Now.AddHours(-1)), Sample(200, at: Now.AddMinutes(-30))], Now);
-            Equal<decimal?>(1m, data.Points[0].UsdPerHour);
-            Equal<decimal?>(2m, data.Points[1].UsdPerHour);
-            Equal(2m, data.ObservedIncreaseUsd);
-        });
-        await Test("sparkline corrections gaps resets and first sample", () =>
-        {
-            True(HistoryAnalysis.Build([Sample()], Now).CollectingHistory);
-            Equal(RatePointKind.Correction, HistoryAnalysis.Build([Sample(100, at: Now.AddHours(-1)), Sample(50)], Now).Points[0].Kind);
-            Equal(RatePointKind.Gap, HistoryAnalysis.Build([Sample(100, at: Now.AddHours(-8)), Sample(150)], Now).Points[0].Kind);
-            Equal(RatePointKind.DuplicateTime, HistoryAnalysis.Build([Sample(100), Sample(150)], Now).Points[0].Kind);
-            DateTimeOffset next = Now.AddMonths(1);
-            var reset = HistoryAnalysis.Build([Sample(100), Sample(150, at: next)], next, TimeSpan.FromDays(40));
-            Equal(RatePointKind.BillingReset, reset.Points[0].Kind);
-            Equal<decimal?>(null, reset.Points[0].UsdPerHour);
         });
         await Test("tokens stringify redacted and source generation works", () =>
         {
@@ -401,7 +411,8 @@ internal static class Program
             using var client = new HttpClient(handler);
             var provider = new CopilotUsageProvider(client, new(new MemoryCredentials(), new(client)), new Clock(Now));
             await Task.WhenAll(provider.FetchWithTokenAsync(Account, new() { AccessToken = "fixture-A" }),
-                provider.FetchWithTokenAsync(Account with { Host = "tenant.ghe.com" }, new() { AccessToken = "fixture-B" }));
+                provider.FetchWithTokenAsync(Account with { Host = "tenant.ghe.com", OAuthClientId = "tenant-registration" },
+                    new() { AccessToken = "fixture-B" }));
             True(handler.Requests.Any(r => r.Uri.Host == "api.github.com" && r.Authorization == "Bearer fixture-A"));
             True(handler.Requests.Any(r => r.Uri.Host == "api.tenant.ghe.com" && r.Authorization == "Bearer fixture-B"));
             Equal<System.Net.Http.Headers.AuthenticationHeaderValue?>(null, client.DefaultRequestHeaders.Authorization);
@@ -446,11 +457,27 @@ internal static class Program
         });
         await Test("identity uses immutable numeric ID and correct GHES path", async () =>
         {
-            var handler = new FakeHttp(_ => Response("""{"id":987654321,"login":"verified-login"}"""));
+            var handler = new FakeHttp(_ => Response("""{"id":987654321,"login":"verified-login","avatar_url":"https://git.example.test:8443/avatars/u/987654321"}"""));
             using var client = new HttpClient(handler);
             GitHubIdentity identity = await new DeviceFlowClient(client).GetIdentityAsync(HostResolver.Resolve("git.example.test:8443"), new() { AccessToken = "fixture" });
             Equal("987654321", identity.UserId);
+            Equal("https://git.example.test:8443/avatars/u/987654321", identity.AvatarUrl);
             Equal("/api/v3/user", handler.Requests[0].Uri.AbsolutePath);
+        });
+        await Test("unsafe or missing avatar does not block identity", async () =>
+        {
+            foreach (string json in new[]
+            {
+                """{"id":42,"login":"fixture-user"}""",
+                """{"id":42,"login":"fixture-user","avatar_url":"https://other.test/collect"}"""
+            })
+            {
+                using var client = new HttpClient(new FakeHttp(_ => Response(json)));
+                var identity = await new DeviceFlowClient(client).GetIdentityAsync(HostResolver.Resolve("github.com"),
+                    new() { AccessToken = "fixture" });
+                Equal("42", identity.UserId);
+                Equal<string?>(null, identity.AvatarUrl);
+            }
         });
         await Test("oversized and malformed HTTP body rejected", async () =>
         {
@@ -509,6 +536,31 @@ internal static class Program
             Equal(60, recovered.Value.PollIntervalMinutes); Equal(1, recovered.Diagnostics.Length);
             True(File.Exists(Path.Combine(store.RootPath, "config.json.corrupt")));
             Equal(60, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
+        });
+        await Test("avatar URL survives settings restart and older settings load", async () =>
+        {
+            JsonStore store = Store();
+            var withAvatar = Account with { AvatarUrl = "https://avatars.githubusercontent.com/u/42?v=4" };
+            await store.SaveSettingsAsync(Settings(withAvatar));
+            Equal(withAvatar.AvatarUrl, (await new JsonStore(store.RootPath).LoadSettingsAsync()).Value.Accounts[0].AvatarUrl);
+            await store.SaveSettingsAsync(Settings(Account));
+            Equal<string?>(null, (await store.LoadSettingsAsync()).Value.Accounts[0].AvatarUrl);
+        });
+        await Test("old registrations and custom account survive settings round trip", async () =>
+        {
+            JsonStore store = Store();
+            await File.WriteAllTextAsync(Path.Combine(store.RootPath, "config.json"),
+                """{"version":1,"accounts":[{"host":"github.com","userId":"42","login":"synthetic"},{"host":"msft.ghe.com","userId":"43","login":"synthetic"}]}""");
+            AppSettings old = (await store.LoadSettingsAsync()).Value;
+            Equal(GitHubOAuth.ClientId, GitHubOAuth.ResolveClientId(old.Accounts[0].Host, old.Accounts[0].OAuthClientId));
+            Equal(GitHubOAuth.MicrosoftEnterpriseClientId,
+                GitHubOAuth.ResolveClientId(old.Accounts[1].Host, old.Accounts[1].OAuthClientId));
+            await store.SaveSettingsAsync(old with { Accounts = old.Accounts.Append(
+                Account with { Host = "tenant.ghe.com", OAuthClientId = "tenant-registration" }).ToArray() });
+            AppSettings reloaded = (await store.LoadSettingsAsync()).Value;
+            Equal("tenant-registration", reloaded.Accounts[2].OAuthClientId);
+            Equal<string?>(null, reloaded.Accounts[0].OAuthClientId);
+            (old with { Accounts = [Account with { Host = "legacy.ghe.com" }] }).Validate();
         });
         await Test("both corrupt settings copies fail rather than reset", async () =>
         {

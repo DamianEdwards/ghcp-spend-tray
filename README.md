@@ -3,9 +3,8 @@
 [![Install from the Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Install-0078D4?logo=microsoftstore&logoColor=white)](https://www.microsoft.com/store/productId/9PMX96TSF295)
 
 GHCPSpendTray is an independent Windows 11 tray app for keeping an eye on
-GitHub Copilot AI-credit consumption. It shows per-account usage and allocation,
-recent history, and optional spending alerts without a browser tab or a hosted
-service.
+GitHub Copilot AI-credit consumption. It shows per-account usage and allocation
+and offers optional spending alerts without a browser tab or a hosted service.
 
 [Install from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295)
 &middot; [All releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases)
@@ -17,9 +16,10 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
 ## Features
 
-- A tray flyout with per-account consumption, allocation meters, and 24-hour
-  history.
+- A tray flyout with per-account consumption and allocation meters.
 - Multiple accounts, including different identities on the same GitHub host.
+- Account avatars in the flyout and account settings when available, with
+  initials when an image cannot be shown.
 - Configurable refresh intervals and percentage or per-account USD-increment
   notifications.
 - Local history and settings, with OAuth tokens in Windows Credential Manager.
@@ -54,14 +54,20 @@ is **not** an in-place upgrade from the GitHub package.
    shown on the consent screen before approving it.
 3. Confirm the GitHub login and user ID displayed by GHCPSpendTray, then save.
 
-The app has a built-in public OAuth registration for `github.com`; it does not
-use `gh` credentials or ask for a client secret.
-Enterprise hosts without a built-in registration require an approved
-host-specific OAuth registration added to the app before sign-in is available;
-there is no user-configurable client ID. Enterprise SSO, managed-user, IP,
-and application policies may require administrator approval. Successfully
+The app has built-in public OAuth registrations for `github.com` and
+`msft.ghe.com`; it does not use `gh` credentials or ask for a client secret.
+For another enterprise host, create an approved host-specific OAuth app with
+Device Flow enabled and enter its Client ID during onboarding. The ID is
+stored with that account and used for reconnect and token refresh; existing
+accounts on built-in hosts retain their registrations. Enterprise SSO,
+managed-user, IP, and application policies may require administrator approval. Successfully
 signing in to a host does not establish that its Copilot consumption API
 is available.
+
+The app saves the avatar URL returned during sign-in for accounts on supported
+hosts. Existing github.com accounts can display an avatar using their saved
+numeric account ID; existing enterprise accounts without an avatar URL show
+initials until reconnected. Avatar images require network access.
 
 GHCPSpendTray currently requests `read:user` for identity and optionally
 `offline_access` for refresh tokens where supported. Consumption comes from
@@ -72,9 +78,13 @@ unavailable data rather than treating it as zero. See
 
 ## Use and notifications
 
-Left-click the tray icon to open the flyout; right-click it for **Open**,
-**Refresh now**, **Settings**, and **Exit**. Settings include account management,
-refresh preferences, and notification thresholds. The default refresh interval
+Left-click the tray icon to toggle the flyout or double-click it to open
+**Settings > Usage**; right-click it for **Open**,
+**Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
+current total, per-account consumption and diagnostics, availability status,
+and a manual refresh action. **Accounts** manages connections and
+per-account preferences; **General** and **Notifications** configure refresh
+and alerts. The default refresh interval
 is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
 
@@ -87,7 +97,9 @@ even when the app submits it.
 Displayed USD consumption is `credits_used / 100` from GitHub's token-billing
 quota data. It is **not** an invoice, a finance budget, or total spend across all
 GitHub products. Stale or partial observations are identified; previous billing
-periods are not counted as current spend.
+periods are not counted as current spend. GitHub's quota snapshot does not
+provide a verified per-day consumption breakdown, so the app does not chart
+daily usage from its locally sampled refreshes.
 
 ## Privacy and removal
 

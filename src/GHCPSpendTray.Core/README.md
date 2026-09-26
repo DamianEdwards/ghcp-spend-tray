@@ -36,7 +36,7 @@ the public metadata for platform Credential Manager payloads.
    `JsonStore.DeleteAccountHistoryAsync` provide optional local-data deletion.
    Local deletion does not revoke the host's OAuth grant.
 
-Onboarding is explicit: resolve host; select `GitHubOAuth.ResolveClientId(host)`;
+Onboarding is explicit: resolve host; select `GitHubOAuth.ResolveClientId(host, account.OAuthClientId)`;
 `BeginAsync`; show user code and validated verification URL; `PollAsync`;
 `GetIdentityAsync`; `FetchWithTokenAsync`; confirm immutable identity; save credentials
 and settings; refresh. Account keys include canonical host and immutable numeric ID,
@@ -49,12 +49,13 @@ Then call `UpdateSettings` with the account still present to resume monitoring.
 
 GHCPSpendTray selects project-owned GHCPSpendTray registrations with `GitHubOAuth.ResolveClientId`:
 `github.com` uses `Ov23ctzkXY5CJhfKQo7T`, while `msft.ghe.com` uses
-`Ov23ox38SoD1bIpzU9zZ`. Hostnames are normalized and matched exactly; unregistered
-hosts fail before device authorization without falling back to another registration.
-This is not user-configurable; account/configuration models
-do not persist client IDs. The lower-level device-flow protocol methods accept
-an explicit ID for testability, but application onboarding and account refresh
-always select the host-specific ID. No client secret is embedded and no existing CLI token
+`Ov23ox38SoD1bIpzU9zZ`. Other custom hosts require a host-specific OAuth Client ID
+registered on that host with Device Flow enabled. A custom host's ID is saved on
+the account in `config.json`; absent IDs in older settings retain the built-in
+registrations for github.com and msft.ghe.com. Changing a hostname clears the
+onboarding ID; reconnect requires the same host and registration. Refresh and
+Credential Manager lookup use the saved ID, never another host's default. No
+client secret is embedded and no existing CLI token
 is read. GitHub's consent screen should identify GHCPSpendTray. The application was
 registered with Device Flow and expiring tokens enabled, without a redirect URI.
 Windows credential targets include the selected host's client ID; accounts from the old CLI
@@ -77,10 +78,9 @@ are not added. SSO/approval failures are surfaced, not bypassed.
 - Reset timestamps define billing periods when available. Only otherwise is a UTC
   calendar month used. `UsageAggregation.Total` excludes expired periods and labels
   partial/last-known totals. A complete total also requires fresh account state.
-- `HistoryAnalysis.Build` returns actual elapsed-time USD/hour observations, with
-  explicit reset/gap/correction markers and a text-friendly observed increase.
-  Its default maximum comparable gap is six hours; the UI can set a different
-  explicit gap policy (for example for a configured daily poll).
+- Local observations remain available for retention and diagnostics, but sampled
+  refreshes are not presented as a per-day consumption chart: the quota
+  snapshot does not supply a verified daily breakdown.
 - Configuration and alert ledgers use flush-to-disk, atomic promotion, and a recovery
   copy. Unsupported or damaged primary schemas recover visibly; two invalid copies
   fail rather than silently resetting account configuration or alert state.
