@@ -16,8 +16,8 @@
 | Packaged launch | After the user enabled Developer Mode, x64 development-package activation passed populated and empty native UI scenarios, package-local storage, and initially disabled Windows StartupTask checks. The test registration was removed afterward; no login startup or certificate trust changes were made |
 | Portable UI smoke | Populated and empty synthetic scenarios pass with the renamed Native AOT executable |
 | Production signing/release | v0.1.0 preview published successfully by Release run 36073933389; public immutable release, trusted timestamped MSIX signature, downloaded checksums, source metadata and GitHub attestations verified |
-| First Store package | v0.1.0 rebuilt from immutable released source for x64/ARM64 using Partner Center identity; unsigned bundle, publisher display name and payload validation pass. Partner Center validated the uploaded bundle; the user subsequently confirmed submitting it for certification. Store approval/publication is not yet confirmed |
-| Store Package workflow | Offline source-selection guards, PowerShell syntax and actionlint checked locally; the workflow needs to reach main before its first Actions run |
+| First Store package | v0.1.0 rebuilt from immutable released source for x64/ARM64 using Partner Center identity; unsigned bundle, publisher display name and payload validation pass. The user confirmed the initial release was published in the Store |
+| Store update tooling | Offline guards cover release selection, token acquisition failure, read-only access checks, pending drafts, published-version ordering, listing preservation, upload failure and commit. Live OIDC access to the Store API, submission and certification for v0.2.0 remain unverified |
 
 The platform suite checks explicit portable arguments, protected paths, private
 portable-directory ACLs, junction rejection, singleton readiness/activation and
@@ -72,8 +72,8 @@ foreground-permission behavior.
 - Uninstall/reset behavior for package-local data, and explicit account credential
   removal before uninstall. No generic Credential Manager cleanup is assumed.
 - ARM64 execution on ARM64 Windows hardware (cross-publishing is not execution).
-- End-to-end Store Package Actions run after merge. Store artifacts are build-only
-  and must be uploaded manually to Partner Center.
+- End-to-end Store Package and Publish Actions run after merge, including Partner
+  Center acceptance of a new update and Store certification/publication.
 - Windows App Certification Kit, Partner Center identity, privacy/listing assets,
   full-trust capability review and Store submission acceptance.
 

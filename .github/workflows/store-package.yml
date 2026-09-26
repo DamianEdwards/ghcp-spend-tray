@@ -1,4 +1,4 @@
-name: Store Package
+name: Store Package and Publish
 
 on:
   workflow_dispatch:
@@ -7,6 +7,16 @@ on:
         description: Existing immutable GitHub release version (e.g. 0.1.0, without v)
         required: true
         type: string
+      publish:
+        description: Submit the validated bundle to Partner Center for certification
+        required: true
+        type: boolean
+        default: true
+      verify_access:
+        description: Check federated Store API access without creating a submission
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,10 +27,13 @@ concurrency:
 
 jobs:
   package:
-    name: Build Store submission package
+    name: Build and optionally submit Store package
     runs-on: windows-2025
     timeout-minutes: 40
-    environment: production
+    environment: microsoft-store
+    permissions:
+      contents: read
+      id-token: write
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       STORE_ID: ${{ vars.STORE_ID }}
@@ -43,7 +56,7 @@ jobs:
           if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Store Package must be dispatched from main.' }
           foreach ($name in @('STORE_ID', 'STORE_IDENTITY_NAME', 'STORE_PUBLISHER', 'STORE_PUBLISHER_DISPLAY_NAME')) {
               if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
-                  throw "Configure $name on the production environment."
+                  throw "Configure $name on the microsoft-store environment."
               }
           }
           $release = .\tools\get-store-release.ps1 -Version $env:RELEASE_VERSION -Repository $env:GITHUB_REPOSITORY
@@ -92,7 +105,32 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-      - name: Explain the manual submission step
+      - name: Sign in to Store publishing identity using federation
+        if: ${{ inputs.publish || inputs.verify_access }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ secrets.STORE_CLIENT_ID }}
+          tenant-id: ${{ secrets.STORE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Verify access or submit Store update
+        if: ${{ inputs.publish || inputs.verify_access }}
+        shell: pwsh
+        env:
+          AZURE_CORE_OUTPUT: none
+        run: |
+          $arguments = @{
+              Bundle = ".\artifacts\store\$env:RELEASE_VERSION\GHCPSpendTray-$env:RELEASE_VERSION-store.msixbundle"
+              Version = $env:RELEASE_VERSION
+              StoreId = $env:STORE_ID
+              IdentityName = $env:STORE_IDENTITY_NAME
+              Publisher = $env:STORE_PUBLISHER
+          }
+          if ('${{ inputs.publish }}' -ne 'true') { $arguments.ValidateOnly = $true }
+          .\tools\publish-store-package.ps1 @arguments
+
+      - name: Summarize Store package
+        if: ${{ always() && steps.upload.outcome == 'success' }}
         shell: pwsh
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
@@ -100,12 +138,14 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
         run: |
           @"
-          ## Store package ready for manual submission
+          ## Store package
           - Source release: $env:RELEASE_URL
           - Source commit: ``$env:RELEASE_SOURCE_COMMIT``
           - Store product: ``$env:STORE_ID``
           - Download: $env:ARTIFACT_URL
-          - Extract the artifact ZIP and upload only ``GHCPSpendTray-$env:RELEASE_VERSION-store.msixbundle`` to Partner Center.
+          - Publish requested: ``${{ inputs.publish }}`` (check the submission step and Partner Center for the outcome).
+          - Read-only API check requested: ``${{ inputs.verify_access }}``.
+          - If publish was not requested, extract the artifact ZIP and upload only ``GHCPSpendTray-$env:RELEASE_VERSION-store.msixbundle`` manually.
           - This package uses the Store publisher and is intentionally unsigned. Microsoft signs it during Store publication.
-          - No Partner Center draft was created or changed, and nothing was submitted or published.
+          - Submission starts Store certification; it does not guarantee publication.
           "@ >> $env:GITHUB_STEP_SUMMARY
