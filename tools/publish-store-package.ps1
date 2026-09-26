@@ -25,10 +25,12 @@ if ($app.id -cne $StoreId -or $app.packageIdentityName -cne $IdentityName -or
     $app.publisherName -cne $Publisher) {
     throw 'Partner Center product identity differs from the validated Store package.'
 }
-if ($null -ne $app.pendingApplicationSubmission) {
+if ($null -ne $app.PSObject.Properties['pendingApplicationSubmission'] -and
+    $null -ne $app.pendingApplicationSubmission) {
     throw "Product $StoreId has a pending submission. Resolve it in Partner Center before publishing; no draft was changed."
 }
-if ($null -eq $app.lastPublishedApplicationSubmission -or
+if ($null -eq $app.PSObject.Properties['lastPublishedApplicationSubmission'] -or
+    $null -eq $app.lastPublishedApplicationSubmission -or
     [string]$app.lastPublishedApplicationSubmission.id -notmatch '\A[0-9]+\z') {
     throw 'The Store product needs a published submission before automated updates.'
 }
@@ -88,7 +90,8 @@ try {
         throw "Store package upload failed for submission $draftId ($($_.Exception.GetType().Name)); inspect the draft before retrying."
     }
     $current = Invoke-RestMethod -Uri $url -Headers $headers
-    if ($null -eq $current.pendingApplicationSubmission -or
+    if ($null -eq $current.PSObject.Properties['pendingApplicationSubmission'] -or
+        $null -eq $current.pendingApplicationSubmission -or
         [string]$current.pendingApplicationSubmission.id -cne [string]$draftId) {
         throw "Pending submission changed while uploading; inspect submission $draftId."
     }
