@@ -212,7 +212,7 @@ For an initial submission, complete Partner Center's pricing/availability, prope
 age ratings, privacy policy, listing text/screenshots, and notes explaining the
 full-trust tray application and how certification can evaluate its sign-in
 experience. Describe data handling and the undocumented GitHub consumption API
-accurately. The approved policy is maintained in [PRIVACY.md](PRIVACY.md).
+accurately. The approved policy is maintained in [PRIVACY.md](../PRIVACY.md).
 Partner Center also accepts the policy text directly in Properties.
 No compliance declarations or listing claims are filled automatically.
 Run the Windows App Certification Kit and resolve package/listing issues before

@@ -68,7 +68,7 @@ GHCPSpendTray currently requests `read:user` for identity and optionally
 an **undocumented GitHub endpoint** that may change or be unavailable on some
 hosts; the minimum OAuth scope for it has not been established. The app reports
 unavailable data rather than treating it as zero. See
-[validation and known limitations](VALIDATION.md).
+[validation and known limitations](docs/VALIDATION.md).
 
 ## Use and notifications
 
@@ -125,8 +125,8 @@ Set-Location ghcp-spend-tray
 AOT. Run build and publish commands sequentially because they share
 intermediates. Local `package.ps1` output is an **unsigned development bundle**,
 not the signed public release. For isolated synthetic UI checks, see
-[`VALIDATION.md`](VALIDATION.md); for release and signing details, see
-[`RELEASING.md`](RELEASING.md).
+[`VALIDATION.md`](docs/VALIDATION.md); for release and signing details, see
+[`RELEASING.md`](docs/RELEASING.md).
 
 The solution is [`GHCPSpendTray.slnx`](GHCPSpendTray.slnx). The `Core` project
 contains domain, HTTP, and storage code; the `App` project contains the Windows
