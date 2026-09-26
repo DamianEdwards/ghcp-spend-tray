@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 using Microsoft.UI.Xaml;
@@ -10,6 +11,8 @@ namespace GHCPSpendTray.App.UI;
 // A cost-first tray surface and task-oriented settings, using the user's Windows theme and native Fluent controls.
 internal static class UI
 {
+    internal static string Version => typeof(UI).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+        .InformationalVersion.Split('+', 2)[0] ?? throw new InvalidOperationException("App version is missing.");
     internal static string Money(decimal? amount) => amount is { } value ?
         "$" + value.ToString("N2", CultureInfo.GetCultureInfo("en-US")) : "Unavailable";
     internal static TextBlockElement Copy(string text) => TextBlock(text).TextWrapping().Foreground(Theme.SecondaryText);
@@ -367,6 +370,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
 
     private static Element About() => VStack(16, UI.Logo(64).HAlign(HorizontalAlignment.Left),
         TextBlock("GHCPSpendTray").FontSize(28).SemiBold(),
+        UI.Copy($"Version {UI.Version}"),
         UI.Copy("GitHub Copilot consumption, at a glance."),
         UI.Copy("Consumption is the USD value of AI credits used, not an invoice, internal finance budget, or all-product spend."),
         UI.Copy("Built with Microsoft UI Reactor, WinUI 3, and .NET Native AOT. The consumption endpoint is undocumented and may change."),

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using GHCPSpendTray.App;
@@ -24,6 +25,10 @@ try
     await app.InitializeAsync();
     Check(app.Settings.PollMinutes == 60, "exact one-hour default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
+    var buildVersion = typeof(SettingsComponent).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+        .InformationalVersion.Split('+', 2)[0];
+    Check(UI.Version == buildVersion && !string.IsNullOrWhiteSpace(UI.Version),
+        "About version matches the built application, including prerelease labels");
     using (var session = new AppSession(app, action => action()))
     {
         Check(session.Page == SettingsPage.Usage, "usage is the initial settings page");
