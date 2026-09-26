@@ -1,316 +1,142 @@
 # GHCPSpendTray
 
-A native Windows 11 tray app for monitoring Copilot AI-credit consumption across
-GitHub accounts. C#, .NET 10, Native AOT, and
-[Microsoft UI Reactor](https://microsoft.github.io/microsoft-ui-reactor/main/)
-over native WinUI 3 controls. The self-contained MSIX bundle includes the Windows App SDK:
-no separately installed .NET runtime, `gh`, WebView, or backend service is required.
+[![Install from the Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Install-0078D4?logo=microsoftstore&logoColor=white)](https://www.microsoft.com/store/productId/9PMX96TSF295)
 
-**Pre-release: initial live sign-in and consumption display confirmed by the user.**
-GHCPSpendTray embeds host-specific GHCPSpendTray public OAuth client IDs; there is no client-ID setting
-or bundled client secret. The September 23, 2026 portable github.com walkthrough
-successfully displayed consumption and allocation. Enterprise compatibility,
-live token refresh, and broader release acceptance remain unverified. See
-[VALIDATION.md](VALIDATION.md) for remaining release checks.
+GHCPSpendTray is an independent Windows 11 tray app for keeping an eye on
+GitHub Copilot AI-credit consumption. It shows per-account usage and allocation,
+recent history, and optional spending alerts without a browser tab or a hosted
+service.
+
+[Install from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295)
+&middot; [All releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases)
+&middot; [Report an issue](https://github.com/DamianEdwards/ghcp-spend-tray/issues)
+
+The app is built with C#, .NET 10 Native AOT, WinUI 3, and
+[Microsoft UI Reactor](https://microsoft.github.io/microsoft-ui-reactor/main/).
+It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
 ## Features
 
-- Multiple GitHub.com and enterprise accounts with device-code sign-in.
-- Cost-first flyout anchored above the tray icon, per-account meters, and 24-hour history.
-- Windows 11-style settings for accounts, preferences, and notifications.
-- Percentage alerts and optional per-account alerts for every $N consumed.
-- Windows Credential Manager token storage and local, versioned history.
-- Per-user MSIX installation, opt-in Windows startup task, and isolated development mode.
-- One signed MSIX bundle containing x64 and ARM64 Native AOT builds.
+- A tray flyout with per-account consumption, allocation meters, and 24-hour
+  history.
+- Multiple accounts, including different identities on the same GitHub host.
+- Configurable refresh intervals and percentage or per-account USD-increment
+  notifications.
+- Local history and settings, with OAuth tokens in Windows Credential Manager.
+- Opt-in launch at Windows startup.
 
 ## Install
 
-Download `GHCPSpendTray-<version>.msixbundle` from
+Requires Windows 11 22H2 (build 22621) or newer on x64 or ARM64.
+
+Install [GHCPSpendTray from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295),
+then start it from the Start menu. It stays in the notification area.
+
+Alternatively, download `GHCPSpendTray-<version>.msixbundle` from
 [GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases),
-open it in Windows App Installer, and choose **Install**. Launch **GHCPSpendTray**
-from Start. Windows 11 22H2 (build 22621) or newer is required.
+open the signed bundle in Windows App Installer, and select **Install**.
+The bundle contains both architectures; the symbols archive is for debugging,
+not installation. Do not bypass Windows trust or organization-policy warnings.
 
-GitHub builds do not check for updates. Exit the tray app and install a newer
-signed bundle with the same identity to update it; settings and history are
-preserved. Store distribution and Store-managed updates are planned, not yet enabled.
-Do not bypass Windows trust or policy warnings.
+To update a GitHub-installed copy, exit the app from its tray menu and install a
+newer signed bundle from Releases. GitHub-distributed builds do not check for
+updates automatically. An update with the same package identity preserves
+settings and history. The Microsoft Store package has a separate identity and
+is **not** an in-place upgrade from the GitHub package.
 
-For maintainer setup, Azure Artifact Signing, release automation, and reserving
-the Store name, see [RELEASING.md](RELEASING.md).
-The **Store Package** workflow prepares a separate unsigned, Store-identity bundle
-from an immutable GitHub release for manual Partner Center upload. It does not
-submit or publish the app; Partner Center submission remains manual.
+## Connect an account
 
-See the [privacy policy](PRIVACY.md) for data handling, retention and removal.
+1. Open the tray flyout and choose the connect button, or open
+   **Settings > Accounts > Add account**.
+2. Enter the GitHub host and check the authentication and API destinations
+   displayed by the app. Start device sign-in, then enter the displayed code on
+   the host's GitHub authorization page in your browser. Verify the OAuth app
+   shown on the consent screen before approving it.
+3. Confirm the GitHub login and user ID displayed by GHCPSpendTray, then save.
 
-## Build
+The app has a built-in public OAuth registration for `github.com`; it does not
+use `gh` credentials or ask for a client secret.
+Enterprise hosts without a built-in registration require an approved
+host-specific OAuth registration added to the app before sign-in is available;
+there is no user-configurable client ID. Enterprise SSO, managed-user, IP,
+and application policies may require administrator approval. Successfully
+signing in to a host does not establish that its Copilot consumption API
+is available.
 
-Install the SDK pinned in `global.json` (`10.0.401`) and Visual Studio
-C++ build tools, including the Windows SDK and ARM64 native tools. From PowerShell:
+GHCPSpendTray currently requests `read:user` for identity and optionally
+`offline_access` for refresh tokens where supported. Consumption comes from
+an **undocumented GitHub endpoint** that may change or be unavailable on some
+hosts; the minimum OAuth scope for it has not been established. The app reports
+unavailable data rather than treating it as zero. See
+[validation and known limitations](VALIDATION.md).
+
+## Use and notifications
+
+Left-click the tray icon to open the flyout; right-click it for **Open**,
+**Refresh now**, **Settings**, and **Exit**. Settings include account management,
+refresh preferences, and notification thresholds. The default refresh interval
+is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
+are 50%, 80%, and 100%.
+
+In **Settings > Notifications**, you can also set a USD increment (for example,
+`50` for alerts at $50, $100, and so on). An account can inherit that value,
+override it, or disable it. Unknown or unlimited allocations can still use
+dollar alerts, but not percentage alerts. Windows may suppress a notification
+even when the app submits it.
+
+Displayed USD consumption is `credits_used / 100` from GitHub's token-billing
+quota data. It is **not** an invoice, a finance budget, or total spend across all
+GitHub products. Stale or partial observations are identified; previous billing
+periods are not counted as current spend.
+
+## Privacy and removal
+
+GHCPSpendTray talks directly to your GitHub host over HTTPS. It does not send
+account data or diagnostic logs to a developer-operated backend. Settings and
+history are stored locally; access and refresh tokens are held in Windows
+Credential Manager. Use **Settings > General > Open data folder** to find your
+local files. See the [privacy policy](PRIVACY.md) for retention and data handling.
+
+Before uninstalling, remove accounts in the app to delete their locally stored
+credentials. To revoke an OAuth grant, use **Manage OAuth grants** in account
+details or the host's application settings; removing an account or uninstalling
+does not necessarily revoke it. Then exit the app and uninstall through
+**Windows Settings > Apps > Installed apps**. Windows normally removes
+package-local data, but generic Credential Manager entries may remain.
+
+If sign-in or consumption fails, check the displayed host destinations and
+error, your organization's policy, and the app's bounded `logs` directory in
+the data folder. Do not post tokens, device codes, unredacted configuration or
+history, or private consumption details in public issues.
+
+## Build and contribute
+
+Install the .NET SDK pinned in [`global.json`](global.json), Visual Studio
+C++ build tools, the Windows SDK, and ARM64 native tools. From PowerShell:
 
 ```powershell
 git clone https://github.com/DamianEdwards/ghcp-spend-tray.git
 Set-Location ghcp-spend-tray
 .\tools\verify.ps1
 .\tools\package.ps1
-.\tools\smoke-test.ps1
-.\tools\smoke-test.ps1 -Empty
 ```
 
-Use `.\tools\verify.ps1 -NativeTests` to run all three suites under both JIT and
-executed x64 Native AOT. Run build/publish commands sequentially because they
-share project intermediates.
+`verify.ps1 -NativeTests` also runs the test suites under executed x64 Native
+AOT. Run build and publish commands sequentially because they share
+intermediates. Local `package.ps1` output is an **unsigned development bundle**,
+not the signed public release. For isolated synthetic UI checks, see
+[`VALIDATION.md`](VALIDATION.md); for release and signing details, see
+[`RELEASING.md`](RELEASING.md).
 
-The local output is `artifacts\release\GHCPSpendTray-0.1.0.msixbundle`, unsigned
-and using a development identity. It is not a public installable release.
-`package.ps1` publishes both architectures, creates source-defined packages with
-the Windows SDK's `MakeAppx`, bundles them, and validates the identity, startup
-declaration, architecture and native payload. `publish.ps1` builds only the
-self-contained payloads. The release workflow supplies the production identity
-and signs the bundle.
-
-The build references only the Windows App SDK UI components from the 2.5.1 release:
-WinUI `2.3.9`, Interactive Experiences `2.1.9`, and DWrite `2.1.0`, with Base and
-Foundation supplied transitively. These component versions are independently
-numbered, not downgrades. The umbrella `Microsoft.WindowsAppSDK` package is
-intentionally absent because it adds AI, ML, Search, and Widgets.
-
-`tools\publish.ps1` rejects those optional packages and their large DLLs if they
-reappear. It keeps all locale resources, PRI/XBF files, and necessary UI runtime
-DLLs. Debug symbols are preserved separately in `artifacts\symbols\<runtime>`,
-not in the application folder or MSIX. Each publish starts with a clean generated
-payload directory to avoid including obsolete dependencies.
-
-Uncompressed publish folders contain:
-`artifacts\publish\win-x64\GHCPSpendTray.exe` and
-`artifacts\publish\win-arm64\GHCPSpendTray.exe`. Use the matching architecture. The
-original rising-bars icon is generated by `python tools\generate-icon.py`; its
-generated `.ico` is included in the project, so Python is not a build prerequisite.
-For the GitHub OAuth application logo, upload
-`src\GHCPSpendTray.App\Assets\ghcpspendtray-badge.png` (512 x 512, opaque emerald background)
-and set the badge background color to `#0C7959`. This avoids a transparent
-inner-circle edge showing as a fringe after image resizing.
-A transparent standalone logo and SVG are included alongside it. Regenerate all with
-`python tools\generate-logo.py`; the emerald-and-ivory artwork is original.
-The smoke test runs only in an isolated portable directory with synthetic
-accounts, submits a synthetic Windows notification, round-trips and deletes a
-uniquely named synthetic Credential Manager entry, and verifies the real GHCPSpendTray
-startup value is unchanged. It never calls live OAuth or consumption endpoints.
-With Developer Mode already enabled, an explicitly approved local package test is:
-
-```powershell
-powershell.exe -NoProfile -File .\tools\smoke-test-package.ps1
-```
-
-It registers only `GHCPSpendTray.Development`, runs synthetic populated and empty
-UI checks through packaged activation and package-local storage, reads (but never
-enables) its Windows startup task, and unregisters the package in `finally`.
-It refuses to replace an existing development registration and never changes
-Developer Mode or certificate trust.
-Use `--demo` together with portable arguments for an interactive synthetic preview,
-or `--demo-empty` for the first-account experience. The .NET 10 target was selected
-after a successful native startup proof; the former .NET 11 RC1 compiler failed
-on Reactor. See `VALIDATION.md` for details.
-
-## Add accounts
-
-1. Open the gear button, then **Accounts > Add account** (or click the large connect
-   button in an empty flyout). Enter the GitHub host and inspect the resolved
-   authentication and API destinations. There is no client ID to enter and no
-   separate app registration to create.
-2. Start device sign-in, copy the displayed code, and open the browser.
-   Verify the project-owned OAuth application on GitHub's consent screen.
-   Its display name is configured on each host, not by the installed app.
-3. After authorization, confirm the verified login and immutable user ID before
-   saving. Enterprise managed users, SSO, IP restrictions, and app policies still
-   apply; obtain administrator approval where required.
-
-The project-owned GHCPSpendTray registrations are selected automatically by normalized
-host, without a client-ID field:
-
-| Authentication host | Public OAuth client ID |
-|---|---|
-| `github.com` | `Ov23ctzkXY5CJhfKQo7T` |
-| `msft.ghe.com` | `Ov23ox38SoD1bIpzU9zZ` |
-
-The github.com application was registered on September 23, 2026 with Device Flow
-and expiring access tokens enabled. Registration succeeded with **no redirect URI**;
-device authorization does not require a callback URL or local callback server.
-Device authorization, token polling, refresh, and credential storage use the
-selected host's registration consistently. No existing
-`gh` credentials are read and `gh` does not need to be installed.
-
-Credential targets include the OAuth client ID so tokens are never reused across
-registrations. No credentials belonging to `gh` or other applications are used.
-
-Other GHE.com tenants and GHES hosts need an approved registration added to
-`GitHubOAuth.ResolveClientId` before authentication is available. Unregistered
-hosts are rejected before any device request rather than using the github.com
-client ID as a fallback. There is no user-configurable per-host override.
-Adding a registration does not establish enterprise policy approval or quota access.
-If sign-in fails before a device code appears, that is a device-authorization
-failure, not a finding that Copilot consumption is unsupported. HTTP 404/501
-errors identify the failing endpoint. Check registration and Device Flow support
-on the selected host with its administrator; changing quota scopes will not
-repair an unrecognized registration.
-
-**Scope evidence:** the initial implemented scope is `read:user` for basic identity.
-This is a starting hypothesis, **not an experimentally established minimum for
-`/copilot_internal/user`**. No `repo`, billing-administration, or broad organization
-scope is requested. The optional `offline_access` checkbox requests an expiring
-token and refresh token where supported. Current
-[GitHub OAuth documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)
-documents device flow, `offline_access`, and secretless refresh for device-issued
-tokens. It does **not** guarantee access to the undocumented quota endpoint.
-No `repo`, `read:org`, or `gist` scopes are added.
-If the host rejects this OAuth application, the error remains visible; there is
-no configurable alternative client ID or automatic scope escalation.
-
-Hosts map as follows:
-
-| Account host | Authentication | API |
-|---|---|---|
-| `github.com` | `https://github.com` | `https://api.github.com` |
-| `TENANT.ghe.com` | `https://TENANT.ghe.com` | `https://api.TENANT.ghe.com` |
-| GHES `HOST[:port]` | `https://HOST[:port]` | `https://HOST[:port]/api/v3` |
-
-GHES authentication success does not imply Copilot consumption API support. The
-app reports unavailable capabilities rather than recording zero. Authenticated
-requests do not automatically follow redirects.
-
-## Daily use
-
-Left-click or keyboard-activate the tray icon for a flyout directly above it.
-Activation always opens or focuses the flyout; repeated or duplicate tray
-notifications do not toggle it closed.
-The flyout centers on the icon where space permits and stays within the monitor's
-work area, falling below a top-edge icon when needed. Click elsewhere or press
-Escape to dismiss it. The gear opens a separate settings window with General,
-Accounts, Notifications, and About pages. Right-click the tray icon for Open,
-Refresh now, Settings, and Exit. Closing Settings does not exit the tray app.
-
-Accounts are keyed by normalized host and immutable GitHub user ID: different
-identities on the same host coexist, while adding the same identity again cannot
-double-count it. Account settings provide an optional display name and per-account
-alert thresholds. Blank account thresholds inherit global defaults.
-Account details show consumption and the allocation meter first. **Spending
-history** and **Advanced details** start collapsed; expand Advanced details for
-a labeled table of raw credits, source/fetch timestamps, billing reset, and next
-refresh. Stale data and account/storage errors remain visible without expanding
-anything.
-
-Polling defaults to **60 minutes**, configurable from 5 through 1440. Alerts
-default to **50%, 80%, and 100%** of each account's allocation. Changes apply
-without restart. Crossing multiple thresholds emits one highest-threshold
-notification and records all reached thresholds for that billing period.
-Windows can suppress notifications even after accepting submission. Shell
-notifications do not guarantee Notification Center history or activation after
-the program exits.
-
-**Spending increments:** in **Settings > Notifications**, set a default USD
-increment such as `50` to notify independently for each account at $50, $100,
-$150, and so on. Blank or `0` disables this feature. In **Accounts > Manage**,
-inherit that default or enter an account-specific increment (`0` disables it for
-that account). Values support two decimal places. Unknown/unlimited allocations
-still support dollar alerts because no allocation denominator is needed.
-
-A jump over several dollar milestones emits one notification for the highest.
-Percentage and dollar crossings in the same observation share one notification.
-The highest submitted dollar level is persisted per account and billing period;
-restarts, corrections, or changing the increment do not re-notify dollar levels
-already reported. The next new level can alert. Enabling increments after spend
-has accumulated emits one current-state milestone on the next successful sample.
-All dollar levels rearm in a new billing period.
-
-Consumption is `credits_used / 100` USD, and allocation consumption is
-`credits_used / entitlement * 100`. These decimal calculations use the
-undocumented token-billing quota fields, **not** rounded `percent_remaining`.
-Consumption value is not an invoice, internal finance budget, or all-product spend.
-Unknown or unlimited allocations do not generate percentage alerts.
-
-Totals distinguish complete data from stale/partial last-known observations.
-Previous-period cached consumption is never included as current spend. The graph
-shows observed USD/hour using actual elapsed time between successful polls,
-with textual history alongside it. Billing resets, corrections, and long gaps
-are not fabricated into continuous spend.
-
-## Installation and data
-
-Windows owns the read-only installation directory, Start menu entry, upgrades,
-and removal. Data is in the package's local application data folder:
-`%LOCALAPPDATA%\Packages\<package-family-name>\LocalState\Data`.
-Use **Settings > General > Open data folder** to find the actual location.
-There is no migration from another installation format.
-
-**Start with Windows** is opt-in and uses a manifest-declared Windows
-`StartupTask`, not a Run registry value. The setting reflects Windows state,
-including user and organization policy restrictions. If disabled externally,
-use **Open Windows startup settings** to re-enable it; the app cannot override
-that choice. Login launch stays in the tray without opening a flyout.
-
-A repeated launch activates the running instance. Quit from the tray menu before
-updating. GHCPSpendTray does not modify package files or bypass OS warnings.
-
-For isolated development, use **portable mode** with an absolute data folder:
-
-```powershell
-.\artifacts\publish\win-x64\GHCPSpendTray.exe --portable --data-dir D:\Scratch\GHCPSpendTray-test
-```
-
-Portable mode isolates the data folder and disables startup registration. Do not point it at
-your real data directory for tests. Normal account onboarding still uses Windows
-Credential Manager; do not authorize real accounts in an isolated smoke test.
-
-Configuration and alert state are versioned JSON, with atomic replacement and
-recovery copies. History is per-account/per-month JSONL with 90-day retention.
-Credentials are versioned access/refresh-token payloads in Windows Credential
-Manager, not plaintext configuration. Logs are bounded and record diagnostic
-categories, not tokens, device codes, account identities, or financial values.
-Configuration and history themselves contain account/consumption data; protect
-the data folder and include it in your own backup/privacy policy.
-
-## Removal and troubleshooting
-
-Remove each account through GHCPSpendTray to delete its local credential. Local removal
-is not necessarily OAuth grant revocation: **Edit account > Manage OAuth grants**
-opens the host's application settings for revocation. Then **Exit** and uninstall
-through **Windows Settings > Apps > Installed apps**. Windows removes the package
-and its startup registration; package-local data is normally removed on uninstall
-or reset. Treat it as removable app state and back up history if needed.
-Generic Credential Manager entries are not guaranteed to be removed by MSIX:
-remove accounts in the app first, or manually remove only this app's
-`GHCPSpendTray/` entries. Never delete unrelated credentials.
-
-Sign-in required means reauthenticate; a policy/SSO restriction requires the
-appropriate host administrator. Unsupported schema or non-token billing must not
-be interpreted as zero consumption. Storage failures are actionable errors:
-check permissions, free space, and the app's bounded `logs` directory. Do not send
-tokens or unredacted config/history as diagnostic reports.
-
-See [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) for the implementation scope.
-[VALIDATION.md](VALIDATION.md) records actual evidence and remaining
-release gates. GHCPSpendTray's icon is original; it does not use GitHub's logo or imply
-GitHub endorsement.
-
-## Contributing
-
-The solution is `GHCPSpendTray.slnx`: `src\GHCPSpendTray.App\UI` contains Reactor components
-and window coordination, `src\GHCPSpendTray.App\Native` contains only the Shell integration,
-and `src\GHCPSpendTray.App\Platform` contains Windows services.
-`src\GHCPSpendTray.App` contains the application controller
-and Windows services; `src\GHCPSpendTray.Core` contains the testable domain, HTTP, and
-storage code; `tests` contains package-free executable test harnesses.
-
-Use `.\tools\verify.ps1` before submitting changes. Changes to native interop or
-serialization should also pass `.\tools\verify.ps1 -NativeTests` and Native AOT
-publishing. Test installation changes in isolated locations, not against your
-real profile or startup settings. Never include credentials, device codes, or
-real account/consumption data in issues, fixtures, or commits.
+The solution is [`GHCPSpendTray.slnx`](GHCPSpendTray.slnx). The `Core` project
+contains domain, HTTP, and storage code; the `App` project contains the Windows
+UI and platform integration; `tests` contains executable test harnesses.
+Please run `.\tools\verify.ps1` before proposing changes, and use synthetic
+data in tests and issue reports.
 
 ## License
 
 [MIT](LICENSE). Copyright (c) 2026 Damian Edwards.
 
-GHCPSpendTray is an independent project and is not affiliated with or endorsed by
-GitHub. Reactor, Windows App SDK, and .NET components included in the distribution retain their
-own applicable licenses and third-party notices.
+GHCPSpendTray is not affiliated with or endorsed by GitHub. Included .NET,
+Windows App SDK, and Reactor components retain their own applicable licenses.

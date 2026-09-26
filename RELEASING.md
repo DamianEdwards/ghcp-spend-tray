@@ -106,9 +106,15 @@ checked-in artwork, not for CI builds.
 
 ## Release a version
 
+On Markdown-only pushes and pull requests, **Verify / Verification** lints
+Markdown without running the SDK setup, build, tests, or packaging. Other
+changes and manual Verify runs perform the full checks; the Release workflow
+also verifies its source before publishing.
+
 1. Merge to `main` and wait for **Verify / Verification** to succeed for the
-   exact source commit. It runs JIT and x64 Native AOT tests, publishes both
-   architectures, and builds and validates an unsigned development bundle.
+   exact source commit. For non-Markdown changes, it runs JIT and x64 Native
+   AOT tests, publishes both architectures, and builds and validates an unsigned
+   development bundle.
 2. Run **Actions > Release > Run workflow** from `main`. Supply an increasing
    three-part version, such as `0.2.0`, and select whether it is a prerelease.
    Every release, including previews, needs a higher numeric package version;
