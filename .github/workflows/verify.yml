@@ -22,16 +22,51 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Check whether source changed
+        id: changes
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            'run_validation=true' >> $env:GITHUB_OUTPUT
+            'lint_markdown=false' >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ($env:BASE_SHA -eq ('0' * 40)) {
+            $paths = @(git ls-files)
+          } elseif ($env:EVENT_NAME -eq 'pull_request') {
+            $paths = @(git diff --no-renames --name-only "$env:BASE_SHA...$env:HEAD_SHA")
+          } else {
+            $paths = @(git diff --no-renames --name-only $env:BASE_SHA $env:HEAD_SHA)
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect changed files.' }
+          $runValidation = @($paths | Where-Object { $_ -notmatch '\.(md|markdown)$' }).Count -gt 0
+          $lintMarkdown = @($paths | Where-Object { $_ -match '\.(md|markdown)$' }).Count -gt 0
+          "run_validation=$($runValidation.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "lint_markdown=$($lintMarkdown.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+      - name: Lint Markdown
+        if: steps.changes.outputs.lint_markdown == 'true'
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.{md,markdown}"
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        if: steps.changes.outputs.run_validation == 'true'
         with:
           global-json-file: global.json
       - name: Verify managed and Native AOT tests
+        if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: .\tools\verify.ps1 -NativeTests
       - name: Build and validate both MSIX architectures
+        if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: .\tools\package.ps1
       - name: Retain unsigned development bundle
+        if: steps.changes.outputs.run_validation == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: unsigned-development-msix
@@ -39,6 +74,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Exercise Store packaging without credentials or submission
+        if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: |
           $publisher = 'CN=11111111-1111-1111-1111-111111111111'
