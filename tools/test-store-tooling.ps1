@@ -65,6 +65,12 @@ try {
         throw 'An empty workflow version input did not select the latest release.'
     }
     Reset-Fixture
+    $state.Fixture.release.body = "## What's Changed`r`n`r`n* Cache account avatars and refresh them from account settings by @DamianEdwards in https://github.com/DamianEdwards/ghcp-spend-tray/pull/26`r`n`r`n`r`n**Full Changelog**: https://github.com/DamianEdwards/ghcp-spend-tray/compare/v0.0.1...v0.1.0"
+    $withFooter = & $selector -Version '0.1.0'
+    if ($withFooter.StoreReleaseNotes -cne "What's new in 0.1.0`n- Cache account avatars and refresh them from account settings") {
+        throw 'GitHub-generated full changelog footer was not excluded from Store release notes.'
+    }
+    Reset-Fixture
     $rejectedWhitespace = $false
     try { & $selector -Version ' ' | Out-Null }
     catch { $rejectedWhitespace = $true }
@@ -89,6 +95,9 @@ try {
     Assert-Rejected { $state.Fixture.release.tag_name = 'v0.2.0' }
     Assert-Rejected { $state.Fixture.release.body = 'No changes' }
     Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n* Unknown entry" }
+    Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n**Full Changelog**: https://github.com/DamianEdwards/ghcp-spend-tray/compare/v0.0.1...v0.1.0" }
+    Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n* Valid by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/1`n**Full Changelog**: invalid" }
+    Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n* Valid by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/1`n**Full Changelog**: https://github.com/DamianEdwards/ghcp-spend-tray/compare/v0.0.1...v0.1.0`n* Unexpected by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/2" }
     Assert-Rejected { $state.Fixture.release.body = "## What's Changed`n* $(-join ('A' * 1510)) by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/1" }
     Assert-Rejected { $state.Fixture.release.assets = @($state.Fixture.release.assets[0]) }
     Assert-Rejected { $state.Fixture.release.assets = @($state.Fixture.release.assets[1]) }
