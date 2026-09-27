@@ -133,18 +133,19 @@ try
     var config = await Load();
     Check(config.Accounts.Length == 3 && credentials.Values.Count == 3, "three distinct persisted credentials/accounts");
     Check(config.Accounts.Select(a => a.Key).Distinct().Count() == 3, "immutable identity keys");
-    Check(config.Accounts.All(a => a.AvatarUrl is not null), "identity avatar URLs persisted for each host");
-    Check(config.Accounts.Single(a => a.Key == "msft.ghe.com:3").AvatarUrl ==
-        "https://avatars.msft.ghe.com/u/3", "enterprise avatar stays on its own tenant");
+    Check(config.Accounts.All(a => a.AvatarUrl is null), "signed avatar URLs are not persisted");
     string persistedSettings = await File.ReadAllTextAsync(Path.Combine(root, "config.json"));
     Check(!persistedSettings.Contains("clientId", StringComparison.OrdinalIgnoreCase), "client ID is not configurable in persisted settings");
+    Check(!persistedSettings.Contains("synthetic-avatar-token", StringComparison.Ordinal),
+        "signed avatar token is never written to settings");
     Check(Volatile.Read(ref view)!.Total.Contains("$53.25"), "three-account consumption total");
     var summary = Volatile.Read(ref view)!.Accounts.Single(account => account.Key == "github.com:1");
-    Check(summary.AvatarUrl == "https://avatars.githubusercontent.com/u/1?v=4",
-        "flyout and settings share the account avatar URL");
+    string? picture = summary.AvatarUrl;
+    Check(picture is not null && File.Exists(picture) &&
+        !picture.Contains("fixture", StringComparison.Ordinal), "flyout and settings use a cached image path");
     Check(GHCPSpendTray.App.UI.UI.AccountPicture(summary, 36) is PersonPictureElement
-        { ProfilePicture: "https://avatars.githubusercontent.com/u/1?v=4" },
-        "avatar URL reaches the native person picture");
+        { ProfilePicture: var profile } && profile == picture,
+        "cached image reaches the native person picture");
     Check(GHCPSpendTray.App.UI.UI.AccountPicture(summary with { AvatarUrl = null }, 36) is PersonPictureElement
         { ProfilePicture: null, DisplayName: "test-1" },
         "missing avatar uses the native initials fallback");
@@ -186,6 +187,41 @@ try
     };
     await app.RefreshAsync("msft.ghe.com:3");
     Check(handler.RefreshRequests == 2, "enterprise token refreshed with enterprise registration");
+    string originalAvatar = Volatile.Read(ref view)!.Accounts.Single(a => a.Key == "msft.ghe.com:3").AvatarUrl!;
+    handler.AvatarRevision = 2;
+    await app.RefreshAccountAsync("msft.ghe.com:3");
+    string updatedAvatar = Volatile.Read(ref view)!.Accounts.Single(a => a.Key == "msft.ghe.com:3").AvatarUrl!;
+    Check(updatedAvatar != originalAvatar && File.Exists(updatedAvatar) &&
+        File.ReadAllBytes(updatedAvatar).Last() == 2, "account refresh downloads a new enterprise avatar");
+    Check(new AvatarCache(http, root).GetPath(config.Accounts.Single(a => a.Key == "msft.ghe.com:3")) == updatedAvatar,
+        "cached avatar survives controller restart");
+    handler.FailAvatar = true;
+    await Throws<AppOperationException>(() => app.RefreshAccountAsync("msft.ghe.com:3"));
+    handler.FailAvatar = false;
+    Check(new AvatarCache(http, root).GetPath(config.Accounts.Single(a => a.Key == "msft.ghe.com:3")) == updatedAvatar,
+        "failed refresh preserves the previous cached image");
+    handler.AvatarRevision = 3;
+    using (var accountSession = new AppSession(app, action => action()))
+    {
+        accountSession.RefreshAccount("msft.ghe.com:3");
+        await Until(() => !accountSession.Busy);
+        Check(accountSession.Error is null && new AvatarCache(http, root)
+            .GetPath(config.Accounts.Single(a => a.Key == "msft.ghe.com:3")) != updatedAvatar,
+            "account-page refresh action updates the avatar");
+    }
+    var cache = new AvatarCache(http, root);
+    var account3 = config.Accounts.Single(a => a.Key == "msft.ghe.com:3");
+    await Throws<InvalidDataException>(() => cache.UpdateAsync(account3, "https://other.ghe.com/u/3"));
+    await Throws<InvalidDataException>(() => cache.UpdateAsync(account3, "http://msft.ghe.com/avatars/u/3"));
+    handler.RedirectAvatar = true;
+    await Throws<HttpRequestException>(() => cache.UpdateAsync(account3,
+        "https://msft.ghe.com/avatars/u/3?token=synthetic-avatar-token&size=64"));
+    handler.RedirectAvatar = false;
+    handler.InvalidAvatar = true;
+    await Throws<InvalidDataException>(() => cache.UpdateAsync(account3,
+        "https://msft.ghe.com/avatars/u/3?token=synthetic-avatar-token&size=64"));
+    handler.InvalidAvatar = false;
+    Check(cache.GetPath(account3) is not null, "rejected avatar response does not replace the cached image");
     Check(handler.OAuthRequests >= 14 &&
         handler.OAuthClientIds.Count(id => id == "Ov23ox38SoD1bIpzU9zZ") == 3 &&
         handler.OAuthClientIds.All(id => id is "Ov23ctzkXY5CJhfKQo7T" or "Ov23ox38SoD1bIpzU9zZ"),
@@ -193,8 +229,9 @@ try
     await Add("MSFT.GHE.COM", "3", "msft.ghe.com:3");
     Check((await Load()).Accounts.Length == 3 && credentials.Values.Count == 3,
         "enterprise reconnect preserves account and credential partition");
-    Check((await Load()).Accounts.Single(a => a.Key == "msft.ghe.com:3").AvatarUrl ==
-        "https://avatars.msft.ghe.com/u/3", "reconnect retains updated avatar");
+    Check((await Load()).Accounts.Single(a => a.Key == "msft.ghe.com:3").AvatarUrl is null &&
+        new AvatarCache(http, root).GetPath(config.Accounts.Single(a => a.Key == "msft.ghe.com:3")) is not null,
+        "reconnect retains a local avatar without a signed URL");
     await app.SaveAccountAsync("github.com:2", "Work", "15, 120");
     await app.RefreshAsync("github.com:2");
     Check(notifications == 3, "new override below consumption alerts once");
@@ -212,10 +249,10 @@ try
     await Add("team.ghe.com", "5", clientId: "team-registration");
     var customSaved = (await Load()).Accounts.Single(a => a.Key == "team.ghe.com:5");
     Check(customSaved.OAuthClientId == "team-registration" &&
-        customSaved.AvatarUrl == "https://avatars.team.ghe.com/u/5",
-        "custom registration and host-scoped avatar survive settings round trip");
+        customSaved.AvatarUrl is null && new AvatarCache(http, root).GetPath(customSaved) is not null,
+        "custom registration and cached avatar survive settings round trip");
     await Until(() => Volatile.Read(ref view)?.Accounts.Any(a =>
-        a.Key == "team.ghe.com:5" && a.AvatarUrl == customSaved.AvatarUrl) == true);
+        a.Key == "team.ghe.com:5" && a.AvatarUrl == new AvatarCache(http, root).GetPath(customSaved)) == true);
     Check(app.AccountClientId("team.ghe.com:5") == "team-registration", "reconnect reads saved registration");
     var teamAccount = (await Load()).Accounts.Single(a => a.Key == "team.ghe.com:5");
     var teamTarget = new VaultCredentials(null).Target(teamAccount);
@@ -231,17 +268,22 @@ try
     await Add("team.ghe.com", "5", "team.ghe.com:5", "team-registration");
     await app.RemoveAsync("team.ghe.com:5");
     Check(!(await Load()).Accounts.Any(a => a.Key == "team.ghe.com:5") &&
-        !credentials.Values.ContainsKey("team.ghe.com:5"), "custom account removal clears its credentials");
+        !credentials.Values.ContainsKey("team.ghe.com:5") &&
+        new AvatarCache(http, root).GetPath(customSaved) is null, "custom account removal clears credentials and avatar");
     string legacyRoot = Path.Combine(root, "legacy");
     var legacyStore = new JsonStore(legacyRoot);
     await legacyStore.SaveSettingsAsync(new AppSettings { Accounts =
     [
-        new Account { Host = "team.ghe.com", UserId = "5", Login = "synthetic" },
+        new Account { Host = "team.ghe.com", UserId = "5", Login = "synthetic",
+            AvatarUrl = "https://team.ghe.com/avatars/u/5?token=synthetic-avatar-token" },
         new Account { Host = "team.ghe.com", UserId = "6", Login = "synthetic" }
     ] });
     using (var legacyApp = new ApplicationController(legacyRoot, true, http, new MemoryCredentials()))
     {
         await legacyApp.InitializeAsync();
+        Check((await legacyStore.LoadSettingsAsync()).Value.Accounts.All(a => a.AvatarUrl is null) &&
+            !File.ReadAllText(Path.Combine(legacyRoot, "config.json.bak")).Contains("synthetic-avatar-token", StringComparison.Ordinal),
+            "startup migrates signed avatar URLs out of settings and recovery copy");
         Check(legacyApp.AccountClientId("team.ghe.com:5") is null,
             "legacy unsupported host remains loadable without guessing a registration");
         await legacyApp.RemoveAsync("team.ghe.com:6");
@@ -304,12 +346,30 @@ sealed class MemoryCredentials : ICredentialStore
 sealed class FixtureHttp : HttpMessageHandler
 {
     internal string NextIdentity { get; set; } = "1";
+    internal byte AvatarRevision { get; set; } = 1;
+    internal bool FailAvatar { get; set; }
+    internal bool RedirectAvatar { get; set; }
+    internal bool InvalidAvatar { get; set; }
     internal int RefreshRequests { get; private set; }
     internal int OAuthRequests => OAuthClientIds.Count;
     internal List<string> OAuthClientIds { get; } = [];
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var uri = request.RequestUri!;
+        if (uri.AbsolutePath.StartsWith("/u/", StringComparison.Ordinal) ||
+            uri.AbsolutePath.StartsWith("/avatars/u/", StringComparison.Ordinal))
+        {
+            if (request.Headers.Authorization is not null || uri.Query != "?token=synthetic-avatar-token&size=64")
+                throw new InvalidOperationException("Avatar request must use only its signed URL.");
+            if (FailAvatar) return new(HttpStatusCode.Forbidden);
+            if (RedirectAvatar) return new(HttpStatusCode.Redirect);
+            return new(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(InvalidAvatar
+                    ? "not an image"u8.ToArray() : [137, 80, 78, 71, 13, 10, 26, 10, AvatarRevision])
+                { Headers = { ContentType = new("image/png") } }
+            };
+        }
         Dictionary<string, string> form = [];
         if (request.Method == HttpMethod.Post)
         {
@@ -355,9 +415,9 @@ sealed class FixtureHttp : HttpMessageHandler
             {
                 var avatar = id switch
                 {
-                    "3" => "https://avatars.msft.ghe.com/u/3",
-                    "5" => "https://avatars.team.ghe.com/u/5",
-                    _ => $"https://avatars.githubusercontent.com/u/{id}?v=4"
+                    "3" => "https://msft.ghe.com/avatars/u/3?token=synthetic-avatar-token&size=64",
+                    "5" => "https://avatars.team.ghe.com/u/5?token=synthetic-avatar-token&size=64",
+                    _ => $"https://avatars.githubusercontent.com/u/{id}?token=synthetic-avatar-token&size=64"
                 };
                 json = $$"""{"id":{{id}},"login":"test-{{id}}","avatar_url":"{{avatar}}"}""";
             }

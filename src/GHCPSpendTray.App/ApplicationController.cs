@@ -14,7 +14,9 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     private readonly HttpClient _http;
     private readonly ICredentialStore _credentials;
     private readonly DeviceFlowClient _auth;
+    private readonly TokenManager _tokens;
     private readonly CopilotUsageProvider _usage;
+    private readonly AvatarCache _avatars;
     private readonly AlertService _alerts;
     private StartupRegistration? _startup;
     private readonly SemaphoreSlim _mutations = new(1, 1);
@@ -26,6 +28,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     private Task? _initialization, _clock;
     private Func<string, string, string, Task<bool>>? _notify;
     private string? _storageDiagnostic;
+    private string? _avatarDiagnostic;
     private bool _disposed;
     public string DataDirectory { get; }
     public bool Portable { get; }
@@ -39,7 +42,9 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         _http = http ?? HttpTransport.CreateClient();
         _credentials = credentials ?? new VaultCredentials(portable ? directory : null);
         _auth = new DeviceFlowClient(_http);
-        _usage = new CopilotUsageProvider(_http, new TokenManager(_credentials, _auth));
+        _tokens = new TokenManager(_credentials, _auth);
+        _usage = new CopilotUsageProvider(_http, _tokens);
+        _avatars = new AvatarCache(_http, directory);
         _alerts = new AlertService(_store, this);
         NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
     }
@@ -61,6 +66,17 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             var result = await _store.LoadSettingsAsync(_stop.Token).ConfigureAwait(false);
             _settings = result.Value;
             if (result.Diagnostics.Length > 0) _storageDiagnostic = string.Join(" ", result.Diagnostics);
+            if (_settings.Accounts.Any(a => a.AvatarUrl is not null))
+            {
+                var migrated = _settings with
+                {
+                    Accounts = _settings.Accounts.Select(a => a with { AvatarUrl = null }).ToArray()
+                };
+                await _store.SaveSettingsAsync(migrated, _stop.Token).ConfigureAwait(false);
+                // Replace the recovery copy too, so an older signed URL cannot be restored.
+                await _store.SaveSettingsAsync(migrated, _stop.Token).ConfigureAwait(false);
+                _settings = migrated;
+            }
             _stop.Token.ThrowIfCancellationRequested();
             _monitor = new MonitorService(_usage, _store, _alerts, _settings);
             _monitor.StateChanged += StateChanged;
@@ -88,6 +104,42 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     {
         await InitializeAsync().ConfigureAwait(false);
         await _monitor!.RefreshAsync(accountKey, _stop.Token).ConfigureAwait(false);
+    }
+    public async Task RefreshAccountAsync(string accountKey)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            var account = _settings.Accounts.SingleOrDefault(a => a.Key == accountKey)
+                ?? throw new AppOperationException("That account is no longer configured.");
+            await _monitor!.RefreshAsync(accountKey, _stop.Token).ConfigureAwait(false);
+            TokenSet tokens = await _tokens.GetAsync(account, cancellationToken: _stop.Token).ConfigureAwait(false);
+            GitHubIdentity identity;
+            try { identity = await _auth.GetIdentityAsync(HostResolver.Resolve(account.Host), tokens, _stop.Token).ConfigureAwait(false); }
+            catch (ServiceException ex) when (ex.Status == AccountStatus.SignInRequired)
+            {
+                tokens = await _tokens.GetAsync(account, forceRefresh: true, _stop.Token).ConfigureAwait(false);
+                identity = await _auth.GetIdentityAsync(HostResolver.Resolve(account.Host), tokens, _stop.Token).ConfigureAwait(false);
+            }
+            if (identity.UserId != account.UserId)
+                throw new AppOperationException("The account identity changed; its avatar was not updated. Reconnect this account.");
+            await _avatars.UpdateAsync(account, identity.AvatarUrl, _stop.Token).ConfigureAwait(false);
+            if (account.AvatarUrl is not null)
+            {
+                var next = _settings with
+                {
+                    Accounts = _settings.Accounts.Select(a => a.Key == accountKey ? a with { AvatarUrl = null } : a).ToArray()
+                };
+                await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
+                _settings = next;
+                _monitor.UpdateSettings(next);
+            }
+            _avatarDiagnostic = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+        finally { _mutations.Release(); }
+        await PublishAsync().ConfigureAwait(false);
     }
     public async Task ResumeAsync()
     {
@@ -177,6 +229,12 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
                 _settings = next;
                 await _alerts.RemoveAccountAsync(key, _stop.Token).ConfigureAwait(false);
+                try { _avatars.Remove(account); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _avatarDiagnostic = "Account removed, but its cached avatar could not be deleted. Check the local data directory.";
+                    Diagnostics.Record($"Avatar cache removal failed ({ex.GetType().Name}).");
+                }
             }
             finally { _monitor!.UpdateSettings(_settings); }
         }
@@ -231,7 +289,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             var tokens = await _auth.PollAsync(resolved, selectedClientId, authorization, token).ConfigureAwait(false);
             var identity = await _auth.GetIdentityAsync(resolved, tokens, token).ConfigureAwait(false);
             var account = new Account { Host = resolved.Host, UserId = identity.UserId, Login = identity.Login,
-                AvatarUrl = identity.AvatarUrl, OAuthClientId = resolved.Kind == HostKind.GitHub ? null : clientId };
+                OAuthClientId = resolved.Kind == HostKind.GitHub ? null : clientId };
             if (reconnectKey is not null && account.Key != reconnectKey)
                 throw new AppOperationException("The browser selected a different account. Nothing was saved; select the original identity and reconnect again.");
             if (reconnectKey is null && _settings.Accounts.Any(a => a.Key == account.Key))
@@ -279,9 +337,20 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                     throw;
                 }
                 finally { _monitor!.UpdateSettings(_settings); }
+                try
+                {
+                    await _avatars.UpdateAsync(account, identity.AvatarUrl, token).ConfigureAwait(false);
+                    _avatarDiagnostic = null;
+                }
+                catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException)
+                {
+                    _avatarDiagnostic = "Avatar could not be cached. Refresh this account to retry.";
+                    Diagnostics.Record($"Avatar cache update failed ({ex.GetType().Name}).");
+                }
             }
             finally { _mutations.Release(); }
             await _monitor!.RefreshAsync(account.Key, token).ConfigureAwait(false);
+            await PublishAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
     }
@@ -338,16 +407,25 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                     var details = new AccountDiagnostics(snapshot?.CreditsUsed, snapshot?.ConsumptionUsd,
                         snapshot?.AllocationUsd, snapshot?.PercentConsumed, snapshot?.Unlimited ?? false, snapshot?.SourceTimestampUtc,
                         snapshot?.ResetAtUtc, state.NextRefreshUtc, snapshot?.PeriodId, current, state.Diagnostic);
+                    string? avatar;
+                    try { avatar = _avatars.GetPath(state.Account); }
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                    {
+                        _avatarDiagnostic = "A cached avatar could not be read. Refresh this account to retry.";
+                        Diagnostics.Record($"Avatar cache read failed ({ex.GetType().Name}).");
+                        avatar = null;
+                    }
                     accountViews.Add(new(state.Account.Key, state.Account.DisplayName ?? state.Account.Login,
                         state.Account.Login, state.Account.Host, details,
                         current ? snapshot?.PercentConsumed : null,
                         current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
-                        visibleStatus, snapshot?.FetchedAtUtc, AccountAvatar.Resolve(state.Account)));
+                        visibleStatus, snapshot?.FetchedAtUtc,
+                        avatar ?? AccountAvatar.Resolve(state.Account)));
                 }
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);
                 var title = $"{qualification}MTD consumption: {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
-                var status = _storageDiagnostic ?? (states.Count == 0 ? "Add an account to get started. Sign-in uses the GHCPSpendTray OAuth application." :
+                var status = _storageDiagnostic ?? _avatarDiagnostic ?? (states.Count == 0 ? "Add an account to get started. Sign-in uses the GHCPSpendTray OAuth application." :
                     $"Poll interval: {_settings.PollIntervalMinutes} minutes. Account freshness and errors are shown below.");
                 var tooltip = $"GHCPSpendTray | {qualification}MTD {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
                 var last = states.Where(s => s.Snapshot is not null).Select(s => s.Snapshot!.FetchedAtUtc).DefaultIfEmpty().Min();
@@ -388,6 +466,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         AppOperationException known => known,
         StartupRegistrationException startup => new(startup.Message),
         ServiceException service => new(service.Message),
+        HttpRequestException or InvalidDataException => new("Avatar could not be downloaded. Check this account's access and try Refresh again."),
         ArgumentException => new("Invalid settings or host. Check the displayed values and supported ranges."),
         IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception =>
             new("Local storage or Credential Manager could not complete the operation. Check permissions and free space; existing configuration was preserved where possible."),

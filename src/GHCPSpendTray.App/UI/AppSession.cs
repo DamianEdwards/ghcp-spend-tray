@@ -153,6 +153,7 @@ internal sealed class AppSession : IDisposable
         });
     }
     internal void Refresh(string? key = null) => Run(() => Controller.RefreshAsync(key));
+    internal void RefreshAccount(string key) => Run(() => Controller.RefreshAccountAsync(key));
     internal void SaveGlobal()
     {
         if (!int.TryParse(PollMinutes, out var minutes) || minutes is < 5 or > 1440)

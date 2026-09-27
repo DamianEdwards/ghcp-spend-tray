@@ -325,7 +325,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             TextBox(Session.AccountIncrement, value => Session.AccountIncrement = value, "0 = off; e.g. 50")
                 .IsEnabled(!Session.InheritIncrement).AutomationName("Account USD spending increment"))),
         HStack(10, Button("Save account", Session.SaveAccount).IsEnabled(!Session.Busy),
-            Button("Refresh", () => Session.Refresh(account.Key)).IsEnabled(!Session.Busy),
+            Button("Refresh", () => Session.RefreshAccount(account.Key)).IsEnabled(!Session.Busy),
             Button("Reconnect", () => Session.Reconnect(account)).IsEnabled(!Session.Busy)),
         UI.Copy("Removing an account deletes its local credential, not the OAuth grant. History follows your retention policy."),
         Button("Manage OAuth grants", () => Session.OpenLink($"https://{account.Host}/settings/applications", owner))

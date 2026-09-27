@@ -25,6 +25,7 @@ internal interface IApplicationController : IDisposable
     SettingsView Settings { get; }
     Task InitializeAsync();
     Task RefreshAsync(string? accountKey = null);
+    Task RefreshAccountAsync(string accountKey);
     Task SaveSettingsAsync(SettingsView settings);
     Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null);
     (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key);
