@@ -29,6 +29,12 @@ Set-Item Function:\az -Value ({
 }.GetNewClosure())
 Set-Item Function:\Invoke-RestMethod -Value ({
     param($Method = 'Get', $Uri, $Headers, $Body, $ContentType)
+    if ($Method -in @('Post', 'Put') -and $ContentType -ne 'application/json') {
+        throw 'Store API writes require JSON content type.'
+    }
+    if ($Method -eq 'Post' -and $null -ne $Body) {
+        throw 'Store submission creation and commit must not send a request body.'
+    }
     if ($Headers.Authorization -ne 'Bearer synthetic-token') { throw 'Missing Store API authorization.' }
     $base = "https://manage.devcenter.microsoft.com/v1.0/my/applications/$storeId"
     if ($Uri -eq $base -and $Method -eq 'Get') {

@@ -72,7 +72,8 @@ if ($ValidateOnly) {
 
 # A new submission copies listing, availability, and other settings from the published one.
 # Never delete or reuse a pending submission: an interrupted run stays available for inspection.
-$draft = Invoke-RestMethod -Method Post -Uri "$url/submissions" -Headers $headers
+$draft = Invoke-RestMethod -Method Post -Uri "$url/submissions" -Headers $headers `
+    -ContentType 'application/json'
 if ([string]$draft.id -notmatch '\A[0-9]+\z' -or $draft.status -cne 'PendingCommit' -or
     [string]::IsNullOrWhiteSpace($draft.fileUploadUrl)) {
     throw 'Partner Center did not return a usable new draft; inspect it before retrying.'
@@ -127,7 +128,8 @@ try {
         (Get-OnlyEnglishListing $ready).releaseNotes -cne $releaseNotes) {
         throw "Store draft $draftId changed while uploading; inspect it before committing."
     }
-    $commit = Invoke-RestMethod -Method Post -Uri "$url/submissions/$draftId/commit" -Headers $headers
+    $commit = Invoke-RestMethod -Method Post -Uri "$url/submissions/$draftId/commit" -Headers $headers `
+        -ContentType 'application/json'
     if ($null -eq $commit -or $commit.status -cne 'CommitStarted') {
         throw "Store submission $draftId did not start committing; inspect Partner Center."
     }
