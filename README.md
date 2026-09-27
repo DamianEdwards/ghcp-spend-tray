@@ -64,10 +64,12 @@ managed-user, IP, and application policies may require administrator approval. S
 signing in to a host does not establish that its Copilot consumption API
 is available.
 
-The app saves the avatar URL returned during sign-in for accounts on supported
-hosts. Existing github.com accounts can display an avatar using their saved
-numeric account ID; existing enterprise accounts without an avatar URL show
-initials until reconnected. Avatar images require network access.
+The app downloads and caches avatars in its local data directory at sign-in,
+so signed image links can expire without making the picture disappear. The
+**Refresh** button on an account's management page fetches a new avatar as
+well as consumption. Existing accounts without a cached image can use that
+button to populate it; initials appear when no image is available.
+Removing an account also removes its cached image.
 
 GHCPSpendTray currently requests `read:user` for identity and optionally
 `offline_access` for refresh tokens where supported. Consumption comes from

@@ -27,6 +27,7 @@ internal sealed class DemoController(string directory, bool empty = false) : IAp
         ], 42.75m, true));
         return Task.CompletedTask;
     }
+    public Task RefreshAccountAsync(string accountKey) => RefreshAsync(accountKey);
     public Task SaveSettingsAsync(SettingsView settings)
     {
         Settings = settings with { Startup = false };
