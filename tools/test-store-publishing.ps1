@@ -11,9 +11,10 @@ Set-Content -LiteralPath $bundle -Value 'Synthetic package; not an installable b
 $notesFile = Join-Path $testDirectory 'release-notes.txt'
 $notes = "What's new in 0.2.0`n- Improve tray behavior"
 Set-Content -LiteralPath $notesFile -Value $notes -Encoding utf8NoBOM -NoNewline
+$oldNames = @('previous-x64.msix', 'previous-arm64.msix')
 $state = @{ Pending = $false; OmitPending = $true; OmitLastPublished = $false
     LocalizedListing = $false; ChangedNotes = $false
-    LastVersion = '0.1.0.0'; LastStatus = 'Published'; ChangedDraft = $false
+    LastVersion = '0.1.0.0'; LastStatus = 'Published'; ChangedDraft = $false; ChangedOldPackages = $false
     FailUpload = $false; TokenFailure = $false; Created = 0; Updated = 0; Uploaded = 0; Committed = 0
     SubmittedNotes = $null }
 Set-Item Function:\az -Value ({
@@ -57,14 +58,24 @@ Set-Item Function:\Invoke-RestMethod -Value ({
                 baseListing = [pscustomobject]@{ title = 'Localized listing' } })
         }
         return [pscustomobject]@{ status = $state.LastStatus
-            applicationPackages = @([pscustomobject]@{ version = $state.LastVersion })
+            applicationPackages = @(
+                foreach ($name in $oldNames) {
+                    [pscustomobject]@{ fileName = $name; version = $state.LastVersion }
+                }
+            )
             listings = $listings }
     }
     if ($Uri -eq "$base/submissions/22" -and $Method -eq 'Get') {
         return [pscustomobject]@{ status = 'PendingCommit'
-            applicationPackages = @([pscustomobject]@{
-                fileName = $(if ($state.ChangedDraft) { 'different.msixbundle' }
-                    else { 'GHCPSpendTray-0.2.0-store.msixbundle' }) })
+            applicationPackages = @(
+                foreach ($name in $oldNames) {
+                    [pscustomobject]@{ fileName = $name; fileStatus = $(if ($state.ChangedOldPackages) {
+                        'Uploaded'
+                    } else { 'PendingDelete' }) }
+                }
+                [pscustomobject]@{ fileName = $(if ($state.ChangedDraft) { 'different.msixbundle' }
+                    else { 'GHCPSpendTray-0.2.0-store.msixbundle' }); fileStatus = 'PendingUpload' }
+            )
             listings = [pscustomobject]@{ 'en-us' = [pscustomobject]@{
                 baseListing = [pscustomobject]@{
                     releaseNotes = $(if ($state.ChangedNotes) { 'Stale release notes' }
@@ -74,7 +85,12 @@ Set-Item Function:\Invoke-RestMethod -Value ({
         $state.Created++
         $state.Pending = $true
         return [pscustomobject]@{ id = '22'; status = 'PendingCommit'; fileUploadUrl = 'https://blob.example.test/upload'
-            applicationPackages = @([pscustomobject]@{ fileName = 'old.msixbundle' })
+            applicationPackages = @(
+                foreach ($name in $oldNames) {
+                    [pscustomobject]@{ id = $name; fileName = $name; fileStatus = 'Uploaded'
+                        minimumDirectXVersion = 'None'; minimumSystemRam = 'None' }
+                }
+            )
             listings = [pscustomobject]@{ 'en-us' = [pscustomobject]@{
                 baseListing = [pscustomobject]@{ title = 'Keep this listing' } } }
             visibility = 'Public'; targetPublishMode = 'Manual' }
@@ -86,13 +102,18 @@ Set-Item Function:\Invoke-RestMethod -Value ({
             $data.listings.'en-us'.baseListing.title -cne 'Keep this listing' -or
             $data.listings.'en-us'.baseListing.releaseNotes -cne $notes -or
             $data.visibility -cne 'Public' -or $data.targetPublishMode -cne 'Immediate' -or
-            @($data.applicationPackages).Count -ne 1 -or
-            $data.applicationPackages[0].fileStatus -cne 'PendingUpload') {
+            @($data.applicationPackages).Count -ne 3 -or
+            $data.applicationPackages[0].id -cne $oldNames[0] -or
+            $data.applicationPackages[1].id -cne $oldNames[1] -or
+            $data.applicationPackages[0].fileStatus -cne 'PendingDelete' -or
+            $data.applicationPackages[1].fileStatus -cne 'PendingDelete' -or
+            $data.applicationPackages[2].fileName -cne 'GHCPSpendTray-0.2.0-store.msixbundle' -or
+            $data.applicationPackages[2].fileStatus -cne 'PendingUpload') {
             throw 'Submission metadata or package list changed unexpectedly.'
         }
         $state.SubmittedNotes = $data.listings.'en-us'.baseListing.releaseNotes
         return [pscustomobject]@{ id = '22'; status = 'PendingCommit'
-            applicationPackages = @([pscustomobject]@{ fileName = $data.applicationPackages[0].fileName })
+            applicationPackages = @($data.applicationPackages)
             listings = [pscustomobject]@{ 'en-us' = [pscustomobject]@{
                 baseListing = [pscustomobject]@{ releaseNotes = $state.SubmittedNotes } } } }
     }
@@ -174,6 +195,14 @@ try {
     if ($state.Committed -ne 0) { throw 'Changed Store draft was committed.' }
     $state.Pending = $false
     $state.ChangedDraft = $false
+    $state.ChangedOldPackages = $true
+    try { Invoke-Fixture; throw 'Restored previous package was committed.' }
+    catch {
+        if ($_.Exception.Message -eq 'Restored previous package was committed.') { throw }
+    }
+    if ($state.Committed -ne 0) { throw 'Restored previous Store package was committed.' }
+    $state.Pending = $false
+    $state.ChangedOldPackages = $false
     $state.ChangedNotes = $true
     try { Invoke-Fixture; throw 'Stale release notes were committed.' }
     catch {
@@ -183,8 +212,8 @@ try {
     $state.Pending = $false
     $state.ChangedNotes = $false
     Invoke-Fixture
-    if ($state.Created -ne 4 -or $state.Updated -ne 4 -or
-        $state.Uploaded -ne 3 -or $state.Committed -ne 1) {
+    if ($state.Created -ne 5 -or $state.Updated -ne 5 -or
+        $state.Uploaded -ne 4 -or $state.Committed -ne 1) {
         throw 'Store update did not create, update, upload and commit exactly once.'
     }
 }
@@ -193,4 +222,4 @@ finally {
     $global:LASTEXITCODE = 0
     Remove-Item -LiteralPath $testDirectory -Recurse
 }
-Write-Output 'PASS: pending drafts, published versions, preserved listings, upload failure and Store commit.'
+Write-Output 'PASS: pending drafts, published versions, copied package removal, upload failure and Store commit.'
