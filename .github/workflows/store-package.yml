@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Existing immutable GitHub release version (e.g. 0.1.0, without v)
-        required: true
+        description: Optional release version (without v); defaults to the latest non-prerelease GitHub release
+        required: false
         type: string
       publish:
         description: Submit the validated bundle to Partner Center for certification
@@ -60,8 +60,10 @@ jobs:
               }
           }
           $release = .\tools\get-store-release.ps1 -Version $env:RELEASE_VERSION -Repository $env:GITHUB_REPOSITORY
+          "version=$($release.Version)" >> $env:GITHUB_OUTPUT
           "source_commit=$($release.SourceCommit)" >> $env:GITHUB_OUTPUT
           "release_url=$($release.ReleaseUrl)" >> $env:GITHUB_OUTPUT
+          "RELEASE_VERSION=$($release.Version)" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Path .\artifacts -Force | Out-Null
           Set-Content -LiteralPath .\artifacts\store-release-notes.txt `
             -Value $release.StoreReleaseNotes -Encoding utf8NoBOM -NoNewline
@@ -102,8 +104,8 @@ jobs:
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: GHCPSpendTray-${{ inputs.version }}-store
-          path: artifacts/store/${{ inputs.version }}/
+          name: GHCPSpendTray-${{ steps.source.outputs.version }}-store
+          path: artifacts/store/${{ steps.source.outputs.version }}/
           if-no-files-found: error
           compression-level: 0
           retention-days: 30

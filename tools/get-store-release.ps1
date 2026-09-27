@@ -1,11 +1,10 @@
 param(
-    [Parameter(Mandatory)][string] $Version,
+    [string] $Version,
     [ValidatePattern('\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z')]
     [string] $Repository = 'DamianEdwards/ghcp-spend-tray'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$versionInfo = & "$PSScriptRoot\get-release-version.ps1" -Version $Version
 
 function Read-GitHubJson([string] $Endpoint, [switch] $Asset) {
     $arguments = @('api', $Endpoint)
@@ -15,7 +14,22 @@ function Read-GitHubJson([string] $Endpoint, [switch] $Asset) {
     $json | ConvertFrom-Json
 }
 
-$release = Read-GitHubJson "repos/$Repository/releases/tags/$($versionInfo.Tag)"
+$latest = $null
+if ([string]::IsNullOrEmpty($Version)) {
+    $latest = Read-GitHubJson "repos/$Repository/releases/latest"
+    if ($null -eq $latest -or $null -eq $latest.PSObject.Properties['tag_name'] -or
+        [string]$latest.tag_name -cnotmatch '\Av.+\z' -or
+        $null -eq $latest.PSObject.Properties['prerelease'] -or $latest.prerelease -ne $false) {
+        throw 'The latest GitHub release must be a non-prerelease with a v-prefixed version tag.'
+    }
+    $Version = $latest.tag_name.Substring(1)
+}
+$versionInfo = & "$PSScriptRoot\get-release-version.ps1" -Version $Version
+$release = if ($null -ne $latest) {
+    $latest
+} else {
+    Read-GitHubJson "repos/$Repository/releases/tags/$($versionInfo.Tag)"
+}
 if ($release.tag_name -cne $versionInfo.Tag -or $release.draft -ne $false -or $release.immutable -ne $true) {
     throw 'Store packages must be built from an existing published, immutable GitHub release.'
 }
