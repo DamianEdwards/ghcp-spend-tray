@@ -240,8 +240,12 @@ Microsoft currently supports automated updates for free products.
    locales need reviewed translations rather than silently reusing English.
    Publish mode is **Immediate**, so an approved update goes live without a second
    manual release action. Check Partner Center for certification and publication.
-   A successful workflow run means the commit started, **not** that the update
-   was approved or is live.
+   The workflow polls the Store status for up to ten minutes after `CommitStarted`.
+   `PreProcessing` or a later documented status confirms commit acceptance even if
+   intermediate states were missed between polls. Known failure states stop the
+   run with Store details; a timeout, unreadable response or unknown status leaves
+   the outcome **indeterminate**, not safe to resubmit. A successful workflow run
+   means the commit was accepted, **not** that the update was approved or is live.
 
 If a submission/upload fails after draft creation, inspect and resolve that
 draft in Partner Center before rerunning; automation does not delete drafts or
@@ -252,6 +256,26 @@ Store API authentication and product validation failures stop before draft
 creation. If **publish** is disabled, download and extract the artifact, then
 upload only `GHCPSpendTray-<version>-store.msixbundle` to Partner Center;
 `store-package.json` and `SHA256SUMS` are traceability files, not app packages.
+
+To inspect an existing submission's asynchronous commit outcome without
+changing it, run this on your own machine with PowerShell 7 and a client secret
+for the Partner Center-associated Entra application:
+
+```powershell
+.\tools\get-store-submission-status.ps1 -TenantId '<tenant-guid>' `
+  -ClientId '<app-client-guid>' -StoreId '<store-product-id>' `
+  -SubmissionId '<submission-id>'
+```
+
+The script prompts privately for the secret (never pass it on the command line),
+obtains a Store API token, and makes only a `GET` request to the submission
+status endpoint. Inspect `StatusDetails.errors` for failure statuses, including
+`CommitFailed` and `PreProcessingFailed`. This temporary local credential is
+separate from the secretless GitHub OIDC workflow; do not commit or save it,
+and revoke it when diagnostics are complete. A `CommitStarted` response to the
+workflow's commit request does not establish that the commit succeeded. If
+polling cannot confirm acceptance, inspect the existing submission before
+rerunning the publish job; it never deletes or automatically resubmits a draft.
 
 The Store bundle is intentionally unsigned and is **not a direct-install
 download**. Microsoft signs it during Store publication. The signed bundle on

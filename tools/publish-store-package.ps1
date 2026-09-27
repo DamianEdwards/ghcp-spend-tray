@@ -160,7 +160,39 @@ try {
     if ($null -eq $commit -or $commit.status -cne 'CommitStarted') {
         throw "Store submission $draftId did not start committing; inspect Partner Center."
     }
-    Write-Output "Store submission $draftId committed for certification; publication is subject to Store review."
+    $statusUrl = "$url/submissions/$draftId/status"
+    for ($attempt = 1; $attempt -le 40; $attempt++) {
+        try {
+            $response = Invoke-RestMethod -Uri $statusUrl -Headers $headers
+        }
+        catch {
+            throw "Could not check Store submission $draftId after commit; outcome is unknown. Inspect its status before retrying. $($_.Exception.Message)"
+        }
+        if ($null -eq $response -or $null -eq $response.PSObject.Properties['status'] -or
+            [string]::IsNullOrWhiteSpace($response.status)) {
+            throw "Store submission $draftId returned no status after commit; outcome is unknown. Inspect it before retrying."
+        }
+        $status = $response.status
+        if ($status -cin @('PreProcessing', 'Certification', 'PendingPublication',
+                'Publishing', 'Published', 'Release')) {
+            Write-Output "Store submission $draftId commit accepted (status: $status). Track certification and publication in Partner Center."
+            break
+        }
+        if ($status -cin @('CommitFailed', 'PreProcessingFailed', 'CertificationFailed',
+                'PublishFailed', 'ReleaseFailed', 'Canceled')) {
+            $details = if ($null -ne $response.PSObject.Properties['statusDetails']) {
+                $response.statusDetails | ConvertTo-Json -Depth 20 -Compress
+            } else { 'No status details returned.' }
+            throw "Store submission $draftId failed ($status): $details"
+        }
+        if ($status -cnotin @('None', 'PendingCommit', 'CommitStarted')) {
+            throw "Store submission $draftId returned unknown status '$status'; outcome is unknown. Inspect it before retrying."
+        }
+        if ($attempt -eq 40) {
+            throw "Store submission $draftId remained $status after 10 minutes; outcome is unknown. Inspect its status before retrying."
+        }
+        Start-Sleep -Seconds 15
+    }
 }
 finally {
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
