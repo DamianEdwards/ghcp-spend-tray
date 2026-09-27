@@ -232,10 +232,11 @@ Microsoft currently supports automated updates for free products.
    an existing pending draft,
    an unpublished predecessor, or a package with an equal or higher version.
    It creates a new submission copying the published listing and availability,
-   sets the `en-us` release notes to the derived plain text, replaces the
-   package list with this bundle, verifies the Store retained both the notes
-   and package, uploads the bundle in a ZIP through the Store API, and commits
-   the update for certification. A single `en-us` listing is required; other
+   sets the `en-us` release notes to the derived plain text, marks the copied
+   published packages `PendingDelete` while retaining their file entries, adds
+   this bundle as `PendingUpload`, verifies the Store retained the package
+   changes and notes, uploads the bundle in a ZIP through the Store API, and
+   commits the update for certification. A single `en-us` listing is required; other
    locales need reviewed translations rather than silently reusing English.
    Publish mode is **Immediate**, so an approved update goes live without a second
    manual release action. Check Partner Center for certification and publication.

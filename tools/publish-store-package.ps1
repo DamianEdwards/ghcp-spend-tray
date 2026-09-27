@@ -31,6 +31,22 @@ function Get-OnlyEnglishListing([object] $Submission) {
     }
     $Submission.listings.PSObject.Properties[$locales[0]].Value.baseListing
 }
+function Assert-RequestedPackages([object] $Submission, [object[]] $PreviousPackages, [string] $FileName) {
+    $packages = @($Submission.applicationPackages)
+    if ($packages.Count -ne $PreviousPackages.Count + 1 -or
+        @($packages | Where-Object {
+            $_.fileName -ceq $FileName -and $_.fileStatus -in @('PendingUpload', 'Uploaded')
+        }).Count -ne 1) {
+        throw 'The Store did not retain the requested package set.'
+    }
+    foreach ($previous in $PreviousPackages) {
+        if (@($packages | Where-Object {
+            $_.fileName -ceq $previous.fileName -and $_.fileStatus -ceq 'PendingDelete'
+        }).Count -ne 1) {
+            throw "The Store did not retain the removal of package $($previous.fileName)."
+        }
+    }
+}
 $accessToken = & az account get-access-token --resource 'https://manage.devcenter.microsoft.com' `
     --query accessToken --output tsv
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($accessToken)) {
@@ -90,7 +106,19 @@ try {
         $baseListing.releaseNotes = $releaseNotes
     }
     $fileName = Split-Path $bundlePath -Leaf
-    $draft.applicationPackages = @(@{
+    $previousPackages = @($draft.applicationPackages)
+    if ($previousPackages.Count -ne @($last.applicationPackages).Count -or
+        @($previousPackages | Where-Object {
+            $_.fileStatus -cne 'Uploaded' -or
+            [string]::IsNullOrWhiteSpace($_.fileName) -or
+            @($last.applicationPackages | Where-Object fileName -CEQ $_.fileName).Count -ne 1
+        }).Count -ne 0) {
+        throw "Store draft $draftId does not contain the published packages; inspect it before updating."
+    }
+    foreach ($package in $previousPackages) {
+        $package.fileStatus = 'PendingDelete'
+    }
+    $draft.applicationPackages = $previousPackages + @(@{
         fileName = $fileName
         fileStatus = 'PendingUpload'
         minimumDirectXVersion = 'None'
@@ -103,11 +131,10 @@ try {
     $updated = Invoke-RestMethod -Method Put -Uri "$url/submissions/$draftId" -Headers $headers `
         -ContentType 'application/json' -Body ($draft | ConvertTo-Json -Depth 100 -Compress)
     if ([string]$updated.id -cne [string]$draftId -or $updated.status -cne 'PendingCommit' -or
-        @($updated.applicationPackages).Count -ne 1 -or
-        $updated.applicationPackages[0].fileName -cne $fileName -or
         (Get-OnlyEnglishListing $updated).releaseNotes -cne $releaseNotes) {
         throw "Submission $draftId did not retain the requested package and release notes; inspect the draft."
     }
+    Assert-RequestedPackages $updated $previousPackages $fileName
     Compress-Archive -LiteralPath $bundlePath -DestinationPath $zip -CompressionLevel NoCompression
     try {
         Invoke-WebRequest -Method Put -Uri $uploadUrl -InFile $zip `
@@ -123,11 +150,11 @@ try {
         throw "Pending submission changed while uploading; inspect submission $draftId."
     }
     $ready = Invoke-RestMethod -Uri "$url/submissions/$draftId" -Headers $headers
-    if ($ready.status -cne 'PendingCommit' -or @($ready.applicationPackages).Count -ne 1 -or
-        $ready.applicationPackages[0].fileName -cne $fileName -or
+    if ($ready.status -cne 'PendingCommit' -or
         (Get-OnlyEnglishListing $ready).releaseNotes -cne $releaseNotes) {
         throw "Store draft $draftId changed while uploading; inspect it before committing."
     }
+    Assert-RequestedPackages $ready $previousPackages $fileName
     $commit = Invoke-RestMethod -Method Post -Uri "$url/submissions/$draftId/commit" -Headers $headers `
         -ContentType 'application/json'
     if ($null -eq $commit -or $commit.status -cne 'CommitStarted') {
