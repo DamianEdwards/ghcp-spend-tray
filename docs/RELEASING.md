@@ -210,19 +210,22 @@ workflow. The app must be live and support the Store submission API.
 Microsoft currently supports automated updates for free products.
 
 1. Merge the workflow to `main`, then choose **Actions > Store Package and
-   Publish > Run workflow** from `main`. Enter an existing immutable GitHub
-   release version without the `v` prefix, such as `0.2.0`. For the first run,
-   turn **publish** off and **verify_access** on to test OIDC and read the live
-   Store product without creating a draft. After that succeeds, run again with
-   **publish** on to submit the update. Turn both inputs off to build a manual
-   upload artifact without using the Store publishing identity.
-2. Approve the `microsoft-store` environment. The workflow verifies the release
-   metadata and immutable tag, checks out that exact application commit
-   separately from the packaging automation, and installs its pinned SDK. It
-   derives the Store notes from the same immutable GitHub release's **What's
-   Changed** PR titles, dropping contributor credits and the full-changelog
-   link. Unexpected formatting, empty notes or more than 1500 characters stop
-   the workflow before any Store draft is created.
+   Publish > Run workflow** from `main`. Leave **version** empty to use GitHub's
+   latest published non-prerelease release. To target another immutable release,
+   including a prerelease, enter its version without the `v` prefix, such as
+   `0.2.0`. The Store package version must still exceed the last published
+   version; rerunning an already submitted release is not a safe retry. For the
+   first run, turn **publish** off and **verify_access** on to test OIDC and read
+   the live Store product without creating a draft. After that succeeds, run
+   again with **publish** on to submit the update. Turn both inputs off to build
+   a manual upload artifact without using the Store publishing identity.
+2. Approve the `microsoft-store` environment. The workflow resolves the selected
+   release, verifies its metadata and immutable tag, checks out that exact
+   application commit separately from the packaging automation, and installs
+   its pinned SDK. It derives the Store notes from the same immutable GitHub
+   release's **What's Changed** PR titles, dropping contributor credits and
+   the full-changelog link. Unexpected formatting, empty notes or more than
+   1500 characters stop the workflow before any Store draft is created.
 3. Both architectures are rebuilt with the Partner Center identity, not the
    Azure certificate's publisher. The workflow validates the unsigned bundle,
    including publisher display name, and uploads the
