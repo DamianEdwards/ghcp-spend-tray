@@ -29,7 +29,7 @@ jobs:
   package:
     name: Build and optionally submit Store package
     runs-on: windows-2025
-    timeout-minutes: 40
+    timeout-minutes: 60
     environment: microsoft-store
     permissions:
       contents: read
@@ -148,9 +148,9 @@ jobs:
           - Store product: ``$env:STORE_ID``
           - Store release notes are derived from the source release's What's Changed PR titles.
           - Download: $env:ARTIFACT_URL
-          - Publish requested: ``${{ inputs.publish }}`` (check the submission step and Partner Center for the outcome).
+          - Publish requested: ``${{ inputs.publish }}`` (the submission step waits for commit acceptance; check Partner Center for certification and publication).
           - Read-only API check requested: ``${{ inputs.verify_access }}``.
           - If publish was not requested, extract the artifact ZIP and upload only ``GHCPSpendTray-$env:RELEASE_VERSION-store.msixbundle`` manually.
           - This package uses the Store publisher and is intentionally unsigned. Microsoft signs it during Store publication.
-          - Submission starts Store certification; it does not guarantee publication.
+          - An accepted commit starts Store processing; it does not guarantee certification or publication. On failure or timeout, inspect the existing submission before another run.
           "@ >> $env:GITHUB_STEP_SUMMARY
