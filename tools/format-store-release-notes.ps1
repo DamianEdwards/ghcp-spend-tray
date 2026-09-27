@@ -9,8 +9,17 @@ if (-not $section.Success) {
     throw 'The GitHub release must have a What''s Changed section for Store release notes.'
 }
 $titles = @(
+    $footerSeen = $false
     foreach ($line in ($section.Groups['items'].Value -split '\r?\n')) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -cmatch '\A\*\*Full Changelog\*\*: https://github\.com/[^/\s]+/[^/\s]+/compare/[^\s]+\z' -and
+            -not $footerSeen) {
+            $footerSeen = $true
+            continue
+        }
+        if ($footerSeen) {
+            throw "Unrecognized GitHub release change entry; review the release notes for $Version."
+        }
         if ($line -cmatch '\A\* (?<title>.+?) by @[^ \r\n]+ in https://github\.com/[^/\s]+/[^/\s]+/pull/[0-9]+\z') {
             $title = $Matches.title.Trim()
         } else {
