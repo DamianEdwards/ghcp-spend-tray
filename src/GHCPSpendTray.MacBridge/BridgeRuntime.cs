@@ -1,0 +1,212 @@
+using System.Collections.Concurrent;
+using GHCPSpendTray.Shared;
+
+namespace GHCPSpendTray.MacBridge;
+
+public sealed class BridgeRuntime : IDisposable
+{
+    private readonly ConcurrentQueue<BridgeEvent> _events = new();
+    private readonly NativePlatform _platform;
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _stateGate = new();
+    private IApplicationController? _controller;
+    private DashboardView? _dashboard;
+    private bool _stateChanged;
+    private CancellationTokenSource? _signIn;
+    private TaskCompletionSource<bool>? _confirmation;
+    private Task? _work;
+    private int _busy;
+    private bool _disposed;
+    private string? _directory;
+
+    public BridgeRuntime() => _platform = new(_events.Enqueue);
+
+    public Receipt Send(Command command)
+    {
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (command.Method == "platform.reply")
+            {
+                _platform.Complete(Required(command.TargetId), command.Reply ?? throw new ArgumentException("Missing platform reply."));
+                return new();
+            }
+            if (command.Method == "signin.cancel")
+            {
+                lock (_stateGate) _signIn?.Cancel();
+                return new();
+            }
+            if (command.Method == "signin.confirm")
+            {
+                lock (_stateGate)
+                {
+                    if (_confirmation is null) throw new AppOperationException("No identity is awaiting confirmation.");
+                    _confirmation.TrySetResult(command.Accepted);
+                }
+                return new();
+            }
+            if (command.Method == "host.describe")
+            {
+                string text = Controller.ResolveHostDescription(Required(command.Host));
+                _events.Enqueue(new() { Kind = "completed", Id = command.Id, Text = text });
+                return new();
+            }
+            if (command.Method == "account.preferences")
+            {
+                string key = Required(command.Key);
+                var preferences = Controller.AccountSettings(key);
+                _events.Enqueue(new()
+                {
+                    Kind = "completed", Id = command.Id,
+                    Preferences = new(preferences.DisplayName, preferences.Thresholds, preferences.SpendIncrementUsd, Controller.AccountClientId(key))
+                });
+                return new();
+            }
+            if (string.IsNullOrEmpty(command.Id)) throw new ArgumentException("Missing command identifier.");
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+                throw new AppOperationException("Another operation is still running.");
+            _work = Task.Run(() => ExecuteAsync(command));
+            return new();
+        }
+        catch (Exception ex) { return new(SafeMessage(ex)); }
+    }
+
+    private IApplicationController Controller => _controller ?? throw new AppOperationException("The application is not initialized.");
+
+    private async Task ExecuteAsync(Command command)
+    {
+        string? error = null;
+        try
+        {
+            switch (command.Method)
+            {
+                case "initialize":
+                    if (_controller is not null) throw new AppOperationException("The application is already initialized.");
+                    _directory = Path.GetFullPath(Required(command.Directory));
+                    _controller = command.Demo ? new DemoController(_directory, command.Empty) :
+                        new ApplicationController(_directory, false, _platform,
+                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic);
+                    _controller.Changed += OnDashboard;
+                    _controller.SetNotificationHandler(_platform.NotifyAsync);
+                    await _controller.InitializeAsync();
+                    break;
+                case "refresh":
+                    await Controller.RefreshAsync(command.Key);
+                    break;
+                case "account.refresh":
+                    await Controller.RefreshAccountAsync(Required(command.Key));
+                    break;
+                case "resume":
+                    await Controller.ResumeAsync();
+                    if (!Controller.Portable) await _platform.InitializeAsync();
+                    break;
+                case "settings.save":
+                    await Controller.SaveSettingsAsync(command.Settings ?? throw new ArgumentException("Missing settings."));
+                    break;
+                case "account.save":
+                    await Controller.SaveAccountAsync(Required(command.Key), command.DisplayName ?? "",
+                        command.Thresholds ?? "", command.SpendIncrementUsd);
+                    break;
+                case "account.remove":
+                    await Controller.RemoveAsync(Required(command.Key));
+                    break;
+                case "signin":
+                    using (var signIn = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token))
+                    {
+                        lock (_stateGate) _signIn = signIn;
+                        try
+                        {
+                            await Controller.AddAsync(Required(command.Host), command.OfflineAccess, command.Key,
+                                prompt => _events.Enqueue(new() { Kind = "prompt", Id = command.Id, Prompt = prompt }),
+                                identity =>
+                                {
+                                    var confirmation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                                    lock (_stateGate) _confirmation = confirmation;
+                                    _events.Enqueue(new() { Kind = "identity", Id = command.Id, Identity = identity });
+                                    return confirmation.Task.WaitAsync(signIn.Token);
+                                }, signIn.Token, command.ClientId);
+                        }
+                        finally { lock (_stateGate) { _signIn = null; _confirmation = null; } }
+                    }
+                    break;
+                default:
+                    throw new AppOperationException("Unknown application command.");
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested || command.Method == "signin")
+        {
+            error = "Sign-in canceled or expired. Nothing new was connected.";
+        }
+        catch (Exception ex) { error = SafeMessage(ex); }
+        finally
+        {
+            lock (_stateGate) _stateChanged = true;
+            Interlocked.Exchange(ref _busy, 0);
+            _events.Enqueue(new() { Kind = "completed", Id = command.Id, Error = error, Settings = _controller?.Settings });
+        }
+    }
+
+    private void OnDashboard(DashboardView dashboard)
+    {
+        lock (_stateGate) { _dashboard = dashboard; _stateChanged = true; }
+    }
+
+    public BridgeEvent[] Poll()
+    {
+        var result = new List<BridgeEvent>();
+        while (_events.TryDequeue(out var message)) result.Add(message);
+        lock (_stateGate)
+        {
+            if (_stateChanged && _controller is not null)
+            {
+                _stateChanged = false;
+                result.Add(new() { Kind = "state", Dashboard = _dashboard, Settings = _controller.Settings });
+            }
+        }
+        return result.ToArray();
+    }
+
+    private void RecordDiagnostic(string category)
+    {
+        lock (_stateGate)
+        {
+            try
+            {
+                string directory = Path.Combine(_directory!, "logs");
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "diagnostics.log");
+                if (File.Exists(path) && new FileInfo(path).Length > 128 * 1024)
+                    File.Move(path, Path.Combine(directory, "diagnostics.previous.log"), true);
+                File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {category}\n");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _events.Enqueue(new() { Kind = "error", Error = "Cannot write the diagnostic log. Check data-folder permissions and free space." });
+            }
+        }
+    }
+
+    private static string Required(string? text) => string.IsNullOrWhiteSpace(text) ?
+        throw new ArgumentException("A required value is missing.") : text;
+
+    private string SafeMessage(Exception ex)
+    {
+        if (_directory is not null) RecordDiagnostic($"Application operation failed ({ex.GetType().Name}).");
+        return ex is AppOperationException or PlatformOperationException ? ex.Message :
+            "The operation failed. Check the supplied values, connectivity, permissions, and local diagnostic log.";
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _lifetime.Cancel();
+        _platform.Dispose();
+        _work?.GetAwaiter().GetResult();
+        if (_controller is not null)
+        {
+            _controller.Changed -= OnDashboard;
+            _controller.Dispose();
+        }
+    }
+}

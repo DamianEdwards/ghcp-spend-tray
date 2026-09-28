@@ -9,7 +9,7 @@ try {
     & "$PSScriptRoot\test-release-tooling.ps1"
     dotnet build GHCPSpendTray.slnx -c Release --nologo -v:q
     if ($LASTEXITCODE -ne 0) { throw 'Solution build failed.' }
-    foreach ($name in @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.AppTests')) {
+    foreach ($name in @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.AppTests', 'GHCPSpendTray.SharedTests')) {
         $project = "tests\$name\$name.csproj"
         dotnet run --project $project -c Release --no-build | Select-Object -Last 1
         if ($LASTEXITCODE -ne 0) { throw "$name failed." }

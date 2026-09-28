@@ -2,12 +2,12 @@ using Windows.ApplicationModel;
 
 namespace GHCPSpendTray.App.Platform;
 
-internal sealed class StartupRegistration(IStartupTaskStore store)
+internal sealed class StartupRegistration(IStartupTaskStore store) : IStartupRegistration
 {
     internal const string TaskId = "GHCPSpendTrayStartup";
-    internal bool Enabled => store.State is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
-    internal bool CanChange => store.State is StartupTaskState.Disabled or StartupTaskState.Enabled;
-    internal string Description => store.State switch
+    public bool Enabled => store.State is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
+    public bool CanChange => store.State is StartupTaskState.Disabled or StartupTaskState.Enabled;
+    public string Description => store.State switch
     {
         StartupTaskState.DisabledByUser => "Disabled in Windows. Enable GHCPSpendTray in Settings > Apps > Startup.",
         StartupTaskState.DisabledByPolicy => "Startup is disabled by your organization's policy.",
@@ -25,7 +25,7 @@ internal sealed class StartupRegistration(IStartupTaskStore store)
         }
     }
 
-    internal async Task SetEnabledAsync(bool enabled)
+    public async Task SetEnabledAsync(bool enabled)
     {
         if (enabled == Enabled) return;
         if (!CanChange) throw new StartupRegistrationException(Description);
@@ -55,7 +55,7 @@ internal sealed class StartupRegistration(IStartupTaskStore store)
     }
 }
 
-internal sealed class StartupRegistrationException(string message) : Exception(message);
+internal sealed class StartupRegistrationException(string message) : PlatformOperationException(message);
 
 internal interface IStartupTaskStore
 {

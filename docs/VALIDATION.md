@@ -1,5 +1,57 @@
 # GHCPSpendTray validation and release gates
 
+## macOS implementation evidence (September 28, 2026)
+
+The native Mac frontend shares the C# controller, host-scoped OAuth, decimal
+accounting, storage, scheduler and alerts with Windows, rather than
+reimplementing them in Swift.
+
+| Check | Evidence |
+|---|---|
+| Shared engine | 147 Core tests and 38 shared controller/bridge assertions pass under managed .NET and executed arm64 Native AOT |
+| Native app | Universal arm64/x86_64 SwiftUI executable and C# Native AOT library build with warnings treated as errors; bundle versions, both slices, dependency paths and ad-hoc signatures checked |
+| UI smoke | Empty/populated app launches, menu-bar creation, navigation/rendering of all five settings pages, onboarding sheet, exact synthetic $42.75 summary, cross-language settings save, and normal shutdown exercised on Apple silicon and the Intel slice under Rosetta |
+| Keychain | Uniquely named synthetic device-local item create/read/update/delete, missing-item behavior and target isolation exercised using Security.framework; no real account credentials read |
+| Swift formatting | Exact cents, invalid/negative amount rejection, unavailable-not-zero display and C# timestamp parsing checked |
+| Automation | Platform-routing and separate-version tests pass; PowerShell Store/release tests pass with Mac releases excluded from Windows selection; workflows pass actionlint |
+| Windows extraction | Windows platform adapter test project compiles on macOS; full WinUI build/execution requires Windows SDK executables and remains a Windows CI gate |
+| Production distribution | Signing/notarization automation implemented; not executed locally without the owner's Developer ID/API credentials |
+
+Reproduce with `bash tools/macos/verify.sh`. To exercise the Intel slice on
+Apple silicon with Rosetta already installed:
+
+```bash
+python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app --arch x86_64
+```
+
+Smoke mode requires a unique absolute `--data-dir`, uses only synthetic
+accounts, and disables authentication, notifications and login startup.
+The smoke launcher uses a temporary directory and a bounded subprocess
+lifetime, then deletes its synthetic data. Render snapshots demonstrate view
+creation, not pixel-perfect layout or VoiceOver correctness; AppKit snapshots
+can omit GPU-composited SwiftUI text. No screenshot or accessibility
+permission is requested or changed by these tests.
+
+### Required before macOS production acceptance
+
+- Run both native architecture CI jobs; Rosetta is not Intel hardware evidence.
+- Install the signed/notarized DMG on a clean standard-user Mac with Gatekeeper
+  enabled, and update between two signed versions without losing settings,
+  history, credentials or login preference.
+- Complete real device sign-in, identity confirmation, reconnect, rotation and
+  explicit credential removal with approved test accounts, on supported hosts.
+- Confirm login startup remains opt-in/hidden, including approval-required and
+  externally disabled states, and catch-up after sleep/network recovery.
+- Exercise notification permission grant/denial, Focus suppression, threshold
+  deduplication, and notification-click account navigation.
+- Check light/dark appearance, small displays, menu-bar overflow, keyboard
+  navigation, VoiceOver, and native sheet/window behavior interactively.
+- Confirm uninstall cleanup guidance, residual Keychain items, and stable
+  signing-team access across upgrades.
+
+These outstanding OS/distribution checks are not established by synthetic
+tests. Mac releases do not imply App Store review or submission.
+
 ## Local evidence (September 24, 2026)
 
 | Check | Evidence |

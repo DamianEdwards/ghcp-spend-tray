@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Optional release version (without v); defaults to the latest non-prerelease GitHub release
+        description: Optional Windows version (without v); defaults to the highest published stable Windows version, never macOS
         required: false
         type: string
       publish:

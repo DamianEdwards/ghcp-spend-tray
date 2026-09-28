@@ -1,0 +1,491 @@
+using System.Globalization;
+using System.Net.NetworkInformation;
+using GHCPSpendTray.Core;
+
+namespace GHCPSpendTray.Shared;
+
+public class ApplicationController : IApplicationController, INotificationSink
+{
+    private readonly JsonStore _store;
+    private readonly HttpClient _http;
+    private readonly ICredentialStore _credentials;
+    private readonly DeviceFlowClient _auth;
+    private readonly TokenManager _tokens;
+    private readonly CopilotUsageProvider _usage;
+    private readonly AvatarCache _avatars;
+    private readonly AlertService _alerts;
+    private IStartupRegistration? _startup;
+    private readonly Func<Task<IStartupRegistration>>? _createStartup;
+    private readonly Action<string> _recordDiagnostic;
+    private readonly SemaphoreSlim _mutations = new(1, 1);
+    private readonly SemaphoreSlim _render = new(1, 1);
+    private readonly CancellationTokenSource _stop = new();
+    private readonly object _initializationLock = new();
+    private AppSettings _settings = new();
+    private MonitorService? _monitor;
+    private Task? _initialization, _clock;
+    private Func<string, string, string, Task<bool>>? _notify;
+    private string? _storageDiagnostic;
+    private string? _avatarDiagnostic;
+    private bool _disposed;
+    public string DataDirectory { get; }
+    public bool Portable { get; }
+    public event Action<DashboardView>? Changed;
+
+    public ApplicationController(string directory, bool portable, ICredentialStore credentials,
+        HttpClient? http = null, Func<Task<IStartupRegistration>>? createStartup = null,
+        Action<string>? recordDiagnostic = null)
+    {
+        DataDirectory = directory; Portable = portable;
+        _store = new JsonStore(directory);
+        _store.DiagnosticReported += StoreDiagnostic;
+        _http = http ?? HttpTransport.CreateClient();
+        _credentials = credentials;
+        _createStartup = createStartup;
+        _recordDiagnostic = recordDiagnostic ?? (message => System.Diagnostics.Trace.TraceError(message));
+        _auth = new DeviceFlowClient(_http);
+        _tokens = new TokenManager(_credentials, _auth);
+        _usage = new CopilotUsageProvider(_http, _tokens);
+        _avatars = new AvatarCache(_http, directory);
+        _alerts = new AlertService(_store, this);
+        NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
+    }
+
+    public SettingsView Settings => new(_settings.PollIntervalMinutes,
+        FormatThresholds(_settings.AlertThresholds), _settings.NotificationsEnabled, _startup?.Enabled ?? false,
+        _settings.SpendIncrementUsd, _startup?.CanChange ?? false,
+        Portable ? "Unavailable in isolated portable mode." : _startup?.Description ?? "Loading login startup settings...");
+
+    public Task InitializeAsync()
+    {
+        lock (_initializationLock) return _initialization ??= InitializeCoreAsync();
+    }
+    private async Task InitializeCoreAsync()
+    {
+        try
+        {
+            if (!Portable && _createStartup is not null) _startup = await _createStartup();
+            var result = await _store.LoadSettingsAsync(_stop.Token).ConfigureAwait(false);
+            _settings = result.Value;
+            if (result.Diagnostics.Length > 0) _storageDiagnostic = string.Join(" ", result.Diagnostics);
+            if (_settings.Accounts.Any(a => a.AvatarUrl is not null))
+            {
+                var migrated = _settings with
+                {
+                    Accounts = _settings.Accounts.Select(a => a with { AvatarUrl = null }).ToArray()
+                };
+                await _store.SaveSettingsAsync(migrated, _stop.Token).ConfigureAwait(false);
+                // Replace the recovery copy too, so an older signed URL cannot be restored.
+                await _store.SaveSettingsAsync(migrated, _stop.Token).ConfigureAwait(false);
+                _settings = migrated;
+            }
+            _stop.Token.ThrowIfCancellationRequested();
+            _monitor = new MonitorService(_usage, _store, _alerts, _settings);
+            _monitor.StateChanged += StateChanged;
+            _monitor.DiagnosticReported += StoreDiagnostic;
+            await PublishAsync().ConfigureAwait(false);
+            await _monitor.StartAsync(_stop.Token).ConfigureAwait(false);
+            _clock = Task.Run(async () =>
+            {
+                using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+                try
+                {
+                    while (await timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false))
+                        await PublishAsync().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw SafeError(ex);
+        }
+    }
+
+    public async Task RefreshAsync(string? accountKey = null)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        await _monitor!.RefreshAsync(accountKey, _stop.Token).ConfigureAwait(false);
+    }
+    public async Task RefreshAccountAsync(string accountKey)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            var account = _settings.Accounts.SingleOrDefault(a => a.Key == accountKey)
+                ?? throw new AppOperationException("That account is no longer configured.");
+            await _monitor!.RefreshAsync(accountKey, _stop.Token).ConfigureAwait(false);
+            TokenSet tokens = await _tokens.GetAsync(account, cancellationToken: _stop.Token).ConfigureAwait(false);
+            GitHubIdentity identity;
+            try { identity = await _auth.GetIdentityAsync(HostResolver.Resolve(account.Host), tokens, _stop.Token).ConfigureAwait(false); }
+            catch (ServiceException ex) when (ex.Status == AccountStatus.SignInRequired)
+            {
+                tokens = await _tokens.GetAsync(account, forceRefresh: true, _stop.Token).ConfigureAwait(false);
+                identity = await _auth.GetIdentityAsync(HostResolver.Resolve(account.Host), tokens, _stop.Token).ConfigureAwait(false);
+            }
+            if (identity.UserId != account.UserId)
+                throw new AppOperationException("The account identity changed; its avatar was not updated. Reconnect this account.");
+            await _avatars.UpdateAsync(account, identity.AvatarUrl, _stop.Token).ConfigureAwait(false);
+            if (account.AvatarUrl is not null)
+            {
+                var next = _settings with
+                {
+                    Accounts = _settings.Accounts.Select(a => a.Key == accountKey ? a with { AvatarUrl = null } : a).ToArray()
+                };
+                await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
+                _settings = next;
+                _monitor.UpdateSettings(next);
+            }
+            _avatarDiagnostic = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+        finally { _mutations.Release(); }
+        await PublishAsync().ConfigureAwait(false);
+    }
+    public async Task ResumeAsync()
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        _monitor!.NotifyResume();
+        await PublishAsync().ConfigureAwait(false);
+    }
+    public async Task SaveSettingsAsync(SettingsView settings)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            var next = _settings with
+            {
+                PollIntervalMinutes = settings.PollMinutes,
+                AlertThresholds = ParseThresholds(settings.Thresholds),
+                NotificationsEnabled = settings.Notifications,
+                SpendIncrementUsd = settings.SpendIncrementUsd
+            };
+            next.Validate();
+            bool previousStartup = _startup?.Enabled ?? false;
+            bool changedStartup = _startup is not null && settings.Startup != previousStartup;
+            if (changedStartup) await _startup!.SetEnabledAsync(settings.Startup);
+            try { await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false); }
+            catch
+            {
+                if (changedStartup) await _startup!.SetEnabledAsync(previousStartup);
+                throw;
+            }
+            _settings = next;
+            _monitor!.UpdateSettings(next);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+        finally { _mutations.Release(); }
+        await PublishAsync().ConfigureAwait(false);
+    }
+    public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key)
+    {
+        var account = _settings.Accounts.SingleOrDefault(a => a.Key == key)
+            ?? throw new AppOperationException("That account is no longer configured.");
+        return (account.DisplayName ?? "", account.ThresholdOverrides is null ? "" : FormatThresholds(account.ThresholdOverrides),
+            account.SpendIncrementUsd);
+    }
+    public async Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            displayName = displayName.Trim();
+            if (displayName.Length > 128 || displayName.Any(char.IsControl))
+                throw new AppOperationException("Display names must be at most 128 characters and contain no control characters.");
+            var overrides = string.IsNullOrWhiteSpace(thresholds) ? null : ParseThresholds(thresholds);
+            AppSettings.ValidateSpendIncrement(spendIncrementUsd);
+            if (!_settings.Accounts.Any(a => a.Key == key)) throw new AppOperationException("That account is no longer configured.");
+            var next = _settings with
+            {
+                Accounts = _settings.Accounts.Select(a => a.Key == key ? a with
+                    { DisplayName = displayName.Length == 0 ? null : displayName, ThresholdOverrides = overrides,
+                      SpendIncrementUsd = spendIncrementUsd } : a).ToArray()
+            };
+            await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
+            _settings = next;
+            _monitor!.UpdateSettings(next);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+        finally { _mutations.Release(); }
+        await PublishAsync().ConfigureAwait(false);
+    }
+    public async Task RemoveAsync(string key)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            var account = _settings.Accounts.SingleOrDefault(a => a.Key == key)
+                ?? throw new AppOperationException("That account is no longer configured.");
+            await _monitor!.PauseAccountAsync(key, _stop.Token).ConfigureAwait(false);
+            try
+            {
+                // Keep configuration when credential deletion fails, so removal can be retried visibly.
+                if (account.OAuthClientId is not null ||
+                    HostResolver.Resolve(account.Host).Host is "github.com" or "msft.ghe.com")
+                    await _credentials.DeleteAsync(account, _stop.Token).ConfigureAwait(false);
+                var next = _settings with { Accounts = _settings.Accounts.Where(a => a.Key != key).ToArray() };
+                await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
+                _settings = next;
+                await _alerts.RemoveAccountAsync(key, _stop.Token).ConfigureAwait(false);
+                try { _avatars.Remove(account); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _avatarDiagnostic = "Account removed, but its cached avatar could not be deleted. Check the local data directory.";
+                    _recordDiagnostic($"Avatar cache removal failed ({ex.GetType().Name}).");
+                }
+            }
+            finally { _monitor!.UpdateSettings(_settings); }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+        finally { _mutations.Release(); }
+        await PublishAsync().ConfigureAwait(false);
+    }
+    public string ResolveHostDescription(string host)
+    {
+        try
+        {
+            var resolved = HostResolver.Resolve(host);
+            return $"{resolved.Kind}: auth {resolved.WebBaseUri}\r\nAPI {resolved.ApiBaseUri}";
+        }
+        catch (ServiceException ex) { throw new AppOperationException(ex.Message); }
+        catch (ArgumentException)
+        {
+            throw new AppOperationException("Enter an HTTPS host only, without a path, user information, query or fragment. Custom ports are GHES-only.");
+        }
+    }
+    public string? AccountClientId(string key)
+    {
+        var account = _settings.Accounts.SingleOrDefault(a => a.Key == key)
+            ?? throw new AppOperationException("That account is no longer configured.");
+        if (account.OAuthClientId is null &&
+            HostResolver.Resolve(account.Host).Host is not ("github.com" or "msft.ghe.com"))
+            return null;
+        return GitHubOAuth.ResolveClientId(account.Host, account.OAuthClientId);
+    }
+    public async Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
+        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        string? clientId = null)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
+        var token = linked.Token;
+        try
+        {
+            var resolved = HostResolver.Resolve(host);
+            string selectedClientId = GitHubOAuth.ResolveClientId(resolved.Host, clientId);
+            if (reconnectKey is not null)
+            {
+                var existing = _settings.Accounts.SingleOrDefault(a => a.Key == reconnectKey)
+                    ?? throw new AppOperationException("That account is no longer configured.");
+                string? originalClientId = AccountClientId(reconnectKey);
+                if (HostResolver.Resolve(existing.Host).Host != resolved.Host ||
+                    originalClientId is not null && originalClientId != selectedClientId)
+                    throw new AppOperationException("Reconnect using the original host and OAuth client ID.");
+            }
+            var authorization = await _auth.BeginAsync(resolved, selectedClientId, offlineAccess, token).ConfigureAwait(false);
+            prompt(new(authorization.UserCode, authorization.VerificationUri, authorization.ExpiresAtUtc));
+            var tokens = await _auth.PollAsync(resolved, selectedClientId, authorization, token).ConfigureAwait(false);
+            var identity = await _auth.GetIdentityAsync(resolved, tokens, token).ConfigureAwait(false);
+            var account = new Account { Host = resolved.Host, UserId = identity.UserId, Login = identity.Login,
+                OAuthClientId = resolved.Kind == HostKind.GitHub ? null : clientId };
+            if (reconnectKey is not null && account.Key != reconnectKey)
+                throw new AppOperationException("The browser selected a different account. Nothing was saved; select the original identity and reconnect again.");
+            if (reconnectKey is null && _settings.Accounts.Any(a => a.Key == account.Key))
+                throw new AppOperationException("This account is already monitored. Select it in the overview and choose Reconnect instead.");
+            _ = await _usage.FetchWithTokenAsync(account, tokens, token).ConfigureAwait(false);
+            if (!await confirm(new(account.Host, long.Parse(identity.UserId, CultureInfo.InvariantCulture), identity.Login))
+                    .WaitAsync(token).ConfigureAwait(false))
+                throw new OperationCanceledException(token);
+            await _mutations.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                var previous = _settings.Accounts.SingleOrDefault(a => a.Key == account.Key);
+                if (previous is not null && reconnectKey is null)
+                    throw new AppOperationException("This identity was added in another window. Use Reconnect.");
+                if (previous is null && reconnectKey is not null)
+                    throw new AppOperationException("This account was removed while sign-in was in progress. Add it again.");
+                if (previous is not null)
+                {
+                    account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides,
+                        SpendIncrementUsd = previous.SpendIncrementUsd,
+                        OAuthClientId = previous.OAuthClientId ?? account.OAuthClientId };
+                    await _monitor!.PauseAccountAsync(account.Key, token).ConfigureAwait(false);
+                }
+                TokenSet? oldTokens = null;
+                bool wroteCredential = false;
+                try
+                {
+                    oldTokens = await _credentials.ReadAsync(account, token).ConfigureAwait(false);
+                    var next = _settings with
+                    {
+                        Accounts = _settings.Accounts.Where(a => a.Key != account.Key).Append(account).ToArray()
+                    };
+                    await _credentials.WriteAsync(account, tokens, token).ConfigureAwait(false);
+                    wroteCredential = true;
+                    await _store.SaveSettingsAsync(next, token).ConfigureAwait(false);
+                    _settings = next;
+                }
+                catch
+                {
+                    if (wroteCredential)
+                    {
+                        if (oldTokens is null) await _credentials.DeleteAsync(account, CancellationToken.None).ConfigureAwait(false);
+                        else await _credentials.WriteAsync(account, oldTokens, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    throw;
+                }
+                finally { _monitor!.UpdateSettings(_settings); }
+                try
+                {
+                    await _avatars.UpdateAsync(account, identity.AvatarUrl, token).ConfigureAwait(false);
+                    _avatarDiagnostic = null;
+                }
+                catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException)
+                {
+                    _avatarDiagnostic = "Avatar could not be cached. Refresh this account to retry.";
+                    _recordDiagnostic($"Avatar cache update failed ({ex.GetType().Name}).");
+                }
+            }
+            finally { _mutations.Release(); }
+            await _monitor!.RefreshAsync(account.Key, token).ConfigureAwait(false);
+            await PublishAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+    }
+
+    public void SetNotificationHandler(Func<string, string, string, Task<bool>> handler) => _notify = handler;
+    public async Task<bool> SubmitAsync(UsageAlert alert, CancellationToken cancellationToken = default)
+    {
+        var notify = _notify ?? throw new AppOperationException("The notification surface is not initialized.");
+        var message = $"{alert.Account.DisplayName ?? alert.Account.Login}: {Money(alert.Snapshot.ConsumptionUsd)} consumed.";
+        if (alert.ReachedThresholds.Length > 0)
+            message += $" {alert.HighestThreshold:0.##}% of {Money(alert.Snapshot.AllocationUsd!.Value)} allocation reached.";
+        if (alert.SpendMilestoneUsd is { } milestone)
+            message += $" Passed the {Money(milestone)} spending milestone.";
+        return await notify(alert.Account.Key, "GHCPSpendTray consumption alert", message)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+    private void StateChanged(AccountState state) => _ = PublishAsync();
+    private void StoreDiagnostic(string message)
+    {
+        _storageDiagnostic = message;
+        _recordDiagnostic("Local storage recovery or maintenance diagnostic; inspect the overview.");
+    }
+    private async void NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+    {
+        if (!e.IsAvailable) return;
+        try
+        {
+            await InitializeAsync().ConfigureAwait(false);
+            _monitor!.NotifyNetworkRecovery();
+            await PublishAsync().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { _recordDiagnostic($"Network recovery failed ({ex.GetType().Name})."); }
+    }
+    private async Task PublishAsync()
+    {
+        try
+        {
+            await _render.WaitAsync(_stop.Token).ConfigureAwait(false);
+            try
+            {
+                var states = _monitor?.States ?? [];
+                var now = DateTimeOffset.UtcNow;
+                var total = UsageAggregation.Total(states, now, TimeSpan.FromMinutes(_settings.PollIntervalMinutes));
+                var accountViews = new List<AccountView>();
+                foreach (var state in states)
+                {
+                    var snapshot = state.Snapshot;
+                    bool current = snapshot is not null && BillingPeriods.IsCurrent(snapshot, now);
+                    var visibleStatus = snapshot is not null && !current ? "Previous billing period - awaiting current data" :
+                        state.Status == AccountStatus.Fresh && snapshot is not null &&
+                        now - snapshot.FetchedAtUtc > TimeSpan.FromMinutes(_settings.PollIntervalMinutes)
+                            ? "Stale - last-known observation" : state.Status.ToString();
+                    var details = new AccountDiagnostics(snapshot?.CreditsUsed, snapshot?.ConsumptionUsd,
+                        snapshot?.AllocationUsd, snapshot?.PercentConsumed, snapshot?.Unlimited ?? false, snapshot?.SourceTimestampUtc,
+                        snapshot?.ResetAtUtc, state.NextRefreshUtc, snapshot?.PeriodId, current, state.Diagnostic);
+                    string? avatar;
+                    try { avatar = _avatars.GetPath(state.Account); }
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                    {
+                        _avatarDiagnostic = "A cached avatar could not be read. Refresh this account to retry.";
+                        _recordDiagnostic($"Avatar cache read failed ({ex.GetType().Name}).");
+                        avatar = null;
+                    }
+                    accountViews.Add(new(state.Account.Key, state.Account.DisplayName ?? state.Account.Login,
+                        state.Account.Login, state.Account.Host, details,
+                        current ? snapshot?.PercentConsumed : null,
+                        current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
+                        visibleStatus, snapshot?.FetchedAtUtc,
+                        avatar ?? AccountAvatar.Resolve(state.Account)));
+                }
+                var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
+                var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);
+                var title = $"{qualification}MTD consumption: {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
+                var status = _storageDiagnostic ?? _avatarDiagnostic ?? (states.Count == 0 ? "Add an account to get started. Sign-in uses the GHCPSpendTray OAuth application." :
+                    $"Poll interval: {_settings.PollIntervalMinutes} minutes. Account freshness and errors are shown below.");
+                var tooltip = $"GHCPSpendTray | {qualification}MTD {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
+                var last = states.Where(s => s.Snapshot is not null).Select(s => s.Snapshot!.FetchedAtUtc).DefaultIfEmpty().Min();
+                if (last != default) tooltip += $"\nOldest update {last.ToLocalTime():HH:mm}";
+                Changed?.Invoke(new(title, status, tooltip, accountViews,
+                    total.IncludedAccounts == 0 ? null : total.ConsumptionUsd, total.IsComplete, total.IsLastKnown));
+            }
+            finally { _render.Release(); }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _recordDiagnostic($"Dashboard update failed ({ex.GetType().Name}).");
+            Changed?.Invoke(new("Consumption unavailable", "Dashboard could not update. Check storage and account errors.",
+                "GHCPSpendTray | Consumption unavailable", []));
+        }
+    }
+    private static decimal[] ParseThresholds(string value)
+    {
+        var parts = value.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length == 0 || parts.Any(p => p.Length == 0))
+            throw new AppOperationException("Enter one or more positive percentages separated by commas.");
+        var result = new List<decimal>();
+        foreach (var part in parts)
+        {
+            if (!decimal.TryParse(part, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var percentage) || percentage <= 0)
+                throw new AppOperationException("Thresholds must be positive percentages. Use '.' for decimals and ',' between values.");
+            result.Add(percentage);
+        }
+        var sorted = result.Distinct().Order().ToArray();
+        AppSettings.ValidateThresholds(sorted);
+        return sorted;
+    }
+    private static string FormatThresholds(decimal[] values) => string.Join(", ", values.Select(v => v.ToString("0.##", CultureInfo.InvariantCulture)));
+    private static string Money(decimal value) => "$" + value.ToString("N2", CultureInfo.GetCultureInfo("en-US"));
+    private static AppOperationException SafeError(Exception ex) => ex switch
+    {
+        AppOperationException known => known,
+        PlatformOperationException platform => new(platform.Message),
+        ServiceException service => new(service.Message),
+        HttpRequestException or InvalidDataException => new("Avatar could not be downloaded. Check this account's access and try Refresh again."),
+        ArgumentException => new("Invalid settings or host. Check the displayed values and supported ranges."),
+        IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception =>
+            new("Local storage or the credential store could not complete the operation. Check permissions and free space; existing configuration was preserved where possible."),
+        _ => new("The request failed or timed out. Check connectivity and the host's OAuth app approval.")
+    };
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
+        _stop.Cancel();
+        if (_monitor is not null)
+        {
+            _monitor.StateChanged -= StateChanged;
+            _monitor.DiagnosticReported -= StoreDiagnostic;
+            _monitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        _http.Dispose();
+    }
+}

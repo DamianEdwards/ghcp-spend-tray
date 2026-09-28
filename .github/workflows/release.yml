@@ -1,10 +1,10 @@
-name: Release
+name: Release Windows
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Increasing three-part version (e.g. 0.2.0); package revision is always zero
+        description: Increasing Windows version (e.g. 0.2.0), independent of macOS; package revision is zero
         required: true
         type: string
       prerelease:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ghcpspendtray-release
+  group: ghcpspendtray-release-windows
   cancel-in-progress: false
 
 jobs:
@@ -131,6 +131,7 @@ jobs:
           Compress-Archive -Path .\artifacts\symbols\* `
             -DestinationPath ".\artifacts\release\GHCPSpendTray-$env:RELEASE_VERSION-symbols.zip"
           @{
+              platform = 'windows'
               version = $env:RELEASE_VERSION
               packageVersion = "$env:RELEASE_VERSION.0"
               sourceCommit = $env:GITHUB_SHA
@@ -170,7 +171,11 @@ jobs:
           $existing = @($json | ConvertFrom-Json) | Where-Object tag_name -eq $tag
           if ($existing -and -not $existing.draft) { throw 'Refusing to overwrite a public release.' }
           if (-not $existing) {
-              $arguments = @('release', 'create', $tag, '--verify-tag', '--draft', '--generate-notes', '--title', "GHCPSpendTray $env:RELEASE_VERSION")
+              $arguments = @('release', 'create', $tag, '--verify-tag', '--draft', '--generate-notes', '--title', "GHCPSpendTray for Windows $env:RELEASE_VERSION")
+              $previous = @(git tag --list 'v*') | Where-Object { $_ -match '^v[0-9]+\.[0-9]+\.[0-9]+$' -and $_ -ne $tag } |
+                  Sort-Object { [version]$_.Substring(1) } -Descending | Select-Object -First 1
+              if ($LASTEXITCODE -ne 0) { throw 'Could not read previous Windows release tags.' }
+              if ($previous) { $arguments += @('--notes-start-tag', $previous) }
               if ($env:PRERELEASE -eq 'true') { $arguments += @('--prerelease', '--latest=false') }
               & gh @arguments
               if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release.' }

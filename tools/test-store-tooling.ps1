@@ -5,6 +5,7 @@ $sha = '1234567890123456789012345678901234567890'
 $state = @{ ExitCode = 0; Fixture = $null; Requests = @() }
 function Reset-Fixture {
     $state.Requests = @()
+    $state.ExtraReleases = @()
     $state.Fixture = @{
         release = @{ tag_name = 'v0.1.0'; draft = $false; immutable = $true; prerelease = $false
             body = "## What's Changed`n* Improve tray behavior by @fixture in https://github.com/DamianEdwards/ghcp-spend-tray/pull/1`n* Update packages by @dependabot[bot] in https://github.com/DamianEdwards/ghcp-spend-tray/pull/2`n`n## New Contributors`n* @dependabot[bot]`n**Full Changelog**: https://github.com/DamianEdwards/ghcp-spend-tray/compare/v0.0.1...v0.1.0"
@@ -17,7 +18,7 @@ Set-Item Function:\gh -Value ({
     $global:LASTEXITCODE = $state.ExitCode
     $state.Requests += $args[1]
     switch -Wildcard ($args[1]) {
-        '*/releases/latest' { $state.Fixture.release | ConvertTo-Json -Depth 8 }
+        '*/releases?per_page=100' { ConvertTo-Json -InputObject @(@(@($state.Fixture.release) + $state.ExtraReleases)) -Depth 8 }
         '*/releases/tags/*' { $state.Fixture.release | ConvertTo-Json -Depth 8 }
         '*/releases/assets/1' { $state.Fixture.metadata | ConvertTo-Json }
         '*/commits/*' { $state.Fixture.commit | ConvertTo-Json }
@@ -54,16 +55,23 @@ try {
     if ($latest.Version -ne '0.3.0' -or $latest.PackageVersion -ne '0.3.0.0' -or
         $latest.StoreReleaseNotes -cnotlike "What's new in 0.3.0*" -or
         $latest.ReleaseUrl -ne 'https://github.com/DamianEdwards/ghcp-spend-tray/releases/tag/v0.3.0' -or
-        $state.Requests[0] -ne 'repos/DamianEdwards/ghcp-spend-tray/releases/latest' -or
+        $state.Requests[0] -ne 'repos/DamianEdwards/ghcp-spend-tray/releases?per_page=100' -or
         @($state.Requests | Where-Object { $_ -like '*/releases/tags/*' }).Count -ne 0) {
         throw 'Default Store source did not resolve and validate the latest release.'
     }
     Reset-Fixture
     $emptyOverride = & $selector -Version ''
     if ($emptyOverride.Version -ne '0.1.0' -or
-        $state.Requests[0] -ne 'repos/DamianEdwards/ghcp-spend-tray/releases/latest') {
+        $state.Requests[0] -ne 'repos/DamianEdwards/ghcp-spend-tray/releases?per_page=100') {
         throw 'An empty workflow version input did not select the latest release.'
     }
+    Reset-Fixture
+    $state.ExtraReleases = @(
+        @{ tag_name = 'macos-v9.0.0'; prerelease = $false; draft = $false; immutable = $true },
+        @{ tag_name = 'v5.0.0'; prerelease = $true; draft = $false; immutable = $true },
+        @{ tag_name = 'v6.0.0'; prerelease = $false; draft = $true; immutable = $false }
+    )
+    if ((& $selector).Version -ne '0.1.0') { throw 'macOS, preview, or draft releases displaced the stable Windows release.' }
     Reset-Fixture
     $state.Fixture.release.body = "## What's Changed`r`n`r`n* Cache account avatars and refresh them from account settings by @DamianEdwards in https://github.com/DamianEdwards/ghcp-spend-tray/pull/26`r`n`r`n`r`n**Full Changelog**: https://github.com/DamianEdwards/ghcp-spend-tray/compare/v0.0.1...v0.1.0"
     $withFooter = & $selector -Version '0.1.0'

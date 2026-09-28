@@ -19,6 +19,8 @@
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="GHCPSpendTray.Shared" />
+    <ProjectReference Include="..\GHCPSpendTray.Application\GHCPSpendTray.Application.csproj" />
     <!-- Component versions from Windows App SDK 2.5.1; the umbrella also brings AI/ML/Search/Widgets. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.1.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />

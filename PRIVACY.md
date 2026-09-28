@@ -1,8 +1,8 @@
 # GHCPSpendTray privacy policy
 
-Last updated: September 24, 2026.
+Last updated: September 28, 2026.
 
-GHCPSpendTray is an independent Windows desktop application maintained by
+GHCPSpendTray is an independent Windows and macOS desktop application maintained by
 Damian Edwards. It displays GitHub Copilot AI-credit consumption for accounts you
 choose to connect. It is not affiliated with or endorsed by GitHub.
 
@@ -27,16 +27,23 @@ Account configuration, consumption history, alert state and diagnostic logs are
 stored locally in the app's data directory. For the Store version, this is inside
 the Windows package's local application data folder. You can open it from
 **Settings > General > Open data folder**.
+On macOS it is `~/Library/Application Support/GHCPSpendTray`, with
+owner-only directory permissions.
 
-Access and refresh tokens are stored in Windows Credential Manager, not in the
+Access and refresh tokens are stored in Windows Credential Manager or the macOS
+login Keychain, not in the
 app's JSON settings or history files. Configuration and history files are not
-separately encrypted by GHCPSpendTray; their protection depends on your Windows
+separately encrypted by GHCPSpendTray; their protection depends on your operating-system
 account, device security and any disk encryption you use.
+Mac credentials are device-local, non-synchronizing Keychain items. The native
+Mac UI and C# engine communicate within the same process, without a localhost
+server or a background credential service.
 
 History retention defaults to 90 days and is maintained while the app runs.
 Recovery copies and files retained after storage errors may remain longer.
 Configuration and credentials remain until you remove them or use the applicable
-Windows reset/uninstall controls. Diagnostic logs are size-bounded and intended
+operating-system removal controls. Deleting the Mac app alone does not delete
+its data directory or Keychain items. Diagnostic logs are size-bounded and intended
 to contain technical error categories rather than tokens, device authorization
 codes, account identities or consumption amounts.
 
@@ -61,15 +68,18 @@ GitHub's handling of information is governed by its
 and any policies applicable to your enterprise host. Microsoft Store delivery and
 Windows services are governed separately by
 [Microsoft's privacy statement](https://privacy.microsoft.com/privacystatement).
+macOS services, including Keychain, notifications, and Gatekeeper/notarization,
+are governed separately by [Apple's privacy policy](https://www.apple.com/legal/privacy/).
 Operating-system diagnostics, backups or synchronization you configure may handle
 local app data independently of GHCPSpendTray.
 
 ## Notifications
 
-If enabled, Windows notifications can display account labels and consumption
+If enabled, operating-system notifications can display account labels and consumption
 information on your desktop. Other people who can see your screen may see that
 information. You can disable app notifications in GHCPSpendTray or control their
-display through Windows settings.
+display through Windows or macOS notification settings, including lock-screen
+previews and Focus/Do Not Disturb.
 
 ## Your choices and deletion
 
@@ -84,6 +94,11 @@ display through Windows settings.
 - Generic Windows Credential Manager entries are not guaranteed to be deleted by
   uninstall. If needed, remove only entries beginning `GHCPSpendTray/` that belong
   to this app.
+- On macOS, disable login startup, remove accounts, quit the app, and move it to
+  the Trash. To remove remaining local files, delete
+  `~/Library/Application Support/GHCPSpendTray`. If needed, use Keychain Access
+  to remove only items for the `com.damianedwards.GHCPSpendTray` service.
+  Backups or recovery copies outside the data directory may remain.
 - Deleting a local credential or uninstalling the app does not revoke its OAuth
   authorization at GitHub. Use **Manage OAuth grants** in account details, or the
   connected host's application settings, to revoke access.

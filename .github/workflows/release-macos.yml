@@ -1,0 +1,72 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Increasing macOS version, independent of Windows (e.g. 0.1.0)
+        required: true
+        type: string
+      prerelease:
+        description: Mark this macOS release as a preview
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcpspendtray-release-macos
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign, notarize and publish macOS
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: production-macos
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout pinned main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate macOS version and verified main source
+        run: python3 tools/macos/release.py validate "$RELEASE_VERSION"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Verify shared engine and universal native app
+        run: bash tools/macos/verify.sh
+      - name: Build release version
+        run: |
+          channel=Stable
+          if [ "$PRERELEASE" = true ]; then channel=Preview; fi
+          bash tools/macos/build.sh "$RELEASE_VERSION" "$channel"
+      - name: Sign, notarize, staple and verify the application and disk image
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: bash tools/macos/sign-package.sh "$RELEASE_VERSION"
+      - name: Attest notarized disk image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ./artifacts/macos-release/*.dmg
+      - name: Stage draft and verify downloaded assets
+        run: python3 tools/macos/release.py stage "$RELEASE_VERSION"
+      - name: Publish verified macOS release
+        run: |
+          python3 tools/macos/release.py publish "$RELEASE_VERSION"
+          echo "Published notarized macOS $RELEASE_VERSION from $GITHUB_SHA (macos-v$RELEASE_VERSION)." >> "$GITHUB_STEP_SUMMARY"
