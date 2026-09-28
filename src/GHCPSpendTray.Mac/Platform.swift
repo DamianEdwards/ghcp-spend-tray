@@ -81,7 +81,12 @@ enum Platform {
         let center = UNUserNotificationCenter.current()
         var authorization = await authorizationStatus(center)
         if authorization == .notDetermined {
-            let allowed = try await center.requestAuthorization(options: [.alert, .sound])
+            let allowed: Bool = try await withCheckedThrowingContinuation { continuation in
+                center.requestAuthorization(options: [.alert, .sound]) { allowed, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: allowed) }
+                }
+            }
             if !allowed { return false }
             authorization = await authorizationStatus(center)
         }
@@ -93,7 +98,13 @@ enum Platform {
         content.body = message
         content.sound = .default
         if let key { content.userInfo = ["accountKey": key] }
-        try await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            center.add(request) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
         return true
     }
 
