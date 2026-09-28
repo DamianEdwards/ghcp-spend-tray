@@ -79,13 +79,13 @@ enum Platform {
 
     static func notify(title: String, message: String, key: String?) async throws -> Bool {
         let center = UNUserNotificationCenter.current()
-        var settings = await center.notificationSettings()
-        if settings.authorizationStatus == .notDetermined {
+        var authorization = await authorizationStatus(center)
+        if authorization == .notDetermined {
             let allowed = try await center.requestAuthorization(options: [.alert, .sound])
             if !allowed { return false }
-            settings = await center.notificationSettings()
+            authorization = await authorizationStatus(center)
         }
-        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+        guard authorization == .authorized || authorization == .provisional else {
             return false
         }
         let content = UNMutableNotificationContent()
@@ -95,6 +95,15 @@ enum Platform {
         if let key { content.userInfo = ["accountKey": key] }
         try await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         return true
+    }
+
+    private static func authorizationStatus(_ center: UNUserNotificationCenter) async -> UNAuthorizationStatus {
+        // Older SDKs do not make UNNotificationSettings Sendable; transfer only the enum.
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
     }
 
     static func handle(_ event: BridgeEvent) async throws -> [String: Any] {
