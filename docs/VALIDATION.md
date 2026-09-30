@@ -62,6 +62,36 @@ synthetic Credential Manager write/read/delete. Shell accepting a notification
 does not prove visual delivery. Synthetic callbacks do not reproduce all Explorer
 foreground-permission behavior.
 
+## Packaged taskbar icon regression (September 30, 2026)
+
+The original 44px PNG has transparent corners, and all original artwork,
+including the window ICO, is unchanged. The package now includes default,
+unplated, and light-unplated candidates at 16, 20, 24, 30, 32, 36, 40, 48, 60,
+64, 72, 80, 96, and 256 pixels. A separate package-identity `resources.pri`
+indexes these under `Files/Assets/Square44x44Logo.png`.
+
+`verify.ps1` passes a warning-free Release build, 147 core tests, 14 platform
+tests, and 128 application assertions. Its icon-tooling regression suite
+rejects missing light/dark files, files present but absent from the PRI, wrong
+dimensions, opaque corners, a mismatched PRI identity, and a manifest pointing
+to another icon or requesting a background color. A second synthetic package
+identity verifies that indexing does not hardcode the development identity.
+
+`package.ps1` successfully publishes x64 and ARM64 Native AOT and creates an
+unsigned development bundle. Validation extracts both packages' PNGs and PRI
+and checks dimensions, transparent corners, opaque artwork, identical themed
+artwork, the final identity, resource URI, and each TargetSize/AlternateForm
+pair. This verifies shipped resources, not just source filenames.
+
+Visual shell acceptance remains manual: install an approved development or
+signed package, open Settings, and check the running and pinned taskbar icons
+in Windows light/dark modes at 100%, 150%, and 200% display scaling with a
+visible accent color. Check Start/search too. Verify both a fresh pin and an
+upgrade of an existing pin; record any stale Explorer icon-cache behavior
+separately rather than changing artwork or deleting user caches. No package
+registration, OS theme/scale changes, or signed upgrade was performed for this
+regression, and cross-publishing does not establish ARM64 shell behavior.
+
 ## Required before production acceptance
 
 - Azure-signed bundle installation as a standard user on a clean Windows 11 system.

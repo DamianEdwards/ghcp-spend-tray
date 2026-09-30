@@ -29,6 +29,7 @@
     <Content Include="Assets\GHCPSpendTray.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\ghcpspendtray-logo.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Square44x44Logo.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Square44x44Logo.targetsize-*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Square150x150Logo.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\StoreLogo.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

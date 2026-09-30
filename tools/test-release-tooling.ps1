@@ -31,4 +31,5 @@ if ($errors.Count) { throw ($errors | Out-String) }
 & "$PSScriptRoot\test-store-tooling.ps1"
 & "$PSScriptRoot\test-store-publishing.ps1"
 & "$PSScriptRoot\test-store-submission-status.ps1"
+& "$PSScriptRoot\test-package-icon-tooling.ps1"
 Write-Output 'PASS: release version boundaries, development identity and PowerShell syntax.'

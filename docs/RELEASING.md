@@ -129,6 +129,24 @@ The `windows-2025` runner needs Visual Studio x64/ARM64 C++ tools and a Windows 
 The same prerequisites apply locally. Python is only needed to regenerate
 checked-in artwork, not for CI builds.
 
+### Packaged shell icons
+
+`python .\tools\generate-logo.py` regenerates the existing coin/bar artwork and
+the `Square44x44Logo.targetsize-*` PNGs. Keep the default, `altform-unplated`,
+and `altform-lightunplated` variants at all 14 sizes, even though both themes
+use identical artwork. Transparent source pixels and the manifest's
+`BackgroundColor="transparent"` alone do not prevent Windows from adding an
+accent-color plate; the shell needs the qualified unplated candidates.
+See [Windows app icon construction](https://learn.microsoft.com/windows/apps/design/iconography/app-icon-construction).
+
+The app project copies these assets into each published payload.
+`package.ps1` uses Windows SDK MakePri and `packaging\priconfig.xml` to generate
+`resources.pri` after assigning the final package identity. This shell index
+maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates. It is
+separate from the existing `GHCPSpendTray.pri` and `Reactor.pri` runtime
+resources, which must remain in the package. `test-package.ps1` extracts and
+checks the actual icon PNGs and shell PRI from both architecture packages.
+
 ## Release a version
 
 On Markdown-only pushes and pull requests, **Verify / Verification** lints

@@ -42,6 +42,7 @@ foreach ($architecture in @('x64', 'arm64')) {
     $manifest.Package.Identity.ProcessorArchitecture = $architecture
     $manifest.Package.Properties.PublisherDisplayName = $PublisherDisplayName
     $manifest.Save((Join-Path $layout 'AppxManifest.xml'))
+    & "$PSScriptRoot\new-package-resources.ps1" -Layout $layout
     $package = Join-Path $packages "GHCPSpendTray-$Version-$architecture.msix"
     & $makeappx pack /d $layout /p $package /o | Select-Object -Last 5
     if ($LASTEXITCODE -ne 0) { throw "MSIX validation/packaging failed for $architecture." }

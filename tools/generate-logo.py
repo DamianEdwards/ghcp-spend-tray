@@ -1,4 +1,4 @@
-"""Generate GHCPSpendTray's transparent logo, opaque badge PNG, and scalable SVG."""
+"""Generate GHCPSpendTray's logo, badge, SVG, and transparent Windows shell assets."""
 import pathlib
 import struct
 import zlib
@@ -11,6 +11,7 @@ CIRCLE = (256, 256, 236)
 BARS = ((118, 272, 66, 108), (223, 195, 66, 185), (328, 118, 66, 262))
 RADIUS = 9
 ASSETS = pathlib.Path(__file__).resolve().parents[1] / "src" / "GHCPSpendTray.App" / "Assets"
+TARGET_SIZES = (16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256)
 
 
 def in_bar(x, y, bar):
@@ -71,4 +72,10 @@ if __name__ == "__main__":
     write_svg(ASSETS / "ghcpspendtray-logo.svg")
     for name, size in (("Square44x44Logo", 44), ("Square150x150Logo", 150), ("StoreLogo", 50)):
         write_png(ASSETS / f"{name}.png", size=size)
+    for size in TARGET_SIZES:
+        target = ASSETS / f"Square44x44Logo.targetsize-{size}.png"
+        write_png(target, size=size)
+        # Both shell themes need an explicit unplated candidate, even with identical artwork.
+        for form in ("unplated", "lightunplated"):
+            (ASSETS / f"Square44x44Logo.targetsize-{size}_altform-{form}.png").write_bytes(target.read_bytes())
     print(f"Created {SIZE}x{SIZE} transparent logo, opaque badge, and SVG in {ASSETS}")
