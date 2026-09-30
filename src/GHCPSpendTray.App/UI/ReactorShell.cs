@@ -1,5 +1,6 @@
 using GHCPSpendTray.App.Native;
 using GHCPSpendTray.App.Platform;
+using GHCPSpendTray.Core;
 using Microsoft.UI.Input;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
@@ -19,11 +20,11 @@ internal sealed class ReactorShell : IDisposable
     private ReactorWindow? _flyout, _settings;
     private bool _exiting;
     private long _flyoutPresentation;
-    private string? _notificationAccount;
     internal AppSession Session => _session;
     internal ReactorWindow? Flyout => _flyout;
     internal ReactorWindow? SettingsWindow => _settings;
     internal nint TrayHandle => _tray.Handle;
+    internal IReadOnlyCollection<TrayIcon> TrayIcons => _tray.Icons;
 
     internal ReactorShell(IApplicationController controller)
     {
@@ -35,25 +36,36 @@ internal sealed class ReactorShell : IDisposable
         });
         _session.OpenSettings = ShowSettings;
         _session.HideFlyout = () => _flyout?.Hide();
-        _session.TestNotification = () => _tray.Icon.Notify("GHCPSpendTray test", "Windows accepted this test notification request.");
-        _tray.OpenRequested += () => _session.Post(ToggleFlyout);
+        _session.TestNotification = () => _tray.Notify(null, "GHCPSpendTray test", "Windows accepted this test notification request.");
+        _tray.OpenRequested += key => _session.Post(() =>
+        {
+            if (key is not null) _session.EditAccount(key);
+            else ToggleFlyout();
+        });
         _tray.SettingsRequested += () => ShowSettings(SettingsPage.Usage);
         _tray.RefreshRequested += () => _session.Refresh();
         _tray.ExitRequested += Exit;
         _tray.ResumeRequested += () => _session.Run(controller.ResumeAsync);
-        _tray.NotificationClicked += () =>
+        _tray.NotificationClicked += key =>
         {
-            if (_notificationAccount is { } key) _session.EditAccount(key);
+            if (key is not null) _session.EditAccount(key);
             else ShowFlyout();
         };
-        _session.Changed += () => _tray.Update(_session.Dashboard.Tooltip);
+        _session.Changed += () =>
+        {
+            try { _tray.Update(_session.Dashboard.Tray ?? TrayPresentation.Unavailable); }
+            catch (Exception ex)
+            {
+                Diagnostics.Record($"Tray display update failed ({ex.GetType().Name}).");
+                _session.ReportTrayError();
+            }
+        };
         controller.SetNotificationHandler((key, title, text) =>
         {
             var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _session.Post(() =>
             {
-                _notificationAccount = key;
-                completion.TrySetResult(_tray.Icon.Notify(title, text));
+                completion.TrySetResult(_tray.Notify(key, title, text));
             });
             return completion.Task;
         });
@@ -111,7 +123,7 @@ internal sealed class ReactorShell : IDisposable
     {
         var window = _flyout;
         var presentation = _flyoutPresentation;
-        var trayClick = _tray.Icon.ContainsCursor();
+        var trayClick = _tray.ContainsCursor();
         // Showing/activating and Shell focus changes can reenter deactivation. Check the
         // settled native foreground window, not Reactor's cached activation/visibility flags.
         _session.Post(() =>
@@ -119,7 +131,7 @@ internal sealed class ReactorShell : IDisposable
             if (_exiting || window is null || !ReferenceEquals(window, _flyout) ||
                 presentation != _flyoutPresentation) return;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow);
-            if (Win32.GetForegroundWindow() != hwnd && !trayClick && !_tray.Icon.ContainsCursor()) window.Hide();
+            if (Win32.GetForegroundWindow() != hwnd && !trayClick && !_tray.ContainsCursor()) window.Hide();
         });
     }
     internal void ShowSettings(SettingsPage page)

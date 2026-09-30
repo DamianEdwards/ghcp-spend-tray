@@ -13,6 +13,7 @@ public sealed record Account
     public string? AvatarUrl { get; init; }
     public decimal[]? ThresholdOverrides { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
+    public bool ExcludeFromTray { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
 
     public void Validate()
@@ -74,6 +75,8 @@ public sealed record AppSettings
     public Account[] Accounts { get; set; } = [];
     public bool RequestOfflineAccess { get; set; }
     public int HistoryRetentionDays { get; set; } = 90;
+    public TrayIconStyle TrayStyle { get; set; }
+    public TrayDisplayMode TrayMode { get; set; }
 
     public void Validate()
     {
@@ -82,6 +85,8 @@ public sealed record AppSettings
             throw new ArgumentException("Polling interval must be between 5 and 1440 minutes.");
         if (HistoryRetentionDays is < 1 or > 3650)
             throw new ArgumentException("History retention must be between 1 and 3650 days.");
+        if (!Enum.IsDefined(TrayStyle) || !Enum.IsDefined(TrayMode))
+            throw new ArgumentException("Unsupported tray display option.");
         ValidateThresholds(AlertThresholds);
         ValidateSpendIncrement(SpendIncrementUsd);
         ArgumentNullException.ThrowIfNull(Accounts);

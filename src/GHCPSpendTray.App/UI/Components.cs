@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 using Microsoft.UI.Xaml;
@@ -178,6 +179,8 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                     model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
                     model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable"),
                 UI.Copy(model.Status).FontSize(12),
+                UI.Copy((model.Tray ?? TrayPresentation.Unavailable).RollUp.Details)
+                    .AutomationId("TrayUsageDetails"),
                 UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12),
                 Button(Session.Busy ? "Refreshing..." : "Refresh consumption", () => Session.Refresh())
                     .AutomationName("Refresh consumption").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Left)
@@ -215,7 +218,33 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             UI.Copy("Check each account every 5 to 1440 minutes. The default is one hour."),
             TextBox(Session.PollMinutes, value => Session.PollMinutes = value).Width(180)
                 .HAlign(HorizontalAlignment.Left).AutomationName("Refresh interval in minutes"))),
-        HStack(10, Button("Save changes", Session.SaveGlobal).IsEnabled(Session.Initialized && !Session.Busy),
+        Card(VStack(12,
+            TextBlock("System tray").SemiBold(),
+            UI.Copy("Show fresh allocation usage, independently of the dollar totals. New accounts are included by default."),
+            TextBlock("Icon style"),
+            ComboBox(["Pie chart", "Percentage number"], (int)Session.TrayStyle,
+                index => { if (index >= 0) { Session.TrayStyle = (TrayIconStyle)index; Session.Notify(); } })
+                .AutomationName("Tray icon style").AutomationId("TrayStyle"),
+            TextBlock("Icons to show"),
+            ComboBox(["One roll-up icon", "One icon per selected account"], (int)Session.TrayMode,
+                index => { if (index >= 0) { Session.TrayMode = (TrayDisplayMode)index; Session.Notify(); } })
+                .AutomationName("Tray display mode").AutomationId("TrayMode"),
+            TextBlock("Included accounts"),
+            Session.Dashboard.Accounts.Count == 0 ? UI.Copy("Connect an account to show its usage.") :
+                VStack(8, Session.Dashboard.Accounts.Select(account =>
+                    CheckBox(!Session.ExcludedTrayAccounts.Contains(account.Key),
+                        value =>
+                        {
+                            if (value == true) Session.ExcludedTrayAccounts.Remove(account.Key);
+                            else Session.ExcludedTrayAccounts.Add(account.Key);
+                            Session.Notify();
+                        }, $"{account.Name} ({account.Host})").AutomationName($"Include {account.Login} on {account.Host} in tray")
+                        .AutomationId("TrayAccount-" + account.Key).WithKey(account.Key)).ToArray()),
+            UI.Copy("! means a partial roll-up; ? means unavailable. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for the percentage; Usage has all inclusion details.").FontSize(12),
+            UI.Copy("A neutral icon remains when nothing is selected. Windows controls which icons appear in the notification area or its overflow.").FontSize(12)
+        )),
+        HStack(10, Button("Save changes", Session.SaveGlobal).AutomationId("SaveGeneralSettings")
+                .IsEnabled(Session.Initialized && !Session.Busy),
             Button("Open data folder", () => Session.OpenLink(Session.Controller.DataDirectory, owner))),
         UI.Copy("Windows manages installation and removal. Install a newer signed package to update; GitHub builds do not check for updates.")
     );

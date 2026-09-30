@@ -21,6 +21,7 @@ internal static class Program
         try
         {
             await DomainTests();
+            await TrayTests();
             await HttpTests();
             await PersistenceTests();
             await AlertTests();
@@ -86,6 +87,141 @@ internal static class Program
 
     private static AppSettings Settings(params Account[] accounts) => new() { Accounts = accounts };
     private static JsonStore Store() => new(Path.Combine(TestRoot, Guid.NewGuid().ToString("N")));
+
+    private static async Task TrayTests()
+    {
+        var second = Account with { UserId = "43", Login = "second" };
+        var settings = Settings(Account, second);
+        AccountState State(Account account, decimal credits, decimal? entitlement = 10000) =>
+            new() { Account = account, Status = AccountStatus.Fresh, Snapshot = Sample(credits, entitlement, account: account) };
+        var first = State(Account, 5000);
+        var next = State(second, 2500, 5000);
+        await Test("tray defaults and legacy JSON preserve all-account roll-up pie", async () =>
+        {
+            var legacy = JsonSerializer.Deserialize(
+                """{"version":1,"accounts":[{"host":"github.com","userId":"42","login":"fixture-user"}]}""",
+                CoreJsonContext.Default.AppSettings)!;
+            legacy.Validate();
+            Equal(TrayIconStyle.Pie, legacy.TrayStyle);
+            Equal(TrayDisplayMode.RollUp, legacy.TrayMode);
+            True(!legacy.Accounts[0].ExcludeFromTray);
+            var store = Store();
+            var saved = legacy with
+            {
+                TrayStyle = TrayIconStyle.Percentage, TrayMode = TrayDisplayMode.PerAccount,
+                Accounts = [Account with { ExcludeFromTray = true }]
+            };
+            await store.SaveSettingsAsync(saved);
+            var restored = (await store.LoadSettingsAsync()).Value;
+            Equal(saved.TrayStyle, restored.TrayStyle);
+            Equal(saved.TrayMode, restored.TrayMode);
+            True(restored.Accounts.Single().ExcludeFromTray);
+            Throws<ArgumentException>(() => (saved with { TrayStyle = (TrayIconStyle)42 }).Validate());
+            Throws<ArgumentException>(() => (saved with { TrayMode = (TrayDisplayMode)42 }).Validate());
+        });
+        await Test("tray weights allocations rather than averaging percentages", () =>
+        {
+            var result = TrayUsage.Create(settings, [first, State(second, 5000, 5000)], Now);
+            True(Math.Abs(result.RollUp.Percent!.Value - 10000d / 15000 * 100) < 1e-10);
+            Equal(2, result.RollUp.IncludedAccounts);
+            True(!result.RollUp.IsPartial);
+            Equal(1, result.Icons.Count);
+            result = TrayUsage.Create(settings, [State(Account, 10, 15), State(second, 20, 15)], Now);
+            Equal<double?>(100, result.RollUp.Percent);
+            True(!result.RollUp.IsOverAllocation, "Floating-point summation must not invent over-allocation.");
+        });
+        await Test("tray excludes every non-fresh status and preserves last-known dollar policy", () =>
+        {
+            foreach (var status in Enum.GetValues<AccountStatus>().Where(s => s != AccountStatus.Fresh))
+            {
+                var failed = next with { Status = status };
+                var result = TrayUsage.Create(settings, [first, failed], Now);
+                Equal<double?>(50, result.RollUp.Percent);
+                True(result.RollUp.IsPartial && result.RollUp.Tooltip.Contains("Partial !"));
+                Equal(1, result.RollUp.IncludedAccounts);
+                Equal(2, result.RollUp.SelectedAccounts);
+                True(result.Accounts[1].Exclusion is not null);
+                Equal(75m, UsageAggregation.Total([first, failed], Now, TimeSpan.FromHours(1)).ConsumptionUsd);
+            }
+        });
+        await Test("tray time alone invalidates percentages including calendar and explicit resets", () =>
+        {
+            var one = Settings(Account);
+            True(TrayUsage.Create(one, [first], Now.AddHours(1)).RollUp.Percent is not null);
+            True(TrayUsage.Create(one, [first], Now.AddHours(1).AddTicks(1)).RollUp.Percent is null);
+            True(TrayUsage.Create(one, [first], Now.AddMonths(1)).RollUp.Percent is null);
+            True(TrayUsage.Create(one, [first], Now.AddTicks(-1)).RollUp.Percent is null);
+            var reset = Now.AddMinutes(30);
+            var explicitReset = first with { Snapshot = first.Snapshot! with
+                { ResetAtUtc = reset, PeriodId = BillingPeriods.Resolve(Now, reset) } };
+            True(TrayUsage.Create(one, [explicitReset], reset.AddTicks(-1)).RollUp.Percent is not null);
+            True(TrayUsage.Create(one, [explicitReset], reset).RollUp.Percent is null);
+        });
+        await Test("tray excludes unknown zero unlimited invalid and missing data", () =>
+        {
+            AccountState[] excluded =
+            [
+                State(second, 0, null), State(second, 0, 0),
+                next with { Snapshot = Sample(account: second, unlimited: true) },
+                next with { Snapshot = next.Snapshot! with { AllocationUsd = -1 } },
+                next with { Snapshot = first.Snapshot },
+                next with { Snapshot = null }
+            ];
+            foreach (var state in excluded)
+            {
+                var result = TrayUsage.Create(settings, [first, state], Now);
+                Equal<double?>(50, result.RollUp.Percent);
+                True(result.RollUp.IsPartial && result.RollUp.Details.Contains("second"));
+            }
+            var missing = TrayUsage.Create(settings, [first], Now);
+            True(missing.RollUp.IsPartial && missing.Accounts[1].Exclusion == "awaiting data");
+        });
+        await Test("tray zero eligible no accounts and no selection always retain neutral access", () =>
+        {
+            foreach (var config in new[] { new AppSettings(), settings, settings with
+                { TrayMode = TrayDisplayMode.PerAccount, Accounts = [Account with { ExcludeFromTray = true }] } })
+            {
+                var result = TrayUsage.Create(config, [], Now);
+                True(result.RollUp.Percent is null && result.RollUp.NumericText == "?");
+                Equal(1, result.Icons.Count);
+                True(!result.RollUp.IsPartial);
+            }
+        });
+        await Test("tray selection and per-account states never change dollar totals", () =>
+        {
+            var config = settings with { TrayMode = TrayDisplayMode.PerAccount };
+            var result = TrayUsage.Create(config, [first, next with { Status = AccountStatus.NetworkError }], Now);
+            Equal(2, result.Icons.Count);
+            Equal(Account.Key, result.Icons[0].AccountKey);
+            True(result.Icons[1].Percent is null);
+            config.Accounts = [Account with { ExcludeFromTray = true }, second];
+            result = TrayUsage.Create(config, [first, next], Now);
+            Equal(1, result.Icons.Count);
+            Equal(second.Key, result.Icons[0].AccountKey);
+            Equal(1, result.RollUp.SelectedAccounts);
+            Equal(75m, UsageAggregation.Total([first, next], Now, TimeSpan.FromHours(1)).ConsumptionUsd);
+        });
+        await Test("tray formats zero fractional exact full over and large percentages", () =>
+        {
+            foreach (var (credits, text) in new (decimal, string)[]
+                { (0, "0"), (.1m, "<1"), (10000, "100"), (10500, "105"), (100000, "999") })
+            {
+                var result = TrayUsage.Create(Settings(Account), [State(Account, credits)], Now).RollUp;
+                Equal(text, result.NumericText);
+                Equal(credits > 10000, result.IsOverAllocation);
+                True(result.Tooltip.Contains(result.ValueText));
+            }
+            var tiny = TrayUsage.Create(Settings(Account), [State(Account, .001m)], Now).RollUp;
+            Equal("<0.01%", tiny.ValueText);
+            var huge = State(Account, decimal.MaxValue, decimal.MaxValue);
+            var huge2 = State(second, decimal.MaxValue, decimal.MaxValue);
+            Equal<double?>(100, TrayUsage.Create(settings, [huge, huge2], Now).RollUp.Percent);
+            var manyAccounts = Enumerable.Range(1, 150).Select(i => Account with
+                { UserId = i.ToString(CultureInfo.InvariantCulture) }).ToArray();
+            var manyStates = manyAccounts.Select(a => State(a, decimal.MaxValue, decimal.MaxValue)).ToArray();
+            Equal<double?>(100, TrayUsage.Create(Settings(manyAccounts), manyStates, Now).RollUp.Percent);
+        });
+    }
 
     private static async Task DomainTests()
     {

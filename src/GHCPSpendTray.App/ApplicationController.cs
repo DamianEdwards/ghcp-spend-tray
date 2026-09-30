@@ -52,7 +52,8 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     public SettingsView Settings => new(_settings.PollIntervalMinutes,
         FormatThresholds(_settings.AlertThresholds), _settings.NotificationsEnabled, _startup?.Enabled ?? false,
         _settings.SpendIncrementUsd, _startup?.CanChange ?? false,
-        Portable ? "Unavailable in isolated portable mode." : _startup?.Description ?? "Loading Windows startup settings...");
+        Portable ? "Unavailable in isolated portable mode." : _startup?.Description ?? "Loading Windows startup settings...",
+        _settings.TrayStyle, _settings.TrayMode, _settings.Accounts.Where(a => a.ExcludeFromTray).Select(a => a.Key).ToArray());
 
     public Task InitializeAsync()
     {
@@ -158,7 +159,13 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 PollIntervalMinutes = settings.PollMinutes,
                 AlertThresholds = ParseThresholds(settings.Thresholds),
                 NotificationsEnabled = settings.Notifications,
-                SpendIncrementUsd = settings.SpendIncrementUsd
+                SpendIncrementUsd = settings.SpendIncrementUsd,
+                TrayStyle = settings.TrayStyle,
+                TrayMode = settings.TrayMode,
+                Accounts = _settings.Accounts.Select(a => a with
+                {
+                    ExcludeFromTray = settings.ExcludedTrayAccounts?.Contains(a.Key, StringComparer.Ordinal) == true
+                }).ToArray()
             };
             next.Validate();
             bool previousStartup = _startup?.Enabled ?? false;
@@ -310,6 +317,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 {
                     account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides,
                         SpendIncrementUsd = previous.SpendIncrementUsd,
+                        ExcludeFromTray = previous.ExcludeFromTray,
                         OAuthClientId = previous.OAuthClientId ?? account.OAuthClientId };
                     await _monitor!.PauseAccountAsync(account.Key, token).ConfigureAwait(false);
                 }
@@ -431,7 +439,8 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 var last = states.Where(s => s.Snapshot is not null).Select(s => s.Snapshot!.FetchedAtUtc).DefaultIfEmpty().Min();
                 if (last != default) tooltip += $"\nOldest update {last.ToLocalTime():HH:mm}";
                 Changed?.Invoke(new(title, status, tooltip, accountViews,
-                    total.IncludedAccounts == 0 ? null : total.ConsumptionUsd, total.IsComplete, total.IsLastKnown));
+                    total.IncludedAccounts == 0 ? null : total.ConsumptionUsd, total.IsComplete, total.IsLastKnown,
+                    TrayUsage.Create(_settings, states, now)));
             }
             finally { _render.Release(); }
         }

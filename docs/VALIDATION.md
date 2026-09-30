@@ -113,6 +113,60 @@ flyout or invent navigation on a top-level settings page. Open a combo-box
 dropdown, text context menu or narrow-window navigation pane and confirm that
 Back does not navigate the account page behind it.
 
+## Configurable tray indicators (September 30, 2026)
+
+The bounded tray implementation adds pie/percentage styles, weighted roll-up or
+per-account icons, and persisted account inclusion. Static application branding
+and packaging assets are unchanged.
+
+`.\tools\verify.ps1 -NativeTests` passed: Release build without warnings, release
+tooling checks, 155 core tests, 14 platform tests and 550 application assertions
+under both JIT and executed x64 Native AOT. Sequential x64 and ARM64 app publishing
+passed with AOT warnings treated as errors. Populated and empty portable smoke
+scenarios passed against the final x64 executable; startup registration was
+unchanged. ARM64 was cross-published, not executed.
+
+- Core fixtures cover omitted-field defaults in version 1 settings, source-generated
+  JSON round trips, invalid enum values, allocation weighting, every non-fresh
+  status, unknown/zero/unlimited allocations, malformed and mismatched snapshots,
+  future observations, freshness deadlines, both billing-period policies, empty
+  selections, fractional/over-allocation values and sums exceeding decimal range.
+- Synthetic controller coverage checks native settings draft reload, persisted
+  exclusions, weighted presentation and failed refreshes without changing
+  last-known dollar totals.
+- Native tests create real HICONs at 16, 20, 24, 32, 48 and 64 pixels; check
+  monochrome partial/unavailable geometry and opaque contrasting pixels; and
+  use an injected Shell boundary to check stable GUIDs/callback IDs, mode changes,
+  reordering, reselection, rejection cleanup, version-4 recovery and disposal.
+  Repeated icon lifetimes/replacements are measured with `GetGuiResources` to
+  detect accumulated GDI/USER handles. These checks do not exercise Explorer UI.
+- The isolated UI smoke path exercises the real WinUI style/mode/account controls,
+  per-account keyboard callbacks, retired callbacks, no-selection access, and
+  simulated `TaskbarCreated`/display-change messages against this app's own icons.
+  It does not restart Explorer or change the user's Windows theme, DPI, contrast,
+  startup registration, or installed app.
+
+Optional renderer samples can be generated from the application harness:
+
+```powershell
+dotnet run --project tests\GHCPSpendTray.AppTests -c Release --no-build -- --tray-samples C:\Temp\tray-samples.bmp
+```
+
+The bitmap contains exact 16px output and 2x nearest-neighbor magnifications.
+Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, and partial 50%;
+rows are light pie, light number, dark pie, dark number. Renderer samples are
+not screenshots of Explorer's notification area.
+
+**Remaining manual acceptance:** real Explorer mouse/keyboard/overflow behavior
+with multiple icons, a real Explorer restart, mixed-DPI monitor/taskbar movement,
+live theme and high-contrast switching, and ARM64 execution. Native palette reads
+use Windows contrast colors when enabled; regular palettes follow the system
+taskbar theme. Each existing icon's monitor DPI is reevaluated on display/theme
+notifications and dashboard updates. Tooltips have Windows' 127-character limit;
+the Usage page is the untruncated source of inclusion reasons. Percentages may
+take up to one minute to age out between updates. Windows retains control of
+overflow visibility and can suppress notifications.
+
 ## Required before production acceptance
 
 - Azure-signed bundle installation as a standard user on a clean Windows 11 system.

@@ -19,12 +19,16 @@ try
     var credentials = new MemoryCredentials();
     using var app = new ApplicationController(root, true, http, credentials);
     int notifications = 0, assertions = 0;
+    TrayTests.Run(Check, root);
+    if (args is ["--tray-samples", var samplePath]) TrayTests.WriteSamples(samplePath);
     DashboardView? view = null;
     app.Changed += next => Volatile.Write(ref view, next);
     app.SetNotificationHandler((_, _, _) => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
     await app.InitializeAsync();
     Check(app.Settings.PollMinutes == 60, "exact one-hour default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
+    Check(app.Settings.TrayStyle == TrayIconStyle.Pie && app.Settings.TrayMode == TrayDisplayMode.RollUp &&
+        app.Settings.ExcludedTrayAccounts!.Length == 0, "initial tray is an all-account roll-up pie");
     var buildVersion = typeof(SettingsComponent).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
         .InformationalVersion.Split('+', 2)[0];
     Check(UI.Version == buildVersion && !string.IsNullOrWhiteSpace(UI.Version),
@@ -139,6 +143,33 @@ try
     Check(!persistedSettings.Contains("synthetic-avatar-token", StringComparison.Ordinal),
         "signed avatar token is never written to settings");
     Check(Volatile.Read(ref view)!.Total.Contains("$53.25"), "three-account consumption total");
+    await Until(() => Volatile.Read(ref view)?.Tray?.RollUp.IncludedAccounts == 3);
+    var tray = Volatile.Read(ref view)!.Tray!;
+    Check(Math.Abs(tray.RollUp.Percent!.Value - 53.25 / 145 * 100) < 1e-10, "controller publishes allocation-weighted tray usage");
+    await app.SaveSettingsAsync(app.Settings with
+    {
+        TrayStyle = TrayIconStyle.Percentage, TrayMode = TrayDisplayMode.PerAccount,
+        ExcludedTrayAccounts = ["github.com:2"]
+    });
+    await Until(() => Volatile.Read(ref view)?.Tray?.Icons.Count == 2);
+    Check((await Load()).Accounts.Single(a => a.Key == "github.com:2").ExcludeFromTray &&
+        (await Load()).TrayStyle == TrayIconStyle.Percentage, "tray style mode and account exclusion persist");
+    using (var traySession = new AppSession(app, action => action()))
+    {
+        traySession.ReloadSettings();
+        Check(traySession.TrayMode == TrayDisplayMode.PerAccount && traySession.ExcludedTrayAccounts.Contains("github.com:2"),
+            "native settings draft reloads account selection and display mode");
+    }
+    handler.FailUsage = true;
+    await app.RefreshAsync("github.com:1");
+    await Until(() => Volatile.Read(ref view)?.Tray?.Accounts.First(a => a.Key == "github.com:1").Percent is null);
+    Check(Volatile.Read(ref view)!.Tray!.RollUp.IsPartial &&
+        Volatile.Read(ref view)!.ConsumptionUsd == 53.25m, "failed refresh invalidates tray percentage but retains dollar accounting");
+    handler.FailUsage = false;
+    await app.RefreshAsync("github.com:1");
+    await Until(() => Volatile.Read(ref view)?.Tray?.RollUp.IncludedAccounts == 2);
+    await app.SaveSettingsAsync(app.Settings with
+        { TrayStyle = TrayIconStyle.Pie, TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] });
     var summary = Volatile.Read(ref view)!.Accounts.Single(account => account.Key == "github.com:1");
     string? picture = summary.AvatarUrl;
     Check(picture is not null && File.Exists(picture) &&
@@ -351,6 +382,7 @@ sealed class FixtureHttp : HttpMessageHandler
     internal bool FailAvatar { get; set; }
     internal bool RedirectAvatar { get; set; }
     internal bool InvalidAvatar { get; set; }
+    internal bool FailUsage { get; set; }
     internal int RefreshRequests { get; private set; }
     internal int OAuthRequests => OAuthClientIds.Count;
     internal List<string> OAuthClientIds { get; } = [];
@@ -424,6 +456,7 @@ sealed class FixtureHttp : HttpMessageHandler
             }
             else if (uri.AbsolutePath == "/copilot_internal/user")
             {
+                if (FailUsage) throw new HttpRequestException("Synthetic offline fixture.");
                 int credits = id switch { "1" => 2625, "2" => 1650, _ => 1050 };
                 int entitlement = id switch { "1" => 2500, "2" => 10000, _ => 2000 };
                 var reset = new DateTimeOffset(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1);

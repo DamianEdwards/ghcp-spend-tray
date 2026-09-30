@@ -32,6 +32,36 @@ internal static unsafe partial class Win32
     [StructLayout(LayoutKind.Sequential)]
     internal struct RECT { internal int left, top, right, bottom; }
     [StructLayout(LayoutKind.Sequential)]
+    internal struct HIGHCONTRAST { internal uint cbSize, dwFlags; internal nint lpszDefaultScheme; }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BITMAPINFOHEADER
+    {
+        internal uint biSize;
+        internal int biWidth, biHeight;
+        internal ushort biPlanes, biBitCount;
+        internal uint biCompression, biSizeImage;
+        internal int biXPelsPerMeter, biYPelsPerMeter;
+        internal uint biClrUsed, biClrImportant;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ICONINFO
+    {
+        internal int fIcon;
+        internal uint xHotspot, yHotspot;
+        internal nint hbmMask, hbmColor;
+    }
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    internal static partial int SystemParametersInfo(uint action, uint parameter, ref HIGHCONTRAST value, uint flags);
+    [LibraryImport("gdi32.dll", SetLastError = true)]
+    internal static partial nint CreateDIBSection(nint dc, ref BITMAPINFOHEADER info, uint usage,
+        out nint bits, nint section, uint offset);
+    [LibraryImport("gdi32.dll", SetLastError = true)]
+    internal static partial nint CreateBitmap(int width, int height, uint planes, uint bitsPerPixel, void* bits);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nint CreateIconIndirect(ref ICONINFO info);
+    [LibraryImport("user32.dll")]
+    internal static partial int GetSystemMetricsForDpi(int index, uint dpi);
+    [StructLayout(LayoutKind.Sequential)]
     internal struct NOTIFYICONIDENTIFIER
     {
         internal uint cbSize;

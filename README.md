@@ -17,6 +17,8 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 ## Features
 
 - A tray flyout with per-account consumption and allocation meters.
+- Configurable pie-chart or percentage tray icons: one weighted roll-up by
+  default, or one icon per selected account.
 - Multiple accounts, including different identities on the same GitHub host.
 - Account avatars in the flyout and account settings when available, with
   initials when an image cannot be shown.
@@ -90,6 +92,32 @@ and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
 is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
+
+In **Settings > General > System tray**, choose **Pie chart** or **Percentage
+number**, one roll-up or per-account icons, and the connected accounts to include.
+Choose **Save changes** to apply and persist the preferences. By default all
+accounts, including newly connected accounts, contribute to a single pie.
+Per-account icons open their account details on click; **Open GHCPSpendTray**
+in any icon's context menu still opens the flyout. Double-click, keyboard access,
+refresh, Settings, notifications and Exit remain available. If no accounts are
+selected or connected, a neutral access icon remains.
+
+The roll-up percentage is **eligible consumption divided by the same accounts'
+eligible allocation**, not an average of account percentages. Only valid, fresh,
+current-period observations with known, finite positive allocation qualify.
+Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
+excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
+available, not zero. Hover for the percentage and included/selected counts;
+**Settings > Usage** lists every selected account and its inclusion or exclusion
+reason. These preferences do not filter or change the existing dollar totals.
+
+Numbers are rounded to whole percentages, with `<1` below 1% and `999+` above
+999%. Pies fill to 100%; a `+` on either style marks over-allocation. Tooltips retain the
+unsaturated percentage (up to two decimals, with `<0.01%` for smaller nonzero
+values) and label over-allocation. Eligibility is reevaluated at least every
+minute and on refresh/resume, including billing rollover. Windows controls
+notification-area overflow and icon visibility; the app cannot force icons to
+remain unhidden.
 
 In **Settings > Notifications**, you can also set a USD increment (for example,
 `50` for alerts at $50, $100, and so on). An account can inherit that value,

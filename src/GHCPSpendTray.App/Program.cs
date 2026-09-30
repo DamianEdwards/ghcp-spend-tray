@@ -1,6 +1,7 @@
 using GHCPSpendTray.App.Native;
 using GHCPSpendTray.App.Platform;
 using GHCPSpendTray.App.UI;
+using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -252,6 +253,7 @@ internal static class Program
                 });
                 await Task.Delay(300);
             }
+            await SmokeTraySettingsAsync(shell);
             await OnUI(shell, () => shell.SettingsWindow!.NativeWindow.Close());
             await Task.Delay(300);
             await OnUI(shell, () =>
@@ -271,6 +273,8 @@ internal static class Program
                     "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
                     "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, " +
                     "account Back controls and scoped keyboard accelerator registration, native controls, " +
+                    "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
+                    "simulated TaskbarCreated recovery and display-change repaint, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -318,8 +322,107 @@ internal static class Program
         throw new InvalidOperationException($"Tray flyout did not become {(expected ? "visible" : "hidden")} {stage}.");
     }
 
-    private static void SendTraySelection(ReactorShell shell, int notification) =>
-        Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((1 << 16) | notification));
+    private static async Task SmokeTraySettingsAsync(ReactorShell shell)
+    {
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "TrayStyle") is not ComboBox style ||
+                Find(shell.SettingsWindow!, "TrayMode") is not ComboBox mode)
+                throw new InvalidOperationException("Native tray settings controls did not render.");
+            style.SelectedIndex = 1;
+            mode.SelectedIndex = 1;
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
+        });
+        await WaitForTraySave();
+        uint retired = 0;
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Controller.Settings is not { TrayStyle: TrayIconStyle.Percentage, TrayMode: TrayDisplayMode.PerAccount } ||
+                shell.TrayIcons.Count != Math.Max(1, shell.Session.Dashboard.Accounts.Count))
+                throw new InvalidOperationException("Tray preferences did not reach the Shell.");
+            var icon = shell.TrayIcons.First();
+            if (icon.AccountKey is not null)
+            {
+                retired = icon.Id;
+                SendTraySelection(shell, 0x401, icon.Id);
+            }
+            // Only this app's icons are re-added; Explorer and other apps are untouched.
+            Win32.SendMessage(shell.TrayHandle, Win32.RegisterWindowMessage("TaskbarCreated"), 0, 0);
+            Win32.SendMessage(shell.TrayHandle, 0x7E, 0, 0);
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            if (retired != 0 && shell.Session.SelectedAccount != shell.TrayIcons.First().AccountKey)
+                throw new InvalidOperationException("Per-account callback opened the wrong identity.");
+            shell.ShowSettings(SettingsPage.General);
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            foreach (var account in shell.Session.Dashboard.Accounts)
+            {
+                if (Find(shell.SettingsWindow!, "TrayAccount-" + account.Key) is not CheckBox selection)
+                    throw new InvalidOperationException("Account inclusion checkbox is missing.");
+                selection.IsChecked = false;
+            }
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
+        });
+        await WaitForTraySave();
+        await OnUI(shell, () =>
+        {
+            if (shell.TrayIcons.Count != 1 || shell.TrayIcons.First().AccountKey is not null ||
+                shell.Session.Dashboard.Tray?.RollUp.Percent is not null)
+                throw new InvalidOperationException("Empty selection did not retain a neutral access icon.");
+            if (retired != 0)
+            {
+                int revision = shell.Session.Revision;
+                SendTraySelection(shell, 0x401, retired);
+                if (shell.Session.Revision != revision)
+                    throw new InvalidOperationException("A retired callback was processed.");
+            }
+            SendTraySelection(shell, 0x401);
+        });
+        await WaitForFlyoutVisibility(shell, true, "with no selected tray accounts");
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            ((ComboBox)Find(shell.SettingsWindow!, "TrayStyle")!).SelectedIndex = 0;
+            ((ComboBox)Find(shell.SettingsWindow!, "TrayMode")!).SelectedIndex = 0;
+            foreach (var account in shell.Session.Dashboard.Accounts)
+                ((CheckBox)Find(shell.SettingsWindow!, "TrayAccount-" + account.Key)!).IsChecked = true;
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
+        });
+        await WaitForTraySave();
+        await OnUI(shell, () =>
+        {
+            if (shell.TrayIcons.Count != 1 || shell.Session.Controller.Settings.TrayStyle != TrayIconStyle.Pie)
+                throw new InvalidOperationException("Restoring the roll-up pie failed.");
+            shell.Session.Navigate(SettingsPage.Notifications);
+        });
+
+        async Task WaitForTraySave()
+        {
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                bool ready = false;
+                await OnUI(shell, () =>
+                {
+                    if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
+                    ready = !shell.Session.Busy && shell.Session.Notice == "Settings saved.";
+                });
+                if (ready) { await Task.Delay(100); return; }
+                await Task.Delay(30);
+            }
+            throw new TimeoutException("Tray settings save did not complete.");
+        }
+    }
+
+    private static void SendTraySelection(ReactorShell shell, int notification, uint id = 1) =>
+        Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((id << 16) | (uint)notification));
 
     private static void InvokeButton(Button button)
     {

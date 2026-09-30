@@ -45,6 +45,9 @@ internal sealed class AppSession : IDisposable
     internal string Increment { get; set; } = "";
     internal bool Notifications { get; set; } = true;
     internal bool Startup { get; set; }
+    internal TrayIconStyle TrayStyle { get; set; }
+    internal TrayDisplayMode TrayMode { get; set; }
+    internal HashSet<string> ExcludedTrayAccounts { get; } = new(StringComparer.Ordinal);
     internal string DisplayName { get; set; } = "";
     internal string AccountThresholds { get; set; } = "";
     internal string AccountIncrement { get; set; } = "";
@@ -74,6 +77,9 @@ internal sealed class AppSession : IDisposable
         Thresholds = settings.Thresholds;
         Increment = settings.SpendIncrementUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
         Notifications = settings.Notifications; Startup = settings.Startup;
+        TrayStyle = settings.TrayStyle; TrayMode = settings.TrayMode;
+        ExcludedTrayAccounts.Clear();
+        ExcludedTrayAccounts.UnionWith(settings.ExcludedTrayAccounts ?? []);
     }
     internal void Navigate(SettingsPage page)
     {
@@ -161,7 +167,8 @@ internal sealed class AppSession : IDisposable
         if (!int.TryParse(PollMinutes, out var minutes) || minutes is < 5 or > 1440)
         { SetError("Enter a polling interval from 5 through 1440 minutes."); return; }
         if (!TryAmount(Increment, out var increment)) return;
-        var next = new SettingsView(minutes, Thresholds, Notifications, Startup, increment);
+        var next = new SettingsView(minutes, Thresholds, Notifications, Startup, increment,
+            TrayStyle: TrayStyle, TrayMode: TrayMode, ExcludedTrayAccounts: ExcludedTrayAccounts.ToArray());
         Run(() => Controller.SaveSettingsAsync(next),
             () => { ReloadSettings(); Notice = "Settings saved."; },
             () => Startup = Controller.Settings.Startup);
@@ -190,6 +197,7 @@ internal sealed class AppSession : IDisposable
         if (SelectedAccount is not { } key) return;
         Run(() => Controller.RemoveAsync(key), () =>
         {
+            ExcludedTrayAccounts.Remove(key);
             SelectedAccount = null; ConfirmRemove = false; Notice = "Account removed from this device.";
         });
     }
@@ -270,6 +278,11 @@ internal sealed class AppSession : IDisposable
         return true;
     }
     internal void SetError(string message) { Error = message; Notice = null; Notify(); }
+    internal void ReportTrayError()
+    {
+        const string message = "Windows could not update the tray display. Open Settings or refresh to retry.";
+        if (Error != message) SetError(message);
+    }
     internal void OpenLink(string uri, nint owner)
     {
         try { ShellServices.Open(uri, owner); }
