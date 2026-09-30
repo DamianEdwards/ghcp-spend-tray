@@ -92,6 +92,27 @@ separately rather than changing artwork or deleting user caches. No package
 registration, OS theme/scale changes, or signed upgrade was performed for this
 regression, and cross-publishing does not establish ARM64 shell behavior.
 
+## Settings Back input regression checks
+
+The application harness covers the shared Back action on account details, add
+and reconnect forms, all sign-in stages, hidden/stale targets, busy operations,
+canceled-operation callbacks and settings closure. Back cancels active sign-in
+without leaving the form; a subsequent Back returns to the accounts list.
+Top-level settings pages have no Back history and leave the input unhandled.
+
+The native UI smoke path checks both visible account Back controls and the
+settings-scoped Alt+Left and GoBack keyboard accelerator registration after
+rerenders and settings-window recreation. Physical input delivery is a separate
+manual acceptance check (posting Win32 mouse messages did not generate WinUI
+pointer events in the local smoke environment):
+with focus in a text box, verify Alt+Left and mouse XButton1 perform the same
+action as the visible Back control, while Backspace, Left, Ctrl+Left,
+selection shortcuts and mouse Forward retain their ordinary behavior. Repeat
+after closing/reopening settings, and verify Back does not dismiss the tray
+flyout or invent navigation on a top-level settings page. Open a combo-box
+dropdown, text context menu or narrow-window navigation pane and confirm that
+Back does not navigate the account page behind it.
+
 ## Required before production acceptance
 
 - Azure-signed bundle installation as a standard user on a clean Windows 11 system.

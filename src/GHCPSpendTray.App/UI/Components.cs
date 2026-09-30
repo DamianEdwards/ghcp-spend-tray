@@ -297,15 +297,12 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                     : Session.SigningIn ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Requesting device sign-in...")) : null,
             HStack(10,
                 Button("Start device sign-in", Session.StartSignIn).IsEnabled(!Session.SigningIn && !Session.Busy),
-                Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () =>
-                {
-                    if (Session.SigningIn) Session.CancelSignIn();
-                    else { Session.CloseSettings(); Session.Navigate(SettingsPage.Accounts); }
-                }).AutomationName(Session.SigningIn ? "Cancel sign-in" : "Back to accounts"))
+                Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () => Session.TryGoBack())
+                    .AutomationName(Session.SigningIn ? "Cancel sign-in" : "Back to accounts").AutomationId("AccountBack"))
         ).AutomationId("AccountOnboarding");
     }
     private Element AccountDetails(AccountView account, nint owner) => VStack(18,
-        HStack(10, Button("Back", () => { Session.CloseSettings(); Session.Navigate(SettingsPage.Accounts); }),
+        HStack(10, Button("Back", () => Session.TryGoBack()).AutomationId("AccountBack"),
             UI.AccountPicture(account, 48),
             VStack(2, TextBlock(account.Name).FontSize(22).SemiBold(), UI.Copy(account.Host).FontSize(12))
                 .VAlign(VerticalAlignment.Center)),

@@ -131,6 +131,7 @@ internal static class Program
                     throw new InvalidOperationException("Settings did not dismiss the flyout.");
                 if (shell.Session.Page != SettingsPage.Usage || Find(shell.SettingsWindow!, "UsagePage") is null)
                     throw new InvalidOperationException("Settings did not open on the usage page.");
+                AssertBackAccelerators(shell.SettingsWindow!);
                 if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
                     throw new InvalidOperationException("Usage refresh control did not render.");
                 if (shell.Session.Dashboard.Accounts.Count == 0)
@@ -198,6 +199,17 @@ internal static class Program
                 var settings = shell.SettingsWindow ?? throw new InvalidOperationException("Settings did not open.");
                 if (Find(settings, "AccountOnboarding") is null || Find(settings, "AccountHostSelection") is not ComboBox)
                     throw new InvalidOperationException("Add-account deep link did not render.");
+                if (Find(settings, "AccountBack") is not Button back)
+                    throw new InvalidOperationException("Onboarding Back action did not render.");
+                InvokeButton(back);
+            });
+            await Task.Delay(300);
+            await OnUI(shell, () =>
+            {
+                if (shell.Session.ShowAddForm || shell.Session.CanGoBack ||
+                    Find(shell.SettingsWindow!, "AccountOnboarding") is not null)
+                    throw new InvalidOperationException("Onboarding Back did not return to the accounts list.");
+                AssertBackAccelerators(shell.SettingsWindow!);
                 shell.Session.Navigate(SettingsPage.Notifications);
             });
             await Task.Delay(500);
@@ -227,18 +239,38 @@ internal static class Program
                 {
                     if (Find(shell.SettingsWindow!, "DetailCredits") is not TextBlock { Text: "2,625" })
                         throw new InvalidOperationException("Expanded account details did not expose labeled data.");
+                    if (Find(shell.SettingsWindow!, "AccountBack") is not Button back)
+                        throw new InvalidOperationException("Account details Back action did not render.");
+                    InvokeButton(back);
+                });
+                await Task.Delay(300);
+                await OnUI(shell, () =>
+                {
+                    if (shell.Session.SelectedAccount is not null || shell.Session.CanGoBack)
+                        throw new InvalidOperationException("Account details Back did not return to accounts.");
                     shell.Session.Navigate(SettingsPage.Notifications);
                 });
                 await Task.Delay(300);
             }
+            await OnUI(shell, () => shell.SettingsWindow!.NativeWindow.Close());
+            await Task.Delay(300);
             await OnUI(shell, () =>
             {
+                if (shell.SettingsWindow is not null || shell.Session.CanGoBack)
+                    throw new InvalidOperationException("Closing settings retained its window or Back target.");
+                shell.ShowSettings(SettingsPage.Notifications);
+            });
+            await Task.Delay(300);
+            await OnUI(shell, () =>
+            {
+                AssertBackAccelerators(shell.SettingsWindow!);
                 if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
                     "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
-                    "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, native controls, " +
+                    "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, " +
+                    "account Back controls and scoped keyboard accelerator registration, native controls, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -250,6 +282,16 @@ internal static class Program
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
+    }
+    private static void AssertBackAccelerators(ReactorWindow window)
+    {
+        if (window.NativeWindow.Content is not UIElement root ||
+            root.KeyboardAccelerators.Count != 2 ||
+            !root.KeyboardAccelerators.Any(a => a.Key == Windows.System.VirtualKey.Left &&
+                a.Modifiers == Windows.System.VirtualKeyModifiers.Menu && a.ScopeOwner == root) ||
+            !root.KeyboardAccelerators.Any(a => a.Key == Windows.System.VirtualKey.GoBack &&
+                a.Modifiers == Windows.System.VirtualKeyModifiers.None && a.ScopeOwner == root))
+            throw new InvalidOperationException("Settings Back keyboard accelerators are missing, duplicated or incorrectly scoped.");
     }
     private static nint FlyoutHwnd(ReactorShell shell) =>
         WinRT.Interop.WindowNative.GetWindowHandle((shell.Flyout ??

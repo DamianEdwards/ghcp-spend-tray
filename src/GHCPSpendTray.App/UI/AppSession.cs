@@ -29,6 +29,8 @@ internal sealed class AppSession : IDisposable
     internal string? Notice { get; private set; }
     internal string? SelectedAccount { get; private set; }
     internal bool ShowAddForm { get; private set; }
+    internal bool CanGoBack => !_disposed && Page == SettingsPage.Accounts &&
+        (ShowAddForm || SelectedAccount is { } key && Dashboard.Accounts.Any(account => account.Key == key));
     internal bool ConfirmRemove { get; set; }
     internal bool ShowAdvancedDetails { get; set; }
     internal DevicePrompt? Prompt { get; private set; }
@@ -260,6 +262,13 @@ internal sealed class AppSession : IDisposable
         Notify();
     }
     internal void CloseSettings() { CancelSignIn(); ShowAddForm = false; SelectedAccount = null; }
+    internal bool TryGoBack()
+    {
+        if (!CanGoBack) return false;
+        if (ShowAddForm && SigningIn) CancelSignIn();
+        else { CloseSettings(); Navigate(SettingsPage.Accounts); }
+        return true;
+    }
     internal void SetError(string message) { Error = message; Notice = null; Notify(); }
     internal void OpenLink(string uri, nint owner)
     {

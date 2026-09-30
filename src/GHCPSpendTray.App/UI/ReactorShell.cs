@@ -1,8 +1,12 @@
 using GHCPSpendTray.App.Native;
 using GHCPSpendTray.App.Platform;
+using Microsoft.UI.Input;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.System;
 
@@ -132,6 +136,22 @@ internal sealed class ReactorShell : IDisposable
                 CornerStyle = WindowCornerStyle.Rounded,
                 Icon = WindowIcon.FromPath(Path.Combine(AppContext.BaseDirectory, "Assets", "GHCPSpendTray.ico"))
             }, () => new SettingsComponent(_session));
+            if (_settings.NativeWindow.Content is UIElement root)
+            {
+                var altLeft = new KeyboardAccelerator
+                    { Key = VirtualKey.Left, Modifiers = VirtualKeyModifiers.Menu, ScopeOwner = root };
+                var back = new KeyboardAccelerator { Key = VirtualKey.GoBack, ScopeOwner = root };
+                altLeft.Invoked += (_, e) => e.Handled = TryGoBack(root);
+                back.Invoked += (_, e) => e.Handled = TryGoBack(root);
+                root.KeyboardAccelerators.Add(altLeft);
+                root.KeyboardAccelerators.Add(back);
+                root.PointerPressed += (_, e) =>
+                {
+                    if (e.GetCurrentPoint(root).Properties.PointerUpdateKind == PointerUpdateKind.XButton1Pressed &&
+                        TryGoBack(root))
+                        e.Handled = true;
+                };
+            }
             _settings.Closed += (_, _) => { _settings = null; _session.CloseSettings(); };
             _settings.NativeWindow.Activated += (_, e) =>
             {
@@ -143,6 +163,18 @@ internal sealed class ReactorShell : IDisposable
             };
         }
         _settings.Show(); _settings.Activate();
+    }
+    private bool TryGoBack(UIElement root) =>
+        VisualTreeHelper.GetOpenPopupsForXamlRoot(root.XamlRoot).Count == 0 &&
+        !HasOverlayPane(root) && _session.TryGoBack();
+
+    private static bool HasOverlayPane(DependencyObject element)
+    {
+        if (element is NavigationView navigation)
+            return navigation.IsPaneOpen && navigation.DisplayMode != NavigationViewDisplayMode.Expanded;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++)
+            if (HasOverlayPane(VisualTreeHelper.GetChild(element, i))) return true;
+        return false;
     }
     internal void Exit()
     {

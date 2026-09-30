@@ -297,6 +297,7 @@ try
     }
     foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         Check(!(await File.ReadAllTextAsync(file)).Contains("fixture-", StringComparison.Ordinal), "no token in persisted files");
+    assertions += await BackNavigationTests.RunAsync(root);
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");
 
     void Check(bool condition, string description)
