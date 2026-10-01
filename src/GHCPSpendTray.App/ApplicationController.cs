@@ -461,17 +461,24 @@ internal sealed class ApplicationController : IApplicationController, INotificat
     }
     private static string FormatThresholds(decimal[] values) => string.Join(", ", values.Select(v => v.ToString("0.##", CultureInfo.InvariantCulture)));
     private static string Money(decimal value) => "$" + value.ToString("N2", CultureInfo.GetCultureInfo("en-US"));
-    private static AppOperationException SafeError(Exception ex) => ex switch
+    private static AppOperationException SafeError(Exception ex)
     {
-        AppOperationException known => known,
-        StartupRegistrationException startup => new(startup.Message),
-        ServiceException service => new(service.Message),
-        HttpRequestException or InvalidDataException => new("Avatar could not be downloaded. Check this account's access and try Refresh again."),
-        ArgumentException => new("Invalid settings or host. Check the displayed values and supported ranges."),
-        IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception =>
-            new("Local storage or Credential Manager could not complete the operation. Check permissions and free space; existing configuration was preserved where possible."),
-        _ => new("The request failed or timed out. Check connectivity and the host's OAuth app approval.")
-    };
+        if (ex is CredentialVaultException credential)
+            Diagnostics.Record($"Credential Manager {credential.Operation} failed (Win32 error {credential.NativeErrorCode}).");
+        return ex switch
+        {
+            AppOperationException known => known,
+            StartupRegistrationException startup => new(startup.Message),
+            ServiceException service => new(service.Message),
+            CredentialVaultException { Operation: "write", NativeErrorCode: 8 } =>
+                new("Windows Credential Manager could not save the credentials (Windows error 8). Its credential store may be full. Open Control Panel > Credential Manager > Windows Credentials, remove only entries you recognize as unused, then try signing in again."),
+            HttpRequestException or InvalidDataException => new("Avatar could not be downloaded. Check this account's access and try Refresh again."),
+            ArgumentException => new("Invalid settings or host. Check the displayed values and supported ranges."),
+            IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception =>
+                new("Local storage or Credential Manager could not complete the operation. Check permissions and free space; existing configuration was preserved where possible."),
+            _ => new("The request failed or timed out. Check connectivity and the host's OAuth app approval.")
+        };
+    }
     public void Dispose()
     {
         if (_disposed) return;
