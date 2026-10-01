@@ -135,6 +135,37 @@ try
         _ => { }, () => { }, default, "other-registration"));
     Check(handler.OAuthRequests == 0, "github.com cannot use another OAuth registration");
 
+    var credentialLogRoot = Path.Combine(root, "credential-diagnostics");
+    Diagnostics.Initialize(credentialLogRoot);
+    credentials.WriteError = new CredentialVaultException(8, "write", "synthetic-secret-must-not-be-logged");
+    try
+    {
+        await app.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default);
+        throw new Exception("Expected credential store exhaustion to fail sign-in.");
+    }
+    catch (AppOperationException ex)
+    {
+        Check(ex.Message.Contains("Windows error 8") && ex.Message.Contains("Windows Credentials"),
+            "credential store exhaustion offers actionable cleanup guidance");
+    }
+    Check(credentials.Values.IsEmpty && (await Load()).Accounts.Length == 0,
+        "credential write failure does not persist the account");
+    string credentialLog = await File.ReadAllTextAsync(Path.Combine(credentialLogRoot, "logs", "diagnostics.log"));
+    Check(credentialLog.Contains("Credential Manager write failed (Win32 error 8).") &&
+        !credentialLog.Contains("synthetic-secret"),
+        "credential diagnostics record operation and native code without exception messages");
+    credentials.WriteError = new CredentialVaultException(5, "write", "synthetic-secret");
+    try
+    {
+        await app.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default);
+        throw new Exception("Expected credential permission failure.");
+    }
+    catch (AppOperationException ex)
+    {
+        Check(ex.Message.Contains("Check permissions and free space") && !ex.Message.Contains("may be full"),
+            "other credential errors retain general storage guidance");
+    }
+    credentials.WriteError = null;
     await Add("github.com", "1");
     await Add("github.com", "2");
     await Add("msft.ghe.com", "3");
@@ -456,10 +487,15 @@ finally
 sealed class MemoryCredentials : ICredentialStore
 {
     internal ConcurrentDictionary<string, TokenSet> Values { get; } = new(StringComparer.Ordinal);
+    internal Exception? WriteError { get; set; }
     public Task<TokenSet?> ReadAsync(Account account, CancellationToken cancellationToken = default) =>
         Task.FromResult(Values.GetValueOrDefault(account.Key));
     public Task WriteAsync(Account account, TokenSet tokens, CancellationToken cancellationToken = default)
-    { Values[account.Key] = tokens; return Task.CompletedTask; }
+    {
+        if (WriteError is { } error) throw error;
+        Values[account.Key] = tokens;
+        return Task.CompletedTask;
+    }
     public Task DeleteAsync(Account account, CancellationToken cancellationToken = default)
     { Values.TryRemove(account.Key, out _); return Task.CompletedTask; }
 }

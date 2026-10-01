@@ -22,7 +22,7 @@ public sealed partial class CredentialVault
             credential?.Dispose();
             if (error == NotFound)
                 return null;
-            throw new Win32Exception(error, "Could not read the GHCPSpendTray credential.");
+            throw new CredentialVaultException(error, "read", "Could not read the GHCPSpendTray credential.");
         }
 
         using (credential)
@@ -58,7 +58,7 @@ public sealed partial class CredentialVault
                     Persist = 2 // CRED_PERSIST_LOCAL_MACHINE: current user, subsequent logons.
                 };
                 if (!CredWrite(in credential, 0))
-                    throw new Win32Exception(Marshal.GetLastPInvokeError(), "Could not save the GHCPSpendTray credential.");
+                    throw new CredentialVaultException(Marshal.GetLastPInvokeError(), "write", "Could not save the GHCPSpendTray credential.");
             }
         }
         finally
@@ -74,7 +74,7 @@ public sealed partial class CredentialVault
         {
             var error = Marshal.GetLastPInvokeError();
             if (error != NotFound)
-                throw new Win32Exception(error, "Could not delete the GHCPSpendTray credential.");
+                throw new CredentialVaultException(error, "delete", "Could not delete the GHCPSpendTray credential.");
         }
     }
 
@@ -126,4 +126,9 @@ public sealed partial class CredentialVault
 
     [LibraryImport("advapi32.dll", EntryPoint = "CredFree")]
     private static partial void CredFree(nint credential);
+}
+
+internal sealed class CredentialVaultException(int error, string operation, string message) : Win32Exception(error, message)
+{
+    internal string Operation { get; } = operation;
 }
