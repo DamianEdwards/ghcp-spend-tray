@@ -11,7 +11,6 @@ internal sealed class AppSession : IDisposable
     private readonly Action<Action> _dispatch;
     private CancellationTokenSource? _signIn;
     private readonly CancellationTokenSource _lifetime = new();
-    private TaskCompletionSource<bool>? _confirmation;
     private string? _notice;
     private readonly System.Threading.Timer _countdown;
     private bool _disposed;
@@ -23,6 +22,7 @@ internal sealed class AppSession : IDisposable
     internal Action<SettingsPage>? OpenSettings { get; set; }
     internal Action? HideFlyout { get; set; }
     internal Func<bool>? TestNotification { get; set; }
+    internal Action<string>? CopyToClipboard { get; set; }
     internal int Revision { get; private set; }
     internal bool Initialized { get; private set; }
     internal bool Busy { get; private set; }
@@ -34,7 +34,10 @@ internal sealed class AppSession : IDisposable
         private set { _notice = value; NoticeIsSuccess = false; }
     }
     internal bool NoticeIsSuccess { get; private set; }
-    internal bool ConnectingAccount => _confirmation?.Task is { IsCompletedSuccessfully: true, Result: true };
+    internal bool ConnectingAccount { get; private set; }
+    internal bool EditingHost { get; private set; }
+    internal bool CodeCopied { get; private set; }
+    internal string? ClipboardError { get; private set; }
     internal string? SelectedAccount { get; private set; }
     internal bool ShowAddForm { get; private set; }
     internal bool CanGoBack => !_disposed && Page == SettingsPage.Accounts &&
@@ -42,7 +45,6 @@ internal sealed class AppSession : IDisposable
     internal bool ConfirmRemove { get; set; }
     internal bool ShowAdvancedDetails { get; set; }
     internal DevicePrompt? Prompt { get; private set; }
-    internal PendingIdentity? Identity { get; private set; }
     internal string Host { get; set; } = "github.com";
     internal bool CustomHost { get; private set; }
     internal string ClientId { get; private set; } = "";
@@ -119,10 +121,10 @@ internal sealed class AppSession : IDisposable
         CancelSignIn();
         Page = SettingsPage.Accounts; ShowAddForm = true; SelectedAccount = null;
         ReconnectKey = null; Host = "github.com"; CustomHost = false; ClientId = "";
-        Prompt = null; Identity = null;
+        EditingHost = false;
         Error = null; Notice = null;
         OpenSettings?.Invoke(SettingsPage.Accounts);
-        Notify();
+        StartSignIn();
     }
     internal void EditAccount(string key)
     {
@@ -143,10 +145,23 @@ internal sealed class AppSession : IDisposable
     internal void Reconnect(AccountView account)
     {
         CancelSignIn();
-        Host = account.Host; CustomHost = account.Host != "github.com";
-        ClientId = CustomHost ? Controller.AccountClientId(account.Key) ?? "" : "";
-        ReconnectKey = account.Key; SelectedAccount = null;
-        ShowAddForm = true; Prompt = null; Identity = null; Error = null; Notice = null; Notify();
+        try
+        {
+            Host = account.Host; CustomHost = account.Host != "github.com";
+            ClientId = CustomHost ? Controller.AccountClientId(account.Key) ?? "" : "";
+            ReconnectKey = account.Key; SelectedAccount = null;
+            ShowAddForm = true; Error = null; Notice = null;
+            EditingHost = CustomHost && string.IsNullOrWhiteSpace(ClientId);
+            if (EditingHost) Notify();
+            else StartSignIn();
+        }
+        catch (Exception ex) { SetError(SafeMessage(ex)); }
+    }
+    internal void ChangeHost()
+    {
+        if (ReconnectKey is not null || ConnectingAccount) return;
+        CancelSignIn();
+        EditingHost = true; Error = null; Notice = null; Notify();
     }
     internal void SelectHost(bool custom)
     {
@@ -237,15 +252,20 @@ internal sealed class AppSession : IDisposable
     }
     internal void StartSignIn()
     {
-        if (SigningIn || Busy) return;
+        if (SigningIn || _disposed) return;
         if (CustomHost)
         {
             try { _ = GitHubOAuth.ResolveClientId(Host, ClientId); }
             catch (Exception ex) when (ex is ArgumentException or ServiceException)
-            { SetError(ex.Message); return; }
+            {
+                Diagnostics.Record($"Account sign-in host validation failed ({ex.GetType().Name}).");
+                SetError(ex.Message);
+                return;
+            }
         }
         var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        _signIn = cancel; Prompt = null; Identity = null; Error = null; Notice = null;
+        _signIn = cancel; Prompt = null; ConnectingAccount = false; EditingHost = false;
+        CodeCopied = false; ClipboardError = null; Error = null; Notice = null;
         string host = Host; bool offline = OfflineAccess; string? reconnect = ReconnectKey;
         string? clientId = CustomHost ? ClientId : null;
         Notify();
@@ -254,17 +274,17 @@ internal sealed class AppSession : IDisposable
             try
             {
                 await Controller.AddAsync(host, offline, reconnect,
-                    prompt => Post(() => { if (_signIn == cancel) { Prompt = prompt; Notify(); } }),
-                    identity =>
+                    prompt => Post(() =>
                     {
-                        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                        Post(() =>
-                        {
-                            if (_signIn != cancel) { completion.TrySetCanceled(); return; }
-                            _confirmation = completion; Identity = identity; Prompt = null; Notice = null; Notify();
-                        });
-                        return completion.Task.WaitAsync(cancel.Token);
-                    }, cancel.Token, clientId).ConfigureAwait(false);
+                        if (_signIn != cancel || ConnectingAccount) return;
+                        Prompt = prompt;
+                        CopyCode();
+                    }),
+                    () => Post(() =>
+                    {
+                        if (_signIn != cancel) return;
+                        ConnectingAccount = true; Prompt = null; CodeCopied = false; ClipboardError = null; Notice = null; Notify();
+                    }), cancel.Token, clientId).ConfigureAwait(false);
                 Post(() =>
                 {
                     if (_signIn != cancel) return;
@@ -273,21 +293,25 @@ internal sealed class AppSession : IDisposable
                     NoticeIsSuccess = true;
                 });
             }
-            catch (OperationCanceledException) { }
-            catch (Exception ex) { Post(() => { if (_signIn == cancel) SetError(SafeMessage(ex)); }); }
+            catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
+            catch (Exception ex)
+            {
+                string message = SafeMessage(ex);
+                Post(() => { if (_signIn == cancel) SetError(message); });
+            }
             finally
             {
                 Post(() =>
                 {
-                    if (_signIn == cancel) { _signIn = null; Prompt = null; Identity = null; _confirmation = null; Notify(); }
+                    if (_signIn == cancel)
+                    {
+                        _signIn = null; Prompt = null; ConnectingAccount = false;
+                        CodeCopied = false; ClipboardError = null; Notify();
+                    }
                 });
                 cancel.Dispose();
             }
         });
-    }
-    internal void ConfirmIdentity(bool accepted)
-    {
-        if (_confirmation?.TrySetResult(accepted) == true) Notify();
     }
     internal void CancelSignIn()
     {
@@ -297,8 +321,7 @@ internal sealed class AppSession : IDisposable
             try { cancel.Cancel(); }
             catch (ObjectDisposedException) { /* Completion already disposed this operation. */ }
         }
-        _confirmation?.TrySetResult(false); _confirmation = null;
-        Prompt = null; Identity = null;
+        Prompt = null; ConnectingAccount = false; CodeCopied = false; ClipboardError = null;
         Notify();
     }
     internal void CloseSettings() { CancelSignIn(); ShowAddForm = false; SelectedAccount = null; }
@@ -320,11 +343,35 @@ internal sealed class AppSession : IDisposable
         try { ShellServices.Open(uri, owner); }
         catch (Exception ex) { SetError(SafeMessage(ex)); }
     }
-    internal void CopyCode(nint owner)
+    internal void OpenSignInBrowser(nint owner)
     {
         if (Prompt is not { } prompt) return;
-        try { ShellServices.CopyText(owner, prompt.Code); Notice = "Code copied."; Notify(); }
-        catch (Exception) { SetError("The clipboard is busy. Select the code and copy it, or try again."); }
+        try
+        {
+            ShellServices.Open(prompt.VerificationUri.AbsoluteUri, owner);
+            Error = null; Notify();
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.Record($"Account sign-in browser launch failed ({ex.GetType().Name}).");
+            SetError("The browser could not be opened. Try Open browser again.");
+        }
+    }
+    internal void CopyCode()
+    {
+        if (Prompt is not { } prompt) return;
+        try
+        {
+            (CopyToClipboard ?? throw new InvalidOperationException("No clipboard owner is available."))(prompt.Code);
+            CodeCopied = true; ClipboardError = null;
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.Record($"Account sign-in code copy failed ({ex.GetType().Name}).");
+            CodeCopied = false;
+            ClipboardError = "The code could not be copied. Select Copy code to retry, or select and copy it yourself.";
+        }
+        Notify();
     }
     internal void SendTest()
     {
@@ -344,6 +391,5 @@ internal sealed class AppSession : IDisposable
         _disposed = true;
         _lifetime.Cancel(); _countdown.Dispose();
         Controller.Changed -= OnDashboard;
-        _confirmation?.TrySetCanceled();
     }
 }

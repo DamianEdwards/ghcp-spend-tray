@@ -40,43 +40,28 @@ internal static class UI
                 ? InfoBar("Complete!", notice).Success().IsClosable(false).AutomationId("AccountConnectionComplete")
                 : InfoBar("", notice).Informational().IsClosable(false)
             : null;
-    internal static InfoBarElement IdentityConfirmation(AppSession state, PendingIdentity identity) =>
-        (InfoBar(state.ConnectingAccount ? "Connecting account..." : "Action required: confirm this account",
-            state.ConnectingAccount
-                ? "Finishing setup. Please wait for confirmation."
-                : "Browser sign-in is complete, but setup is not. Select Connect this account to finish.")
-            .IsClosable(false) with
-        {
-            Severity = state.ConnectingAccount ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
-            Content = state.ConnectingAccount ? VStack(12,
-                TextBlock("Saving your connection").FontSize(20).SemiBold(),
-                TextBlock($"{identity.Login} on {identity.Host}").TextWrapping().SemiBold(),
-                Copy($"Immutable user ID: {identity.UserId}. Consumption access was checked."),
-                HStack(10, ProgressRing().Width(24).Height(24), Copy("Connecting...")),
-                VStack(8,
-                    Button("Connect this account", () => state.ConfirmIdentity(true)).AccentButton()
-                        .IsEnabled(false).AutomationId("ConfirmAccount").HAlign(HorizontalAlignment.Left),
-                    Button("Wrong account", () => state.ConfirmIdentity(false))
-                        .IsEnabled(false).AutomationId("RejectAccount").HAlign(HorizontalAlignment.Left)))
-                : VStack(12,
-                    TextBlock("Final step").FontSize(20).SemiBold(),
-                    Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
-                        AccountPicture(identity.Login, identity.AvatarPath, $"{identity.Host}:{identity.UserId}", 48)
-                            .Grid(column: 0).Margin(0, 0, 12, 0),
-                        VStack(4,
-                            TextBlock($"{identity.Login} on {identity.Host}").TextWrapping().SemiBold(),
-                            Copy($"Immutable user ID: {identity.UserId}. Consumption access was checked."))
-                            .Grid(column: 1).VAlign(VerticalAlignment.Center)),
-                    FlexRow(
-                        Button("Connect this account", () => state.ConfirmIdentity(true)).AccentButton()
-                            .AutomationId("ConfirmAccount").IsEnabled(true).Flex(shrink: 0),
-                        Button("Wrong account", () => state.ConfirmIdentity(false))
-                            .AutomationId("RejectAccount").Flex(shrink: 0)) with
-                    {
-                        Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8,
-                        AlignItems = FlexAlign.FlexStart
-                    }).Padding(0, 0, 16, 16)
-        }).AutomationId("AccountIdentityConfirmation");
+    internal static Element DeviceSignIn(AppSession state, DevicePrompt device, nint owner)
+    {
+        int remaining = Math.Max(0, (int)(device.Expires - DateTimeOffset.UtcNow).TotalSeconds);
+        return Card(VStack(16,
+            TextBlock("Enter this code in your browser").FontSize(20).SemiBold().TextWrapping(),
+            TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled()
+                .AutomationName("Device authorization code").AutomationId("DeviceCode"),
+            state.ClipboardError is { } error
+                ? InfoBar("Copy the code", error).Warning().IsClosable(false).AutomationId("CodeCopyFeedback")
+                : state.CodeCopied
+                    ? InfoBar("", "Code copied to clipboard.").Success().IsClosable(false).AutomationId("CodeCopyFeedback")
+                    : null,
+            FlexRow(
+                Button("Open browser", () => state.OpenSignInBrowser(owner))
+                    .AccentButton().AutomationId("OpenSignInBrowser").Flex(shrink: 0),
+                Button("Copy code", state.CopyCode).AutomationId("CopySignInCode").Flex(shrink: 0)) with
+            {
+                Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8, AlignItems = FlexAlign.FlexStart
+            },
+            Copy($"Waiting for authorization on {device.VerificationUri.Host}. Code expires in {remaining} seconds.").FontSize(12)
+        )).AutomationId("DeviceSignIn");
+    }
     internal static string? AccountWarning(AccountView account)
     {
         if (account.Freshness == "Fresh") return account.Details.Message;
@@ -361,14 +346,11 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     }
     private Element AddForm(nint owner)
     {
-        string remaining = Session.Prompt is { } prompt
-            ? Math.Max(0, (int)(prompt.Expires - DateTimeOffset.UtcNow).TotalSeconds).ToString(CultureInfo.InvariantCulture) : "";
         return VStack(18,
             TextBlock(Session.ReconnectKey is null ? "Connect an account" : "Reconnect account").FontSize(22).SemiBold(),
-            Session.Identity is { } identity
-                ? UI.IdentityConfirmation(Session, identity)
-                : VStack(18,
-                    UI.Copy("Authorize the OAuth application registered for this host in your browser. No password or token needs to be pasted here."),
+            Session.EditingHost
+                ? VStack(18,
+                    UI.Copy("Choose the GitHub host to sign in to."),
                     TextBlock("GitHub host").SemiBold(),
                     ComboBox(["github.com", "Custom..."], Session.CustomHost ? 1 : 0,
                         index => Session.SelectHost(index == 1))
@@ -382,24 +364,33 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                             TextBlock("OAuth Client ID").SemiBold(),
                             TextBox(Session.ClientId, Session.SetClientId, "Host-specific OAuth Client ID")
                                 .AutomationName("Host-specific OAuth Client ID").AutomationId("AccountClientId")
-                                .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null))
+                                .IsEnabled(!Session.SigningIn))
                         : null,
                     UI.Copy(Session.HostDescription()).FontSize(12),
                     CheckBox(Session.OfflineAccess, value => { Session.OfflineAccess = value; Session.Notify(); },
                         "Request offline_access where supported").IsEnabled(!Session.SigningIn),
-                    UI.Copy("Sign-in requests basic identity access. Enterprise registrations and application policies are host-specific."),
-                    Session.Prompt is { } device
-                        ? Card(VStack(12,
-                            UI.Copy("Enter this code on GitHub"),
-                            TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled().AutomationName("Device authorization code"),
-                            HStack(10, Button("Copy code", () => Session.CopyCode(owner)),
-                                Button("Open browser", () => Session.OpenLink(device.VerificationUri.AbsoluteUri, owner))),
-                            UI.Copy($"Expires in {remaining} seconds. Waiting for authorization...")))
-                        : Session.SigningIn ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Requesting device sign-in...")) : null),
-            HStack(10,
-                Button("Start device sign-in", Session.StartSignIn).IsEnabled(!Session.SigningIn && !Session.Busy),
+                    UI.Copy("Sign-in requests basic identity access. Enterprise registrations and application policies are host-specific."))
+                : Session.Prompt is { } device
+                    ? UI.DeviceSignIn(Session, device, owner)
+                    : Session.SigningIn
+                        ? HStack(12, ProgressRing().Width(24).Height(24),
+                            UI.Copy(Session.ConnectingAccount ? "Finishing your connection..." : $"Generating a sign-in code for {Session.Host}..."))
+                            .AutomationId("SignInProgress")
+                        : UI.Copy("Start sign-in to generate a new code."),
+            FlexRow(
+                !Session.SigningIn
+                    ? Button(Session.EditingHost ? "Start sign-in" : "Try again", Session.StartSignIn)
+                        .AccentButton().IsEnabled(!Session.Busy).AutomationId("StartSignIn")
+                        .AutomationName(Session.EditingHost ? "Start sign-in" : "Try again").Flex(shrink: 0)
+                    : null,
+                Session.ReconnectKey is null && !Session.EditingHost && !Session.ConnectingAccount
+                    ? Button("Change host", Session.ChangeHost).AutomationId("ChangeSignInHost").Flex(shrink: 0)
+                    : null,
                 Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () => Session.TryGoBack())
-                    .AutomationName(Session.SigningIn ? "Cancel sign-in" : "Back to accounts").AutomationId("AccountBack"))
+                    .AutomationName(Session.SigningIn ? "Cancel sign-in" : "Back to accounts").AutomationId("AccountBack").Flex(shrink: 0)) with
+            {
+                Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8, AlignItems = FlexAlign.FlexStart
+            }
         ).AutomationId("AccountOnboarding");
     }
     private Element AccountDetails(AccountView account, nint owner) => VStack(18,

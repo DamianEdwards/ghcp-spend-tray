@@ -74,6 +74,7 @@ try
     {
         session.AddAccount();
         Check(!session.CustomHost && session.Host == "github.com", "onboarding defaults to github.com");
+        session.ChangeHost();
         session.SelectHost(true);
         Check(session.CustomHost && session.Host == "" && session.ClientId == "", "custom host starts empty");
         session.SetHost("msft.ghe.com");
@@ -128,10 +129,10 @@ try
     Check(app.ResolveHostDescription("MSFT.ghe.com").Contains("https://api.msft.ghe.com/"), "GHE API mapping in controller");
     await Throws<AppOperationException>(() => app.AddAsync("unregistered.ghe.com", false, null,
         _ => throw new InvalidOperationException("Unregistered host must not return a code."),
-        _ => Task.FromResult(true), default));
+        () => { }, default));
     Check(handler.OAuthRequests == 0, "unregistered host fails visibly without a network request or github.com fallback");
     await Throws<AppOperationException>(() => app.AddAsync("github.com", false, null,
-        _ => { }, _ => Task.FromResult(true), default, "other-registration"));
+        _ => { }, () => { }, default, "other-registration"));
     Check(handler.OAuthRequests == 0, "github.com cannot use another OAuth registration");
 
     await Add("github.com", "1");
@@ -283,12 +284,13 @@ try
     Check((await Load()).Accounts.Length == 3, "duplicate cannot double-count");
     handler.NextIdentity = "2";
     await Throws<AppOperationException>(() => app.AddAsync("github.com", false, "github.com:1",
-        _ => { }, _ => Task.FromResult(true), default));
+        _ => { }, () => { }, default));
     Check(credentials.Values["github.com:1"].AccessToken == "fixture-1", "wrong-account reconnect preserves credential");
     handler.NextIdentity = "4";
-    await Throws<OperationCanceledException>(() => app.AddAsync("github.com", false, null,
-        _ => { }, _ => Task.FromResult(false), default));
-    Check(credentials.Values.Count == 3, "declined identity is not persisted");
+    using (var cancelSignIn = new CancellationTokenSource())
+        await Throws<OperationCanceledException>(() => app.AddAsync("github.com", false, null,
+            _ => { }, cancelSignIn.Cancel, cancelSignIn.Token));
+    Check(credentials.Values.Count == 3, "cancelled sign-in is not persisted");
     credentials.Values["github.com:1"] = credentials.Values["github.com:1"] with
     {
         ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
@@ -374,7 +376,7 @@ try
     var teamTarget = new VaultCredentials(null).Target(teamAccount);
     Check(teamTarget.Contains("/team-registration/", StringComparison.Ordinal), "custom credentials use selected registration");
     await Throws<AppOperationException>(() => app.AddAsync("team.ghe.com", false, "team.ghe.com:5",
-        _ => { }, _ => Task.FromResult(true), default, "other-registration"));
+        _ => { }, () => { }, default, "other-registration"));
     Check(credentials.Values["team.ghe.com:5"].AccessToken == "fixture-5",
         "reconnect with different registration cannot overwrite existing credentials");
     credentials.Values["team.ghe.com:5"] = credentials.Values["team.ghe.com:5"] with
@@ -407,14 +409,14 @@ try
             "legacy unsupported account can be removed without an unknown credential target");
         handler.NextIdentity = "5";
         await legacyApp.AddAsync("team.ghe.com", false, "team.ghe.com:5",
-            _ => { }, _ => Task.FromResult(true), default, "team-registration");
+            _ => { }, () => { }, default, "team-registration");
         Check((await legacyStore.LoadSettingsAsync()).Value.Accounts.Single().OAuthClientId == "team-registration",
             "legacy unsupported account reconnect saves its explicit host registration");
     }
     foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         Check(!(await File.ReadAllTextAsync(file)).Contains("fixture-", StringComparison.Ordinal), "no token in persisted files");
     assertions += await BackNavigationTests.RunAsync(root);
-    assertions += await AccountConfirmationTests.RunAsync(Path.Combine(root, "confirmation"));
+    assertions += await AccountSignInTests.RunAsync(Path.Combine(root, "sign-in"));
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");
 
     void Check(bool condition, string description)
@@ -433,7 +435,7 @@ try
         handler.NextIdentity = id;
         await app.AddAsync(host, false, reconnectKey,
             prompt => Check(prompt.VerificationUri.Host == host.ToLowerInvariant() && prompt.Code == "TEST-CODE", "validated device prompt"),
-            identity => Task.FromResult(identity.UserId > 0), default, clientId);
+            () => { }, default, clientId);
     }
     async Task<AppSettings> Load() => (await new JsonStore(root).LoadSettingsAsync()).Value;
     static async Task Until(Func<bool> predicate)

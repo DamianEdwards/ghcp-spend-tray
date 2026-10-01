@@ -50,14 +50,22 @@ is **not** an in-place upgrade from the GitHub package.
 
 1. Open the tray flyout and choose the connect button, or open
    **Settings > Accounts > Add account**.
-2. Enter the GitHub host and check the authentication and API destinations
-   displayed by the app. Start device sign-in, then enter the displayed code on
-   the host's GitHub authorization page in your browser. Verify the OAuth app
-   shown on the consent screen before approving it.
-3. Return to GHCPSpendTray. Browser authorization alone does not finish setup:
-   check the GitHub host, login, and user ID in the **Action required** panel,
-   then select **Connect this account**. Choose **Wrong account** to reject the
-   identity and try again. Wait for **Complete!** to confirm the account was saved.
+2. A github.com sign-in code is generated immediately and copied to the clipboard.
+   Select **Open browser**, paste the code on GitHub, and authorize GHCPSpendTray.
+   Check the account and OAuth app shown on GitHub before approving. If copying
+   failed, use **Copy code** to retry or select and copy the displayed code yourself.
+3. Return to GHCPSpendTray. The account is verified and saved automatically after
+   browser authorization; **Complete!** appears when setup finishes. There is no
+   additional in-app confirmation.
+
+For an enterprise account, select **Change host** to cancel the github.com attempt,
+choose the host and its OAuth Client ID, check the displayed destinations, then
+select **Start sign-in**. New Add account actions always start with github.com.
+**Reconnect** starts immediately using the account's original host and registration;
+a different browser identity is rejected rather than overwriting that account.
+**Cancel sign-in** stops the current attempt, and **Try again** generates a new code.
+Sign-in and clipboard failures are reported in the UI and diagnostic logs without
+logging device codes, tokens, or server response bodies.
 
 The app has built-in public OAuth registrations for `github.com` and
 `msft.ghe.com`; it does not use `gh` credentials or ask for a client secret.

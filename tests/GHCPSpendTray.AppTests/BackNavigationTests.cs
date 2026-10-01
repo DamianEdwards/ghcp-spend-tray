@@ -13,6 +13,8 @@ internal static class BackNavigationTests
         int opens = 0, hides = 0;
         session.OpenSettings = _ => opens++;
         session.HideFlyout = () => hides++;
+        int copied = 0;
+        session.CopyToClipboard = _ => copied++;
         session.Initialize();
         await Until(() => session.Initialized && !session.Busy);
 
@@ -44,6 +46,7 @@ internal static class BackNavigationTests
         Check(!session.TryGoBack(), "missing account details have no visible Back target");
 
         session.AddAccount();
+        session.CancelSignIn();
         session.Navigate(SettingsPage.About);
         Check(!session.TryGoBack() && session.ShowAddForm, "hidden add form is not a Back target");
         session.Navigate(SettingsPage.Accounts);
@@ -53,6 +56,7 @@ internal static class BackNavigationTests
 
         session.EditAccount(account.Key);
         session.Reconnect(account);
+        session.CancelSignIn();
         Check(session.TryGoBack() && !session.ShowAddForm && session.SelectedAccount is null,
             "idle reconnect returns to accounts rather than inventing a details history");
 
@@ -63,30 +67,29 @@ internal static class BackNavigationTests
         work.SetResult();
         await Until(() => !session.Busy);
 
-        foreach (var stage in new[] { "requesting", "device prompt", "identity confirmation" })
+        foreach (var stage in new[] { "requesting", "device prompt", "finishing connection" })
         {
             var attempt = new SignInAttempt();
             controller.Attempt = attempt;
-            session.AddAccount();
             if (stage == "device prompt") session.Reconnect(account);
-            session.StartSignIn();
+            else session.AddAccount();
             await attempt.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
             if (stage != "requesting")
             {
                 attempt.ShowPrompt.SetResult();
                 await Until(() => session.Prompt is not null);
             }
-            if (stage == "identity confirmation")
+            if (stage == "finishing connection")
             {
-                attempt.ShowIdentity.SetResult();
-                await Until(() => session.Identity is not null);
+                attempt.Authorize.SetResult();
+                await Until(() => session.ConnectingAccount);
             }
             Check(session.TryGoBack() && !session.SigningIn && session.ShowAddForm &&
-                session.Prompt is null && session.Identity is null && attempt.Token.IsCancellationRequested,
+                session.Prompt is null && !session.ConnectingAccount && attempt.Token.IsCancellationRequested,
                 $"Back cancels {stage} and leaves the add/reconnect form visible");
             await attempt.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Drain();
-            Check(!attempt.Accepted && session.ShowAddForm && session.Error is null,
+            Check(!attempt.Saved && session.ShowAddForm && session.Error is null,
                 $"canceled {stage} cannot connect an account or navigate late");
             Check(session.TryGoBack() && !session.ShowAddForm && !session.TryGoBack(),
                 $"next Back after {stage} returns to accounts, then becomes unhandled");
@@ -96,7 +99,6 @@ internal static class BackNavigationTests
         var old = new SignInAttempt();
         controller.Attempt = old;
         session.AddAccount();
-        session.StartSignIn();
         await old.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Check(session.TryGoBack(), "old sign-in canceled");
         await old.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -106,8 +108,14 @@ internal static class BackNavigationTests
         await current.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         current.ShowPrompt.SetResult();
         await Until(() => session.Prompt is not null);
+        int currentCopies = copied;
+        old.PromptCallback!(new("STALE-CODE", new Uri("https://github.com/login/device"), DateTimeOffset.UtcNow.AddMinutes(1)));
+        old.AuthorizedCallback!();
+        Drain();
         Check(session.SigningIn && !current.Token.IsCancellationRequested,
             "queued completion from canceled sign-in does not cancel the new attempt");
+        Check(session.Prompt?.Code == "TEST-CODE" && !session.ConnectingAccount && copied == currentCopies,
+            "late cancelled prompts and authorization callbacks cannot replace the new code or clipboard");
         session.CloseSettings();
         await current.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Drain();
@@ -143,22 +151,29 @@ internal static class BackNavigationTests
     {
         internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ShowPrompt { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal TaskCompletionSource ShowIdentity { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Authorize { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Save { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal CancellationToken Token { get; private set; }
-        internal bool Accepted { get; private set; }
+        internal bool Saved { get; private set; }
+        internal Action<DevicePrompt>? PromptCallback { get; private set; }
+        internal Action? AuthorizedCallback { get; private set; }
 
-        internal async Task RunAsync(Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm,
+        internal async Task RunAsync(Action<DevicePrompt> prompt, Action authorized,
             CancellationToken token)
         {
             Token = token;
+            PromptCallback = prompt;
+            AuthorizedCallback = authorized;
             Started.SetResult();
             try
             {
                 await ShowPrompt.Task.WaitAsync(token);
                 prompt(new("TEST-CODE", new Uri("https://github.com/login/device"), DateTimeOffset.UtcNow.AddMinutes(5)));
-                await ShowIdentity.Task.WaitAsync(token);
-                Accepted = await confirm(new("github.com", 42, "synthetic")).WaitAsync(token);
+                await Authorize.Task.WaitAsync(token);
+                authorized();
+                await Save.Task.WaitAsync(token);
+                Saved = true;
             }
             finally { Finished.SetResult(); }
         }
@@ -182,8 +197,8 @@ internal static class BackNavigationTests
             _demo.AccountSettings(key);
         public Task RemoveAsync(string key) => _demo.RemoveAsync(key);
         public Task AddAsync(string host, bool offlineAccess, string? reconnectKey, Action<DevicePrompt> prompt,
-            Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken, string? clientId = null) =>
-            (Attempt ?? throw new InvalidOperationException("No synthetic sign-in configured.")).RunAsync(prompt, confirm, cancellationToken);
+            Action authorized, CancellationToken cancellationToken, string? clientId = null) =>
+            Attempt?.RunAsync(prompt, authorized, cancellationToken) ?? Task.Delay(Timeout.Infinite, cancellationToken);
         public string? AccountClientId(string key) => _demo.AccountClientId(key);
         public string ResolveHostDescription(string host) => _demo.ResolveHostDescription(host);
         public Task ResumeAsync() => _demo.ResumeAsync();

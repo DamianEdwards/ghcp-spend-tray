@@ -212,8 +212,18 @@ internal static class Program
             await OnUI(shell, () =>
             {
                 var settings = shell.SettingsWindow ?? throw new InvalidOperationException("Settings did not open.");
-                if (Find(settings, "AccountOnboarding") is null || Find(settings, "AccountHostSelection") is not ComboBox)
+                if (Find(settings, "AccountOnboarding") is null ||
+                    Find(settings, "ChangeSignInHost") is not Button changeHost ||
+                    Find(settings, "AccountIdentityConfirmation") is not null)
                     throw new InvalidOperationException("Add-account deep link did not render.");
+                InvokeButton(changeHost);
+            });
+            await Task.Delay(300);
+            await OnUI(shell, () =>
+            {
+                var settings = shell.SettingsWindow!;
+                if (Find(settings, "AccountHostSelection") is not ComboBox || !shell.Session.EditingHost)
+                    throw new InvalidOperationException("Change host did not expose host-specific sign-in settings.");
                 if (Find(settings, "AccountBack") is not Button back)
                     throw new InvalidOperationException("Onboarding Back action did not render.");
                 InvokeButton(back);

@@ -1,5 +1,23 @@
 # GHCPSpendTray validation and release gates
 
+## Streamlined account sign-in (October 1, 2026)
+
+`verify.ps1 -NativeTests` passed with a warning-free Release build, 155 core
+tests, 14 platform tests and 776 application assertions under managed and
+executed x64 Native AOT. x64/ARM64 Native AOT publishing and package resource
+validation passed. The portable UI smoke retains coverage for the account
+entry points, Change host editor, Back controls and existing usage/tray flows.
+
+Direct native UI interaction against the real controller with synthetic HTTP
+and in-memory credentials verified that a single Add account click generates
+the code and copies it to the actual Windows clipboard, with visible success
+feedback and a primary Open browser action. Change host cancelled the attempt
+and displayed host settings. After simulated browser authorization, the
+account was saved and Complete appeared without an extra confirmation click.
+No real browser OAuth authorization, installed credentials, or account data
+were used. Screenshots cover the code/copy state and automatic completion;
+live enterprise authorization remains a manual acceptance item.
+
 ## Empty Usage and status-icon refinement (September 30, 2026)
 
 With no connected accounts, Usage shows only the setup message and primary
@@ -261,23 +279,21 @@ overflow visibility and can suppress notifications.
 
 ## Authentication evidence and limitations
 
-Account confirmation fixtures exercise the final action-required panel, explicit
-Connect and Wrong account actions, pending-save feedback, and completion only
-after credentials and account settings are saved. They also cover cancellation,
-save failure/retry, and matching/mismatched reconnect identities using synthetic
-HTTP and credentials. Confirmation actions use a horizontal wrapping row with
-explicit content inset. Avatar previews reuse the host-scoped, redirect-rejecting,
-1 MiB cache downloader with a three-second timeout and a per-sign-in temporary
-directory. Signed URLs are never persisted; rejection, cancellation and completion
-clean up the preview without changing registered avatars. Failed previews use
-initials and emit a diagnostic instead of blocking authentication. Fixtures cover
-HTTP/image/size/redirect/timeout failures, cancellation during fetch, subsequent
-sign-in isolation and rejected reconnect cleanup.
+The October 1 sign-in flow supersedes the earlier confirmation screenshots.
+Add account immediately starts github.com device authorization, displays and copies
+the code, and emphasizes Open browser. Change host cancels the attempt and opens
+host-specific options. Reconnect uses the original identity/registration.
+Browser authorization proceeds directly through identity/consumption checks and
+credential/settings persistence; no confirmation callback, decision buttons or
+temporary pre-confirmation avatar cache remain.
 
-The panel uses native warning/success InfoBars and the WinUI accent button style.
-Synthetic real-WinUI dark-theme screenshots cover confirmation, pending save and
-completion. Light/high-contrast rendering and OS text scaling still require visual
-acceptance.
+Synthetic fixtures cover automatic start/copy/completion, clipboard contention and
+retry, host switching, duplicate and mismatched reconnect identities, code/token/
+identity/consumption failures, timeout, persistence rollback and cancellation.
+Diagnostic assertions check fixed failure phases and exception categories while
+rejecting device codes, access tokens, signed avatar URLs and raw exception messages.
+The post-save avatar cache remains bounded and nonfatal; normal cache security
+checks remain in the Core/application harnesses.
 
 The user confirmed initial github.com device sign-in and consumption/allocation
 display on September 23, 2026. That does not establish compatibility on every host

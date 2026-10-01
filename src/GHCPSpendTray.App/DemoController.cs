@@ -61,7 +61,7 @@ internal sealed class DemoController(string directory, bool empty = false) : IAp
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key) => ("Demonstration", "", null);
     public Task RemoveAsync(string key) => throw new AppOperationException("Synthetic accounts cannot be removed in demonstration mode.");
     public Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null) =>
         throw new AppOperationException("Authentication is disabled in demonstration mode. Start normal portable mode to sign in.");
     public string? AccountClientId(string key) => throw new AppOperationException("Authentication is disabled in demonstration mode.");

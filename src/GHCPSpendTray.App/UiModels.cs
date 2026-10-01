@@ -19,8 +19,10 @@ internal sealed record SettingsView(int PollMinutes, string Thresholds, bool Not
     string StartupDescription = "Unavailable in isolated portable mode.",
     TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
     string[]? ExcludedTrayAccounts = null);
-internal sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires);
-internal sealed record PendingIdentity(string Host, long UserId, string Login, string? AvatarPath = null);
+internal sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)
+{
+    public override string ToString() => "DevicePrompt [redacted]";
+}
 
 internal interface IApplicationController : IDisposable
 {
@@ -36,7 +38,7 @@ internal interface IApplicationController : IDisposable
     (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key);
     Task RemoveAsync(string key);
     Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null);
     string? AccountClientId(string key);
     string ResolveHostDescription(string host);

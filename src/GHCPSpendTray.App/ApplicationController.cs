@@ -272,15 +272,17 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         return GitHubOAuth.ResolveClientId(account.Host, account.OAuthClientId);
     }
     public async Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null)
     {
-        await InitializeAsync().ConfigureAwait(false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
         var token = linked.Token;
-        string? previewDirectory = null;
+        string stage = "initialization";
         try
         {
+            await InitializeAsync().ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            stage = "host validation";
             var resolved = HostResolver.Resolve(host);
             string selectedClientId = GitHubOAuth.ResolveClientId(resolved.Host, clientId);
             if (reconnectKey is not null)
@@ -292,9 +294,15 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                     originalClientId is not null && originalClientId != selectedClientId)
                     throw new AppOperationException("Reconnect using the original host and OAuth client ID.");
             }
+            stage = "device code request";
             var authorization = await _auth.BeginAsync(resolved, selectedClientId, offlineAccess, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
             prompt(new(authorization.UserCode, authorization.VerificationUri, authorization.ExpiresAtUtc));
+            stage = "browser authorization";
             var tokens = await _auth.PollAsync(resolved, selectedClientId, authorization, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            authorized();
+            stage = "identity verification";
             var identity = await _auth.GetIdentityAsync(resolved, tokens, token).ConfigureAwait(false);
             var account = new Account { Host = resolved.Host, UserId = identity.UserId, Login = identity.Login,
                 OAuthClientId = resolved.Kind == HostKind.GitHub ? null : clientId };
@@ -302,38 +310,10 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 throw new AppOperationException("The browser selected a different account. Nothing was saved; select the original identity and reconnect again.");
             if (reconnectKey is null && _settings.Accounts.Any(a => a.Key == account.Key))
                 throw new AppOperationException("This account is already monitored. Select it in the overview and choose Reconnect instead.");
+            stage = "consumption access";
             _ = await _usage.FetchWithTokenAsync(account, tokens, token).ConfigureAwait(false);
-            string? avatarPath = null;
-            if (identity.AvatarUrl is not null)
-            {
-                previewDirectory = Path.Combine(DataDirectory, "pending-avatars", Guid.NewGuid().ToString("N"));
-                using var avatarTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-                avatarTimeout.CancelAfter(TimeSpan.FromSeconds(3));
-                try
-                {
-                    string? downloaded = await new AvatarCache(_http, previewDirectory)
-                        .UpdateAsync(account, identity.AvatarUrl, avatarTimeout.Token).ConfigureAwait(false);
-                    if (downloaded is not null)
-                    {
-                        // Keep the native image URI short; the temporary cache's hashed path can exceed MAX_PATH.
-                        string previewPath = Path.Combine(previewDirectory, "preview" + Path.GetExtension(downloaded));
-                        File.Move(downloaded, previewPath);
-                        avatarPath = previewPath;
-                    }
-                }
-                catch (OperationCanceledException) when (!token.IsCancellationRequested)
-                {
-                    Diagnostics.Record("Confirmation avatar download timed out; using initials.");
-                }
-                catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException)
-                {
-                    Diagnostics.Record($"Confirmation avatar unavailable ({ex.GetType().Name}); using initials.");
-                }
-            }
             token.ThrowIfCancellationRequested();
-            if (!await confirm(new(account.Host, long.Parse(identity.UserId, CultureInfo.InvariantCulture), identity.Login, avatarPath))
-                    .WaitAsync(token).ConfigureAwait(false))
-                throw new OperationCanceledException(token);
+            stage = "account save";
             await _mutations.WaitAsync(token).ConfigureAwait(false);
             try
             {
@@ -354,30 +334,45 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 bool wroteCredential = false;
                 try
                 {
+                    stage = "credential read";
                     oldTokens = await _credentials.ReadAsync(account, token).ConfigureAwait(false);
                     var next = _settings with
                     {
                         Accounts = _settings.Accounts.Where(a => a.Key != account.Key).Append(account).ToArray()
                     };
+                    stage = "credential save";
                     await _credentials.WriteAsync(account, tokens, token).ConfigureAwait(false);
                     wroteCredential = true;
+                    stage = "settings save";
                     await _store.SaveSettingsAsync(next, token).ConfigureAwait(false);
                     _settings = next;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    string failedStage = stage;
+                    Diagnostics.Record($"Account sign-in persistence failed during {stage} ({ex.GetType().Name}).");
                     if (wroteCredential)
                     {
+                        stage = "credential rollback";
                         if (oldTokens is null) await _credentials.DeleteAsync(account, CancellationToken.None).ConfigureAwait(false);
                         else await _credentials.WriteAsync(account, oldTokens, CancellationToken.None).ConfigureAwait(false);
                     }
+                    stage = failedStage;
                     throw;
                 }
                 finally { _monitor!.UpdateSettings(_settings); }
                 try
                 {
-                    await _avatars.UpdateAsync(account, identity.AvatarUrl, token).ConfigureAwait(false);
+                    stage = "avatar cache";
+                    using var avatarTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    avatarTimeout.CancelAfter(TimeSpan.FromSeconds(3));
+                    await _avatars.UpdateAsync(account, identity.AvatarUrl, avatarTimeout.Token).ConfigureAwait(false);
                     _avatarDiagnostic = null;
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    _avatarDiagnostic = "Avatar could not be cached. Refresh this account to retry.";
+                    Diagnostics.Record("Account sign-in avatar cache timed out; using initials.");
                 }
                 catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException)
                 {
@@ -386,23 +381,27 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 }
             }
             finally { _mutations.Release(); }
+            stage = "initial refresh";
             await _monitor!.RefreshAsync(account.Key, token).ConfigureAwait(false);
+            stage = "dashboard update";
             await PublishAsync().ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
-        finally
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            if (previewDirectory is not null)
+            Diagnostics.Record($"Account sign-in cancelled during {stage}.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            string status = ex is ServiceException service ? $", {service.Status}" : "";
+            Diagnostics.Record($"Account sign-in failed during {stage} ({ex.GetType().Name}{status}).");
+            throw ex switch
             {
-                try
-                {
-                    if (Directory.Exists(previewDirectory)) Directory.Delete(previewDirectory, recursive: true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    Diagnostics.Record($"Confirmation avatar cleanup failed ({ex.GetType().Name}).");
-                }
-            }
+                OperationCanceledException => new AppOperationException("Sign-in timed out. Try again."),
+                HttpRequestException => new AppOperationException("Sign-in could not reach GitHub. Check connectivity and try again."),
+                InvalidDataException => new AppOperationException("Sign-in received invalid data. Check the diagnostic log and try again."),
+                _ => SafeError(ex)
+            };
         }
     }
 

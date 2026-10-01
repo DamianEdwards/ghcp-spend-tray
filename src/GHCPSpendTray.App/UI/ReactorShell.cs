@@ -35,6 +35,11 @@ internal sealed class ReactorShell : IDisposable
                 Diagnostics.Record("Reactor UI dispatcher rejected an operation.");
         });
         _session.OpenSettings = ShowSettings;
+        _session.CopyToClipboard = text =>
+        {
+            var window = _settings ?? throw new InvalidOperationException("Settings is not open.");
+            ShellServices.CopyText(WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow), text);
+        };
         _session.HideFlyout = () => _flyout?.Hide();
         _session.TestNotification = () => _tray.Notify(null, "GHCPSpendTray test", "Windows accepted this test notification request.");
         _tray.OpenRequested += key => _session.Post(() =>
