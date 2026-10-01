@@ -65,6 +65,38 @@ jobs:
         if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: .\tools\package.ps1
+      - name: Launch packaged x64 smoke scenarios
+        id: package_smoke
+        if: steps.changes.outputs.run_validation == 'true'
+        timeout-minutes: 5
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $logDirectory = Join-Path $env:RUNNER_TEMP 'GHCPSpendTray-package-smoke'
+          New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+          Start-Transcript -Path (Join-Path $logDirectory 'smoke.log')
+          try {
+              # Developer Mode is enabled only on this disposable hosted runner.
+              $unlock = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
+              New-Item -Path $unlock -Force | Out-Null
+              New-ItemProperty -Path $unlock -Name AllowDevelopmentWithoutDevLicense `
+                -PropertyType DWord -Value 1 -Force | Out-Null
+              $makeappx = .\tools\get-windows-sdk-tool.ps1 -Name makeappx.exe
+              $layout = '.\artifacts\package-smoke-layout'
+              & $makeappx unpack /p .\artifacts\msix\packages\GHCPSpendTray-0.1.0-x64.msix `
+                /d $layout /o | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'Cannot extract packaged smoke-test payload.' }
+              .\tools\smoke-test-package.ps1 -Layout $layout
+          }
+          finally { Stop-Transcript }
+      - name: Retain packaged smoke diagnostics
+        if: ${{ always() && steps.package_smoke.outcome != 'skipped' && steps.package_smoke.outcome != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-smoke-diagnostics
+          path: ${{ runner.temp }}/GHCPSpendTray-package-smoke/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Retain unsigned development bundle
         if: steps.changes.outputs.run_validation == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

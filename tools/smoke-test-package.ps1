@@ -42,19 +42,27 @@ try {
         if (Test-Path -LiteralPath $result) { Remove-Item -LiteralPath $result -Force }
         $processId = [PackageSmokeActivation]::Launch("$($package.PackageFamilyName)!App", $arguments)
         $process = Get-Process -Id $processId
+        # Retain the native handle so ExitCode remains available after a fast startup crash.
+        $null = $process.Handle
         if (-not $process.WaitForExit(45000)) {
             Stop-Process -Id $processId
-            throw 'Packaged smoke test timed out.'
+            throw "Packaged smoke test timed out ($arguments)."
         }
-        if (-not (Test-Path -LiteralPath $result)) { throw "No packaged smoke result. Exit code: $($process.ExitCode)" }
+        if (-not (Test-Path -LiteralPath $result)) {
+            throw "No packaged smoke result ($arguments). Exit code: $($process.ExitCode)"
+        }
         $text = Get-Content -LiteralPath $result -Raw
         if (-not $text.StartsWith('PASS:')) { throw $text }
+        if ($process.ExitCode -ne 0) { throw "Packaged smoke process failed ($arguments). Exit code: $($process.ExitCode)" }
         Write-Output $text
+        $process.Dispose()
+        $process = $null
     }
     Write-Output 'PASS: packaged activation, package-local data and disabled Windows StartupTask.'
 }
 finally {
     if ($null -ne $process -and -not $process.HasExited) { Stop-Process -Id $process.Id }
+    if ($null -ne $process) { $process.Dispose() }
     if ($registered) {
         $package = Get-AppxPackage -Name GHCPSpendTray.Development
         if ($package -and $package.InstallLocation -eq $layoutPath) {

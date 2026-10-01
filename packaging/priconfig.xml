@@ -6,4 +6,7 @@
     </default>
     <indexer-config type="resfiles" qualifierDelimiter="." />
   </index>
+  <index root="\" startIndexAt="GHCPSpendTray.pri">
+    <indexer-config type="PRI" />
+  </index>
 </resources>

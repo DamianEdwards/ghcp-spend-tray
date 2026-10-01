@@ -69,10 +69,12 @@ try {
             New-Item -ItemType Directory -Path (Join-Path $iconLayout 'Assets') -Force | Out-Null
             try {
                 foreach ($iconEntry in $app.Entries | Where-Object {
-                    $_.FullName -cmatch '^(AppxManifest\.xml|resources\.pri|Assets/[^/\\]+\.png)$'
+                    $_.FullName -cmatch '^(AppxManifest\.xml|resources\.pri|Assets/[^/\\]+\.png|Reactor/Hosting/ReactorApplication\.xbf|Microsoft\.UI\.Xaml/Themes/(generic|themeresources)\.xbf)$'
                 }) {
+                    $destination = Join-Path $iconLayout $iconEntry.FullName.Replace('/', '\')
+                    New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
                     [IO.Compression.ZipFileExtensions]::ExtractToFile($iconEntry,
-                        (Join-Path $iconLayout $iconEntry.FullName.Replace('/', '\')))
+                        $destination)
                 }
                 & "$PSScriptRoot\test-package-icons.ps1" -Layout $iconLayout
             }
@@ -93,4 +95,4 @@ try {
     }
 }
 finally { $archive.Dispose() }
-Write-Output "PASS: bundle identity, architectures, Native AOT payload, transparent shell resources and opt-in startup ($Version)."
+Write-Output "PASS: bundle identity, architectures, Native AOT payload, startup XAML, transparent shell resources and opt-in startup ($Version)."
