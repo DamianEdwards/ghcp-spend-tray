@@ -1,5 +1,45 @@
 # GHCPSpendTray validation and release gates
 
+## Packaged startup resource regression (October 1, 2026)
+
+Store version 0.3.0 crashed before the app's UI exception handler was installed:
+Windows recorded `Microsoft.UI.Xaml.dll`, exception `0xc000027b`, and WER
+signature `0x802b000a`. The new package-level `resources.pri` indexed only shell
+icons. Its presence changed packaged WinUI resource resolution, hiding startup
+XAML despite `GHCPSpendTray.pri`, `Reactor.pri` and the XBF files being present.
+
+The unchanged installed executable and runtime files reproduced the identical
+crash under an isolated development identity with synthetic data. Merging
+`GHCPSpendTray.pri` into the final-identity primary index, without changing the
+executable, made both populated and empty packaged smoke scenarios pass. The
+Store registration, account data, credentials and startup settings were not
+changed; the temporary development registration was removed.
+
+The packaging fix now retains WinUI/Reactor XAML and localized resources in
+the primary map alongside the qualified icons. Bundle checks reject missing
+startup resources, accept valid embedded XBF or existing file candidates, and
+still check every shell icon size/theme. Synthetic regressions cover missing
+application PRI, the 0.3.0 icon-only primary index, and missing/unindexed startup
+XAML under multiple package identities.
+
+Local validation passed a warning-free Release build, 155 core tests, 14
+platform tests and 785 application assertions under both JIT and executed x64
+Native AOT. x64/ARM64 publishing, development and synthetic Store bundle
+validation, Store staging, and actionlint passed. Both smoke scenarios passed
+after extracting the newly built x64 MSIX and registering that extracted
+payload, matching the new CI path. ARM64 was cross-published, not executed.
+
+PR/main/manual verification now runs this packaged x64 smoke after building,
+using Developer Mode on the disposable hosted runner, a bounded timeout,
+nonzero-exit/missing-result checks, registration cleanup and an uploaded
+transcript. Hosted Actions execution of this new step remains unverified until
+the first workflow run. No corrected production release has been published.
+
+This escaped earlier checks because recent UI smoke runs were portable and
+package checks inspected shell candidates and runtime file presence, not
+packaged activation. The last documented packaged smoke preceded the icon
+index change. Portable smoke alone is not evidence for packaged startup.
+
 ## Streamlined account sign-in (October 1, 2026)
 
 `verify.ps1 -NativeTests` passed with a warning-free Release build, 155 core

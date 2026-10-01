@@ -24,6 +24,31 @@ finally { if (Test-Path -LiteralPath $dumpPath) { Remove-Item -LiteralPath $dump
 $identity = $manifest.Package.Identity.Name
 $map = $dump.SelectSingleNode('/PriInfo/ResourceMap')
 if ($null -eq $map -or $map.name -cne $identity) { throw 'Shell PRI identity does not match the package.' }
+# File presence alone is insufficient: the package's primary map must resolve startup XAML.
+foreach ($relativePath in @('Reactor\Hosting\ReactorApplication.xbf',
+    'Microsoft.UI.Xaml\Themes\generic.xbf', 'Microsoft.UI.Xaml\Themes\themeresources.xbf')) {
+    $runtimeUri = "ms-resource://$identity/Files/$($relativePath.Replace('\', '/'))"
+    $runtimeResource = @($map.SelectNodes('.//NamedResource') | Where-Object { $_.uri -ceq $runtimeUri })
+    if ($runtimeResource.Count -ne 1) { throw "Missing startup PRI resource: $relativePath" }
+    $runtimeCandidate = $runtimeResource[0].SelectNodes('Candidate')
+    if ($runtimeCandidate.Count -ne 1 -or
+        $runtimeCandidate[0].SelectNodes('QualifierSet/Qualifier').Count -ne 0) {
+        throw "Invalid startup PRI candidate: $relativePath"
+    }
+    if ($runtimeCandidate[0].type -ceq 'EmbeddedData') {
+        $xbf = [Convert]::FromBase64String($runtimeCandidate[0].Base64Value)
+        if ($xbf.Length -lt 4 -or $xbf[0] -ne 0x58 -or $xbf[1] -ne 0x42 -or
+            $xbf[2] -ne 0x46 -or $xbf[3] -ne 0) {
+            throw "Invalid embedded startup XAML: $relativePath"
+        }
+    } elseif ($runtimeCandidate[0].type -ceq 'Path' -and $runtimeCandidate[0].Value -ceq $relativePath) {
+        if (-not (Test-Path -LiteralPath (Join-Path $layoutPath $relativePath) -PathType Leaf)) {
+            throw "Missing startup XAML payload: $relativePath"
+        }
+    } else {
+        throw "Invalid startup PRI candidate: $relativePath"
+    }
+}
 $uri = "ms-resource://$identity/Files/Assets/Square44x44Logo.png"
 $resource = @($map.SelectNodes('.//NamedResource') | Where-Object { $_.uri -ceq $uri })
 if ($resource.Count -ne 1) { throw 'Shell PRI does not index Files/Assets/Square44x44Logo.png.' }
@@ -72,4 +97,4 @@ foreach ($size in @(44) + $sizes) {
         if ($qualifiers.Count -ne $expectedCount) { throw "Unexpected shell qualifiers: $relativePath" }
     }
 }
-Write-Output 'PASS: transparent shell artwork and package-identity PRI candidates at all 14 target sizes in both themes.'
+Write-Output 'PASS: package-identity startup XAML resources and transparent shell artwork at all 14 target sizes in both themes.'

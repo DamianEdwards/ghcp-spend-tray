@@ -153,11 +153,19 @@ See [Windows app icon construction](https://learn.microsoft.com/windows/apps/des
 
 The app project copies these assets into each published payload.
 `package.ps1` uses Windows SDK MakePri and `packaging\priconfig.xml` to generate
-`resources.pri` after assigning the final package identity. This shell index
-maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates. It is
-separate from the existing `GHCPSpendTray.pri` and `Reactor.pri` runtime
-resources, which must remain in the package. `test-package.ps1` extracts and
-checks the actual icon PNGs and shell PRI from both architecture packages.
+`resources.pri` after assigning the final package identity. This primary index
+maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates **and merges
+the generated `GHCPSpendTray.pri`**, including WinUI/Reactor XAML and localized
+resources, into the package's resource map. The original `GHCPSpendTray.pri`
+and `Reactor.pri` must also remain in the package. An icon-only `resources.pri`
+shadows runtime resource resolution and crashes packaged WinUI at startup,
+even when all the separate PRI/XBF files are present.
+
+`test-package.ps1` extracts and checks the actual icon PNGs, primary PRI and
+startup XBF files from both architecture packages. Its startup-resource checks
+run for development, signed GitHub and Store bundles. After changing resource
+generation, also run the isolated packaged smoke test documented in
+`docs/VALIDATION.md`: portable activation does not exercise this lookup path.
 
 ## Release a version
 
@@ -169,7 +177,12 @@ also verifies its source before publishing.
 1. Merge to `main` and wait for **Verify / Verification** to succeed for the
    exact source commit. For non-Markdown changes, it runs JIT and x64 Native
    AOT tests, publishes both architectures, and builds and validates an unsigned
-   development bundle.
+   development bundle. It then extracts the built x64 MSIX, registers the
+   isolated development package, and runs both populated and empty synthetic
+   packaged UI smoke scenarios. Crashes, missing results, nonzero exit codes
+   and timeouts fail verification; the registration is removed afterward.
+   Developer Mode is enabled only on the disposable hosted runner, and the
+   `packaged-smoke-diagnostics` artifact retains the transcript.
 2. Run **Actions > Release > Run workflow** from `main`. Supply an increasing
    three-part version, such as `0.2.0`, and select whether it is a prerelease.
    Every release, including previews, needs a higher numeric package version;
