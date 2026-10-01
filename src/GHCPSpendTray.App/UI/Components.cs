@@ -44,6 +44,15 @@ internal static class UI
     {
         int remaining = Math.Max(0, (int)(device.Expires - DateTimeOffset.UtcNow).TotalSeconds);
         return Card(VStack(16,
+            FlexRow(
+                TextBlock($"Signing in to {device.VerificationUri.Host}").FontSize(16).SemiBold()
+                    .TextWrapping().AutomationId("ActiveSignInHost").Flex(shrink: 1),
+                state.ReconnectKey is null
+                    ? Button("Change host", state.ChangeHost).AutomationId("ChangeSignInHost").Flex(shrink: 0)
+                    : null) with
+            {
+                Wrap = FlexWrap.Wrap, ColumnGap = 12, RowGap = 8, AlignItems = FlexAlign.Center
+            },
             TextBlock("Enter this code in your browser").FontSize(20).SemiBold().TextWrapping(),
             TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled()
                 .AutomationName("Device authorization code").AutomationId("DeviceCode"),
@@ -59,7 +68,7 @@ internal static class UI
             {
                 Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8, AlignItems = FlexAlign.FlexStart
             },
-            Copy($"Waiting for authorization on {device.VerificationUri.Host}. Code expires in {remaining} seconds.").FontSize(12)
+            Copy($"Waiting for authorization. Code expires in {remaining} seconds.").FontSize(12)
         )).AutomationId("DeviceSignIn");
     }
     internal static string? AccountWarning(AccountView account)
@@ -383,7 +392,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         .AccentButton().IsEnabled(!Session.Busy).AutomationId("StartSignIn")
                         .AutomationName(Session.EditingHost ? "Start sign-in" : "Try again").Flex(shrink: 0)
                     : null,
-                Session.ReconnectKey is null && !Session.EditingHost && !Session.ConnectingAccount
+                Session.ReconnectKey is null && Session.Prompt is null && !Session.EditingHost && !Session.ConnectingAccount
                     ? Button("Change host", Session.ChangeHost).AutomationId("ChangeSignInHost").Flex(shrink: 0)
                     : null,
                 Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () => Session.TryGoBack())

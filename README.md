@@ -58,7 +58,8 @@ is **not** an in-place upgrade from the GitHub package.
    browser authorization; **Complete!** appears when setup finishes. There is no
    additional in-app confirmation.
 
-For an enterprise account, select **Change host** to cancel the github.com attempt,
+The code panel identifies the active host above the code instructions, with
+**Change host** beside it. For an enterprise account, select it to cancel the github.com attempt,
 choose the host and its OAuth Client ID, check the displayed destinations, then
 select **Start sign-in**. New Add account actions always start with github.com.
 **Reconnect** starts immediately using the account's original host and registration;

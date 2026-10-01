@@ -39,7 +39,16 @@ internal static class AccountSignInTests
             Descendants(panel).OfType<InfoBarElement>().Any(bar =>
                 bar.Message == "Code copied to clipboard." && bar.Severity == InfoBarSeverity.Success),
             "device code and accurate clipboard feedback are displayed together");
-        var actions = Descendants(panel).OfType<FlexElement>().Single();
+        var body = (StackElement)((BorderElement)panel).Child!;
+        var hostHeader = (FlexElement)body.Children[0];
+        Check(hostHeader.Children.OfType<TextBlockElement>().Single().Content == "Signing in to github.com" &&
+            hostHeader.Children.OfType<ButtonElement>().Single().Label == "Change host" &&
+            body.Children[1] is TextBlockElement { Content: "Enter this code in your browser" },
+            "active host and adjacent Change host action lead the inset panel above the code instructions");
+        Check(hostHeader.Wrap == FlexWrap.Wrap && hostHeader.AlignItems == FlexAlign.Center,
+            "host header aligns its action and can wrap at narrow widths");
+        var actions = Descendants(panel).OfType<FlexElement>()
+            .Single(row => row.Children.OfType<ButtonElement>().Any(button => button.Label == "Open browser"));
         Check(actions.Children.OfType<ButtonElement>().Select(button => button.Label)
             .SequenceEqual(["Open browser", "Copy code"]), "browser is the leading action beside manual Copy");
         Check(credentials.Writes == 0 && (await store.LoadSettingsAsync()).Value.Accounts.Length == 0,
@@ -75,7 +84,8 @@ internal static class AccountSignInTests
         session.CopyCode();
         Check(session.CodeCopied && session.ClipboardError is null && copies.Count == 2,
             "manual copy retry clears the warning only after success");
-        session.ChangeHost();
+        Descendants(UI.DeviceSignIn(session, session.Prompt!, 0)).OfType<ButtonElement>()
+            .Single(button => button.Label == "Change host").OnClick!();
         Check(!session.SigningIn && session.EditingHost && session.Prompt is null && !session.CodeCopied,
             "Change host cancels authorization and clears the old code and copy feedback");
         session.SelectHost(true);
@@ -88,6 +98,9 @@ internal static class AccountSignInTests
         Check(session.Prompt!.VerificationUri.Host == "team.ghe.com" &&
             fixture.OAuthClientIds.Last() == "team-registration" && session.CodeCopied,
             "custom-host sign-in uses its own registration and automatically copies its new code");
+        Check(Descendants(UI.DeviceSignIn(session, session.Prompt!, 0)).OfType<TextBlockElement>()
+            .Any(text => text.Content == "Signing in to team.ghe.com"),
+            "active host header reflects the current validated enterprise authorization");
         handler.TokenGate.TrySetResult();
         await Until(() => !session.SigningIn);
         Check(session.NoticeIsSuccess && (await store.LoadSettingsAsync()).Value.Accounts.Length == 2,
@@ -100,6 +113,8 @@ internal static class AccountSignInTests
         Check(session.SigningIn && !session.EditingHost && session.ReconnectKey == account.Key,
             "Reconnect immediately starts the original host flow");
         await Until(() => session.Prompt is not null);
+        Check(!Descendants(UI.DeviceSignIn(session, session.Prompt!, 0)).OfType<ButtonElement>()
+            .Any(button => button.Label == "Change host"), "reconnect preserves its fixed original host");
         handler.TokenGate.TrySetResult();
         await Until(() => !session.SigningIn);
         Check(session.Notice == "Account reconnected." && session.NoticeIsSuccess &&
