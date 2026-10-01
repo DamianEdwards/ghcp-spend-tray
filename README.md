@@ -54,7 +54,10 @@ is **not** an in-place upgrade from the GitHub package.
    displayed by the app. Start device sign-in, then enter the displayed code on
    the host's GitHub authorization page in your browser. Verify the OAuth app
    shown on the consent screen before approving it.
-3. Confirm the GitHub login and user ID displayed by GHCPSpendTray, then save.
+3. Return to GHCPSpendTray. Browser authorization alone does not finish setup:
+   check the GitHub host, login, and user ID in the **Action required** panel,
+   then select **Connect this account**. Choose **Wrong account** to reject the
+   identity and try again. Wait for **Complete!** to confirm the account was saved.
 
 The app has built-in public OAuth registrations for `github.com` and
 `msft.ghe.com`; it does not use `gh` credentials or ask for a client secret.

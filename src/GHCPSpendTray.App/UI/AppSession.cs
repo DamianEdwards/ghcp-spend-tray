@@ -12,6 +12,7 @@ internal sealed class AppSession : IDisposable
     private CancellationTokenSource? _signIn;
     private readonly CancellationTokenSource _lifetime = new();
     private TaskCompletionSource<bool>? _confirmation;
+    private string? _notice;
     private readonly System.Threading.Timer _countdown;
     private bool _disposed;
     internal IApplicationController Controller { get; }
@@ -27,7 +28,13 @@ internal sealed class AppSession : IDisposable
     internal bool Busy { get; private set; }
     internal bool SigningIn => _signIn is not null;
     internal string? Error { get; private set; }
-    internal string? Notice { get; private set; }
+    internal string? Notice
+    {
+        get => _notice;
+        private set { _notice = value; NoticeIsSuccess = false; }
+    }
+    internal bool NoticeIsSuccess { get; private set; }
+    internal bool ConnectingAccount => _confirmation?.Task is { IsCompletedSuccessfully: true, Result: true };
     internal string? SelectedAccount { get; private set; }
     internal bool ShowAddForm { get; private set; }
     internal bool CanGoBack => !_disposed && Page == SettingsPage.Accounts &&
@@ -139,7 +146,7 @@ internal sealed class AppSession : IDisposable
         Host = account.Host; CustomHost = account.Host != "github.com";
         ClientId = CustomHost ? Controller.AccountClientId(account.Key) ?? "" : "";
         ReconnectKey = account.Key; SelectedAccount = null;
-        ShowAddForm = true; Prompt = null; Identity = null; Error = null; Notify();
+        ShowAddForm = true; Prompt = null; Identity = null; Error = null; Notice = null; Notify();
     }
     internal void SelectHost(bool custom)
     {
@@ -254,14 +261,16 @@ internal sealed class AppSession : IDisposable
                         Post(() =>
                         {
                             if (_signIn != cancel) { completion.TrySetCanceled(); return; }
-                            _confirmation = completion; Identity = identity; Prompt = null; Notify();
+                            _confirmation = completion; Identity = identity; Prompt = null; Notice = null; Notify();
                         });
                         return completion.Task.WaitAsync(cancel.Token);
                     }, cancel.Token, clientId).ConfigureAwait(false);
                 Post(() =>
                 {
                     if (_signIn != cancel) return;
-                    ShowAddForm = false; SelectedAccount = null; Notice = "Account connected.";
+                    ShowAddForm = false; SelectedAccount = null;
+                    Notice = reconnect is null ? "Account connected." : "Account reconnected.";
+                    NoticeIsSuccess = true;
                 });
             }
             catch (OperationCanceledException) { }
@@ -276,7 +285,10 @@ internal sealed class AppSession : IDisposable
             }
         });
     }
-    internal void ConfirmIdentity(bool accepted) => _confirmation?.TrySetResult(accepted);
+    internal void ConfirmIdentity(bool accepted)
+    {
+        if (_confirmation?.TrySetResult(accepted) == true) Notify();
+    }
     internal void CancelSignIn()
     {
         var cancel = _signIn; _signIn = null;

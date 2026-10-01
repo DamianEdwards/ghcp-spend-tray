@@ -3,6 +3,7 @@ using System.Reflection;
 using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
+using Microsoft.UI.Reactor.Layout;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using static Microsoft.UI.Reactor.Factories;
@@ -20,9 +21,11 @@ internal static class UI
     internal static Element Logo(double size) => Image(Path.Combine(AppContext.BaseDirectory, "Assets", "ghcpspendtray-logo.png"))
         .Width(size).Height(size).AutomationName("GHCPSpendTray");
     internal static Element AccountPicture(AccountView account, double size) =>
-        (PersonPicture().DisplayName(account.Login) with { ProfilePicture = account.AvatarUrl })
-            .Width(size).Height(size).AutomationName($"Account {account.Login}")
-            .AutomationId("AccountAvatar-" + account.Key);
+        AccountPicture(account.Login, account.AvatarUrl, account.Key, size);
+    internal static Element AccountPicture(string login, string? avatarPath, string key, double size) =>
+        (PersonPicture().DisplayName(login) with { ProfilePicture = avatarPath })
+            .Width(size).Height(size).AutomationName($"Account {login}")
+            .AutomationId("AccountAvatar-" + key);
     internal static ButtonElement Glyph(string glyph, string label, Action action) =>
         Button(Icon(FontIcon(glyph, "Segoe Fluent Icons", 18)), action)
             .Width(40).Height(40).Padding(0).AutomationName(label).ToolTip(label);
@@ -32,7 +35,48 @@ internal static class UI
             control.Grid(column: 1).VAlign(VerticalAlignment.Center)));
     internal static Element? Feedback(AppSession state, bool showNotice = true) => state.Error is { } error
         ? InfoBar("Unable to complete", error).Error().IsClosable(false)
-        : showNotice && state.Notice is { } notice ? InfoBar("", notice).Informational().IsClosable(false) : null;
+        : showNotice && state.Notice is { } notice
+            ? state.NoticeIsSuccess
+                ? InfoBar("Complete!", notice).Success().IsClosable(false).AutomationId("AccountConnectionComplete")
+                : InfoBar("", notice).Informational().IsClosable(false)
+            : null;
+    internal static InfoBarElement IdentityConfirmation(AppSession state, PendingIdentity identity) =>
+        (InfoBar(state.ConnectingAccount ? "Connecting account..." : "Action required: confirm this account",
+            state.ConnectingAccount
+                ? "Finishing setup. Please wait for confirmation."
+                : "Browser sign-in is complete, but setup is not. Select Connect this account to finish.")
+            .IsClosable(false) with
+        {
+            Severity = state.ConnectingAccount ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
+            Content = state.ConnectingAccount ? VStack(12,
+                TextBlock("Saving your connection").FontSize(20).SemiBold(),
+                TextBlock($"{identity.Login} on {identity.Host}").TextWrapping().SemiBold(),
+                Copy($"Immutable user ID: {identity.UserId}. Consumption access was checked."),
+                HStack(10, ProgressRing().Width(24).Height(24), Copy("Connecting...")),
+                VStack(8,
+                    Button("Connect this account", () => state.ConfirmIdentity(true)).AccentButton()
+                        .IsEnabled(false).AutomationId("ConfirmAccount").HAlign(HorizontalAlignment.Left),
+                    Button("Wrong account", () => state.ConfirmIdentity(false))
+                        .IsEnabled(false).AutomationId("RejectAccount").HAlign(HorizontalAlignment.Left)))
+                : VStack(12,
+                    TextBlock("Final step").FontSize(20).SemiBold(),
+                    Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
+                        AccountPicture(identity.Login, identity.AvatarPath, $"{identity.Host}:{identity.UserId}", 48)
+                            .Grid(column: 0).Margin(0, 0, 12, 0),
+                        VStack(4,
+                            TextBlock($"{identity.Login} on {identity.Host}").TextWrapping().SemiBold(),
+                            Copy($"Immutable user ID: {identity.UserId}. Consumption access was checked."))
+                            .Grid(column: 1).VAlign(VerticalAlignment.Center)),
+                    FlexRow(
+                        Button("Connect this account", () => state.ConfirmIdentity(true)).AccentButton()
+                            .AutomationId("ConfirmAccount").IsEnabled(true).Flex(shrink: 0),
+                        Button("Wrong account", () => state.ConfirmIdentity(false))
+                            .AutomationId("RejectAccount").Flex(shrink: 0)) with
+                    {
+                        Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8,
+                        AlignItems = FlexAlign.FlexStart
+                    }).Padding(0, 0, 16, 16)
+        }).AutomationId("AccountIdentityConfirmation");
     internal static string? AccountWarning(AccountView account)
     {
         if (account.Freshness == "Fresh") return account.Details.Message;
@@ -313,40 +357,37 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ? Math.Max(0, (int)(prompt.Expires - DateTimeOffset.UtcNow).TotalSeconds).ToString(CultureInfo.InvariantCulture) : "";
         return VStack(18,
             TextBlock(Session.ReconnectKey is null ? "Connect an account" : "Reconnect account").FontSize(22).SemiBold(),
-            UI.Copy("Authorize the OAuth application registered for this host in your browser. No password or token needs to be pasted here."),
-            TextBlock("GitHub host").SemiBold(),
-            ComboBox(["github.com", "Custom..."], Session.CustomHost ? 1 : 0,
-                index => Session.SelectHost(index == 1))
-                .AutomationName("GitHub host").AutomationId("AccountHostSelection")
-                .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
-            Session.CustomHost
-                ? VStack(8,
-                    TextBox(Session.Host, Session.SetHost, "sample.ghe.com")
-                        .AutomationName("Custom GitHub hostname").AutomationId("AccountHost")
-                        .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
-                    TextBlock("OAuth Client ID").SemiBold(),
-                    TextBox(Session.ClientId, Session.SetClientId, "Host-specific OAuth Client ID")
-                        .AutomationName("Host-specific OAuth Client ID").AutomationId("AccountClientId")
-                        .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null))
-                : null,
-            UI.Copy(Session.HostDescription()).FontSize(12),
-            CheckBox(Session.OfflineAccess, value => { Session.OfflineAccess = value; Session.Notify(); },
-                "Request offline_access where supported").IsEnabled(!Session.SigningIn),
-            UI.Copy("Sign-in requests basic identity access. Enterprise registrations and application policies are host-specific."),
             Session.Identity is { } identity
-                ? Card(VStack(12, TextBlock("Confirm this account").FontSize(20).SemiBold(),
-                    TextBlock($"{identity.Login} on {identity.Host}").TextWrapping(),
-                    UI.Copy($"Immutable user ID: {identity.UserId}. Consumption access was checked."),
-                    HStack(10, Button("Connect this account", () => Session.ConfirmIdentity(true)),
-                        Button("Wrong account", () => Session.ConfirmIdentity(false)))))
-                : Session.Prompt is { } device
-                    ? Card(VStack(12,
-                        UI.Copy("Enter this code on GitHub"),
-                        TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled().AutomationName("Device authorization code"),
-                        HStack(10, Button("Copy code", () => Session.CopyCode(owner)),
-                            Button("Open browser", () => Session.OpenLink(device.VerificationUri.AbsoluteUri, owner))),
-                        UI.Copy($"Expires in {remaining} seconds. Waiting for authorization...")))
-                    : Session.SigningIn ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Requesting device sign-in...")) : null,
+                ? UI.IdentityConfirmation(Session, identity)
+                : VStack(18,
+                    UI.Copy("Authorize the OAuth application registered for this host in your browser. No password or token needs to be pasted here."),
+                    TextBlock("GitHub host").SemiBold(),
+                    ComboBox(["github.com", "Custom..."], Session.CustomHost ? 1 : 0,
+                        index => Session.SelectHost(index == 1))
+                        .AutomationName("GitHub host").AutomationId("AccountHostSelection")
+                        .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
+                    Session.CustomHost
+                        ? VStack(8,
+                            TextBox(Session.Host, Session.SetHost, "sample.ghe.com")
+                                .AutomationName("Custom GitHub hostname").AutomationId("AccountHost")
+                                .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
+                            TextBlock("OAuth Client ID").SemiBold(),
+                            TextBox(Session.ClientId, Session.SetClientId, "Host-specific OAuth Client ID")
+                                .AutomationName("Host-specific OAuth Client ID").AutomationId("AccountClientId")
+                                .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null))
+                        : null,
+                    UI.Copy(Session.HostDescription()).FontSize(12),
+                    CheckBox(Session.OfflineAccess, value => { Session.OfflineAccess = value; Session.Notify(); },
+                        "Request offline_access where supported").IsEnabled(!Session.SigningIn),
+                    UI.Copy("Sign-in requests basic identity access. Enterprise registrations and application policies are host-specific."),
+                    Session.Prompt is { } device
+                        ? Card(VStack(12,
+                            UI.Copy("Enter this code on GitHub"),
+                            TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled().AutomationName("Device authorization code"),
+                            HStack(10, Button("Copy code", () => Session.CopyCode(owner)),
+                                Button("Open browser", () => Session.OpenLink(device.VerificationUri.AbsoluteUri, owner))),
+                            UI.Copy($"Expires in {remaining} seconds. Waiting for authorization...")))
+                        : Session.SigningIn ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Requesting device sign-in...")) : null),
             HStack(10,
                 Button("Start device sign-in", Session.StartSignIn).IsEnabled(!Session.SigningIn && !Session.Busy),
                 Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () => Session.TryGoBack())

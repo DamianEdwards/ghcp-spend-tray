@@ -278,6 +278,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
         await InitializeAsync().ConfigureAwait(false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
         var token = linked.Token;
+        string? previewDirectory = null;
         try
         {
             var resolved = HostResolver.Resolve(host);
@@ -302,7 +303,35 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             if (reconnectKey is null && _settings.Accounts.Any(a => a.Key == account.Key))
                 throw new AppOperationException("This account is already monitored. Select it in the overview and choose Reconnect instead.");
             _ = await _usage.FetchWithTokenAsync(account, tokens, token).ConfigureAwait(false);
-            if (!await confirm(new(account.Host, long.Parse(identity.UserId, CultureInfo.InvariantCulture), identity.Login))
+            string? avatarPath = null;
+            if (identity.AvatarUrl is not null)
+            {
+                previewDirectory = Path.Combine(DataDirectory, "pending-avatars", Guid.NewGuid().ToString("N"));
+                using var avatarTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                avatarTimeout.CancelAfter(TimeSpan.FromSeconds(3));
+                try
+                {
+                    string? downloaded = await new AvatarCache(_http, previewDirectory)
+                        .UpdateAsync(account, identity.AvatarUrl, avatarTimeout.Token).ConfigureAwait(false);
+                    if (downloaded is not null)
+                    {
+                        // Keep the native image URI short; the temporary cache's hashed path can exceed MAX_PATH.
+                        string previewPath = Path.Combine(previewDirectory, "preview" + Path.GetExtension(downloaded));
+                        File.Move(downloaded, previewPath);
+                        avatarPath = previewPath;
+                    }
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    Diagnostics.Record("Confirmation avatar download timed out; using initials.");
+                }
+                catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException)
+                {
+                    Diagnostics.Record($"Confirmation avatar unavailable ({ex.GetType().Name}); using initials.");
+                }
+            }
+            token.ThrowIfCancellationRequested();
+            if (!await confirm(new(account.Host, long.Parse(identity.UserId, CultureInfo.InvariantCulture), identity.Login, avatarPath))
                     .WaitAsync(token).ConfigureAwait(false))
                 throw new OperationCanceledException(token);
             await _mutations.WaitAsync(token).ConfigureAwait(false);
@@ -361,6 +390,20 @@ internal sealed class ApplicationController : IApplicationController, INotificat
             await PublishAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
+        finally
+        {
+            if (previewDirectory is not null)
+            {
+                try
+                {
+                    if (Directory.Exists(previewDirectory)) Directory.Delete(previewDirectory, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Diagnostics.Record($"Confirmation avatar cleanup failed ({ex.GetType().Name}).");
+                }
+            }
+        }
     }
 
     public void SetNotificationHandler(Func<string, string, string, Task<bool>> handler) => _notify = handler;

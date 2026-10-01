@@ -412,6 +412,7 @@ try
     foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         Check(!(await File.ReadAllTextAsync(file)).Contains("fixture-", StringComparison.Ordinal), "no token in persisted files");
     assertions += await BackNavigationTests.RunAsync(root);
+    assertions += await AccountConfirmationTests.RunAsync(Path.Combine(root, "confirmation"));
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");
 
     void Check(bool condition, string description)
@@ -466,6 +467,9 @@ sealed class FixtureHttp : HttpMessageHandler
     internal bool RedirectAvatar { get; set; }
     internal bool InvalidAvatar { get; set; }
     internal bool FailUsage { get; set; }
+    internal bool OversizedAvatar { get; set; }
+    internal TaskCompletionSource? AvatarGate { get; set; }
+    internal int AvatarRequests;
     internal int RefreshRequests { get; private set; }
     internal int OAuthRequests => OAuthClientIds.Count;
     internal List<string> OAuthClientIds { get; } = [];
@@ -475,13 +479,15 @@ sealed class FixtureHttp : HttpMessageHandler
         if (uri.AbsolutePath.StartsWith("/u/", StringComparison.Ordinal) ||
             uri.AbsolutePath.StartsWith("/avatars/u/", StringComparison.Ordinal))
         {
+            Interlocked.Increment(ref AvatarRequests);
+            if (AvatarGate is { } gate) await gate.Task.WaitAsync(cancellationToken);
             if (request.Headers.Authorization is not null || uri.Query != "?token=synthetic-avatar-token&size=64")
                 throw new InvalidOperationException("Avatar request must use only its signed URL.");
             if (FailAvatar) return new(HttpStatusCode.Forbidden);
             if (RedirectAvatar) return new(HttpStatusCode.Redirect);
             return new(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(InvalidAvatar
+                Content = new ByteArrayContent(OversizedAvatar ? new byte[1024 * 1024 + 1] : InvalidAvatar
                     ? "not an image"u8.ToArray() : [137, 80, 78, 71, 13, 10, 26, 10, AvatarRevision])
                 { Headers = { ContentType = new("image/png") } }
             };

@@ -193,6 +193,24 @@ overflow visibility and can suppress notifications.
 
 ## Authentication evidence and limitations
 
+Account confirmation fixtures exercise the final action-required panel, explicit
+Connect and Wrong account actions, pending-save feedback, and completion only
+after credentials and account settings are saved. They also cover cancellation,
+save failure/retry, and matching/mismatched reconnect identities using synthetic
+HTTP and credentials. Confirmation actions use a horizontal wrapping row with
+explicit content inset. Avatar previews reuse the host-scoped, redirect-rejecting,
+1 MiB cache downloader with a three-second timeout and a per-sign-in temporary
+directory. Signed URLs are never persisted; rejection, cancellation and completion
+clean up the preview without changing registered avatars. Failed previews use
+initials and emit a diagnostic instead of blocking authentication. Fixtures cover
+HTTP/image/size/redirect/timeout failures, cancellation during fetch, subsequent
+sign-in isolation and rejected reconnect cleanup.
+
+The panel uses native warning/success InfoBars and the WinUI accent button style.
+Synthetic real-WinUI dark-theme screenshots cover confirmation, pending save and
+completion. Light/high-contrast rendering and OS text scaling still require visual
+acceptance.
+
 The user confirmed initial github.com device sign-in and consumption/allocation
 display on September 23, 2026. That does not establish compatibility on every host
 or packaged authentication/credential behavior.

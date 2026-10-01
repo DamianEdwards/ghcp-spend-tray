@@ -20,7 +20,7 @@ internal sealed record SettingsView(int PollMinutes, string Thresholds, bool Not
     TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
     string[]? ExcludedTrayAccounts = null);
 internal sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires);
-internal sealed record PendingIdentity(string Host, long UserId, string Login);
+internal sealed record PendingIdentity(string Host, long UserId, string Login, string? AvatarPath = null);
 
 internal interface IApplicationController : IDisposable
 {
