@@ -4,9 +4,11 @@ using GHCPSpendTray.Core;
 
 internal static class TrayTests
 {
-    internal static void WriteSamples(string path)
+    internal static void WriteSamples(string path, int size = 16)
     {
-        const int width = 480, height = 256;
+        if (size is < 16 or > 64) throw new ArgumentOutOfRangeException(nameof(size));
+        int cellWidth = Math.Max(60, size * 2 + 16), cellHeight = size * 3 + 16;
+        int width = cellWidth * 8, height = cellHeight * 4;
         var sheet = new uint[width * height];
         Array.Fill(sheet, 0xFF808080u);
         double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50];
@@ -15,14 +17,18 @@ internal static class TrayTests
             {
                 var palette = row < 2 ? new TrayPalette(0xFFF3F3F3, 0xFF161616) : new TrayPalette(0xFF202020, 0xFFF5F5F5);
                 var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col == 7 ? 2 : 1, "", "");
-                var pixels = TrayIconRenderer.Pixels(indicator, row % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage, 16, palette);
-                for (int y = 0; y < 16; y++)
-                    for (int x = 0; x < 16; x++)
+                var pixels = TrayIconRenderer.Pixels(indicator, row % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage, size, palette);
+                for (int y = 0; y < cellHeight; y++)
+                    Array.Fill(sheet, palette.Background, (row * cellHeight + y) * width + col * cellWidth, cellWidth);
+                for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++)
                     {
-                        sheet[(row * 64 + 4 + y) * width + col * 60 + 20 + x] = pixels[y * 16 + x];
+                        uint pixel = Composite(pixels[y * size + x], palette.Background);
+                        sheet[(row * cellHeight + 4 + y) * width + col * cellWidth + (cellWidth - size) / 2 + x] = pixel;
                         for (int sy = 0; sy < 2; sy++)
                             for (int sx = 0; sx < 2; sx++)
-                                sheet[(row * 64 + 27 + y * 2 + sy) * width + col * 60 + 12 + x * 2 + sx] = pixels[y * 16 + x];
+                                sheet[(row * cellHeight + size + 10 + y * 2 + sy) * width + col * cellWidth +
+                                    (cellWidth - size * 2) / 2 + x * 2 + sx] = pixel;
                     }
             }
         using var writer = new BinaryWriter(File.Create(path));
@@ -41,6 +47,15 @@ internal static class TrayTests
         foreach (uint pixel in sheet) writer.Write(pixel);
     }
 
+    private static uint Composite(uint pixel, uint background)
+    {
+        uint inverse = 255 - (pixel >> 24);
+        return 0xFF000000 |
+            (((pixel >> 16 & 255) + (background >> 16 & 255) * inverse / 255) << 16) |
+            (((pixel >> 8 & 255) + (background >> 8 & 255) * inverse / 255) << 8) |
+            ((pixel & 255) + (background & 255) * inverse / 255);
+    }
+
     internal static void Run(Action<bool, string> check, string root)
     {
         var palette = new TrayPalette(0xFF000000, 0xFFFFFFFF);
@@ -52,9 +67,13 @@ internal static class TrayTests
                 foreach (double? value in new double?[] { null, 0, .1, 1, 50, 99.9, 100, 105, 999, 1000, 1e28 })
                 {
                     var pixels = TrayIconRenderer.Pixels(Indicator(value), style, size, palette);
-                    check(pixels.Length == size * size && pixels.All(p => p == palette.Background || p == palette.Foreground),
-                        "tray pixels stay within their exact size and use an opaque contrasting palette");
-                    check(pixels.Any(p => p == palette.Foreground), "tray glyph is visible even for zero and unavailable");
+                    check(pixels.Length == size * size && pixels[0] == 0 && pixels[size - 1] == 0 &&
+                        pixels[^size] == 0 && pixels[^1] == 0,
+                        "tray artwork has transparent corners and exact native pixel dimensions");
+                    check(pixels.Any(p => p >> 24 > 128) && pixels.Any(p => p >> 24 is > 0 and < 255),
+                        "native glyphs and pie contours have strong ink with antialiased edge coverage");
+                    check(pixels.All(p => (p & 255) == p >> 24 && (p >> 8 & 255) == p >> 24 &&
+                        (p >> 16 & 255) == p >> 24), "white icon coverage is premultiplied without ClearType color fringes");
                     using var image = TrayIconRenderer.Create(Indicator(value), style, size, palette);
                     check(!image.IsInvalid, "native usage HICON created for every boundary and DPI");
                 }
@@ -66,6 +85,16 @@ internal static class TrayTests
             var zero = TrayIconRenderer.Pixels(Indicator(0), style, 16, palette);
             check(!full.SequenceEqual(partial) && !zero.SequenceEqual(missing),
                 "partial and unavailable have distinct monochrome geometry, not just color");
+            var opaqueWhite = TrayIconRenderer.Pixels(Indicator(50), style, 24, palette);
+            var color = new TrayPalette(0xFFB02090, 0xFF19AAE6);
+            var tinted = TrayIconRenderer.Pixels(Indicator(50), style, 24, color);
+            check(tinted.Select(p => p >> 24).SequenceEqual(opaqueWhite.Select(p => p >> 24)) &&
+                tinted.All(p => (p >> 16 & 255) == (0x19 * (p >> 24) + 127) / 255 &&
+                    (p >> 8 & 255) == (0xAA * (p >> 24) + 127) / 255 &&
+                    (p & 255) == (0xE6 * (p >> 24) + 127) / 255),
+                "theme and high-contrast colors tint the same transparent antialiased coverage correctly");
+            check(tinted.SequenceEqual(TrayIconRenderer.Pixels(Indicator(50), style, 24,
+                color with { Background = 0xFF00FFFF })), "tray artwork never bakes in a taskbar background rectangle");
         }
         var selected = Presentation(Indicator(25, "github.com:1"), Indicator(null, "example.ghe.com:2"));
         var rollUp = Presentation(Indicator(25, partial: true));

@@ -215,12 +215,26 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     private Element Usage()
     {
         var model = Session.Dashboard;
+        if (!Session.Initialized)
+            return VStack(16,
+                Session.Error is null
+                    ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Loading your accounts..."))
+                    : Button("Try loading again", Session.Initialize).HAlign(HorizontalAlignment.Left)
+            ).AutomationId("UsagePage");
+        if (model.Accounts.Count == 0)
+            return VStack(16,
+                TextBlock("Add an account to see your usage").FontSize(22).SemiBold().TextWrapping()
+                    .AutomationId("UsageEmptyMessage"),
+                UI.Copy("Connect your GitHub account to start tracking Copilot consumption."),
+                Button(HStack(8, Icon("Add"), TextBlock("Add account")), Session.AddAccount)
+                    .AccentButton().AutomationName("Add account").AutomationId("UsageAddAccount")
+                    .HAlign(HorizontalAlignment.Left)
+            ).Padding(0, 16).AutomationId("UsagePage");
         return VStack(18,
             Card(VStack(10,
                 UI.Copy("This month's consumption"),
                 TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId("UsageTotal"),
-                UI.Copy(model.Accounts.Count == 0 ? "No current consumption to display." :
-                    model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
+                UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
                     model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable"),
                 UI.Copy(model.Status).FontSize(12),
                 UI.Copy((model.Tray ?? TrayPresentation.Unavailable).RollUp.Details)
@@ -229,14 +243,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 Button(Session.Busy ? "Refreshing..." : "Refresh consumption", () => Session.Refresh())
                     .AutomationName("Refresh consumption").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Left)
                     .IsEnabled(Session.Initialized && !Session.Busy))),
-            !Session.Initialized
-                ? Session.Error is null
-                    ? UI.Copy("Loading your accounts...")
-                    : Button("Try loading again", Session.Initialize).HAlign(HorizontalAlignment.Left)
-                : model.Accounts.Count == 0
-                    ? Button("Add account", Session.AddAccount).AutomationId("UsageAddAccount")
-                        .HAlign(HorizontalAlignment.Left)
-                    : VStack(16, model.Accounts.Select(UsageAccount).ToArray())
+            VStack(16, model.Accounts.Select(UsageAccount).ToArray())
         ).AutomationId("UsagePage");
     }
     private Element UsageAccount(AccountView account) => Card(VStack(12,
@@ -304,10 +311,11 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 var account = preview.Accounts.FirstOrDefault(a => a.Key == icon.AccountKey);
                 string label = account is null ? "Roll-up" : $"{account.Name} ({account.Host})";
                 return Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
-                    new TrayPreviewElement().Set(image => TrayPreviewImage.Apply(image, icon, preview.Style))
-                        .Width(16).Height(16).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0)
+                    Border(new TrayPreviewElement().Set(image => TrayPreviewImage.Apply(image, icon, preview.Style))
+                        .Width(16).Height(16)
                         .AutomationId("TrayPreviewIcon-" + (icon.AccountKey ?? "rollup"))
-                        .AutomationName($"{label}: {icon.Details}").ToolTip(icon.Details).Grid(column: 0),
+                        .AutomationName($"{label}: {icon.Details}").ToolTip(icon.Details))
+                        .Padding(2).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0).Grid(column: 0),
                     TextBlock($"{label} - {icon.ValueText}" +
                         (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over allocation)" : ""))
                         .TextWrapping().FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 1))

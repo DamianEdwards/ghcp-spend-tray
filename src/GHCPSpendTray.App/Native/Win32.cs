@@ -281,6 +281,14 @@ internal static unsafe partial class Win32
     [LibraryImport("gdi32.dll")]
     internal static partial int DeleteDC(nint dc);
     [LibraryImport("gdi32.dll")]
+    internal static partial uint SetTextColor(nint dc, uint color);
+    [LibraryImport("gdi32.dll")]
+    internal static partial int SetBkMode(nint dc, int mode);
+    [LibraryImport("gdi32.dll")]
+    internal static partial int GdiFlush();
+    [LibraryImport("user32.dll", EntryPoint = "DrawTextW", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial int DrawText(nint dc, string text, int length, ref RECT bounds, uint format);
+    [LibraryImport("gdi32.dll")]
     internal static partial int BitBlt(nint target, int x, int y, int width, int height, nint source, int sourceX, int sourceY, uint rop);
     [LibraryImport("gdi32.dll")]
     internal static partial nint CreatePen(int style, int width, uint color);

@@ -44,8 +44,7 @@ internal static class TrayIconRenderer
             bitmap = Win32.CreateDIBSection(0, ref info, 0, out var bits, 0, 0);
             if (bitmap == 0) throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot allocate tray pixels.");
             pixels.CopyTo(new Span<uint>((void*)bits, pixels.Length));
-            // An explicit zero AND mask makes the fully opaque, high-contrast pixels
-            // independent of the Shell's compositing background.
+            // Windows composites the 32-bit premultiplied alpha; the AND mask stays clear.
             byte[] maskBits = new byte[((size + 15) / 16) * 2 * size];
             fixed (byte* data = maskBits) mask = Win32.CreateBitmap(size, size, 1, 1, data);
             if (mask == 0) throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot allocate tray mask.");
@@ -61,81 +60,142 @@ internal static class TrayIconRenderer
         }
     }
 
-    internal static uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette)
+    internal static unsafe uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette)
     {
         if (size is < 16 or > 256) throw new ArgumentOutOfRangeException(nameof(size));
-        var pixels = new uint[size * size];
-        Array.Fill(pixels, palette.Background | 0xFF000000);
-        if (indicator.Percent is null)
+        const int samples = 4;
+        int resolution = size * samples;
+        double scale = resolution / 16d;
+        var info = new Win32.BITMAPINFOHEADER
         {
-            Text("?", 5, 1, 2, 2);
-            return pixels;
-        }
-        if (style == TrayIconStyle.Percentage)
+            biSize = (uint)sizeof(Win32.BITMAPINFOHEADER), biWidth = resolution, biHeight = -resolution,
+            biPlanes = 1, biBitCount = 32
+        };
+        nint dc = 0, bitmap = 0, previous = 0, bits = 0;
+        try
         {
-            string text = indicator.NumericText;
-            int scale = text.Length <= 2 ? 2 : 1;
-            int width = (text.Length * 4 - 1) * scale;
-            Text(text, (16 - width) / 2, 1, scale, 2);
-            Text("%", 1, 11);
-            if (indicator.IsOverAllocation) Text("+", 6, 11);
-        }
-        else
-        {
-            double fraction = Math.Clamp(indicator.Percent.Value / 100, 0, 1);
+            dc = Win32.CreateCompatibleDC(0);
+            if (dc == 0) throw new Win32Exception("Cannot allocate the tray drawing context.");
+            bitmap = Win32.CreateDIBSection(dc, ref info, 0, out bits, 0, 0);
+            if (bitmap == 0) throw new Win32Exception("Cannot allocate tray coverage pixels.");
+            previous = Win32.SelectObject(dc, bitmap);
+            if (previous == 0 || previous == -1) throw new Win32Exception("Cannot select tray coverage pixels.");
+            var coverage = new Span<uint>((void*)bits, resolution * resolution);
+            coverage.Clear();
+            if (Win32.SetBkMode(dc, 1) == 0 || Win32.SetTextColor(dc, 0xFFFFFF) == uint.MaxValue)
+                throw new Win32Exception("Cannot configure tray text rendering.");
+
+            if (indicator.Percent is null) Text("?", 16, 18);
+            else
+            {
+                if (style == TrayIconStyle.Percentage)
+                {
+                    bool badges = indicator.IsPartial || indicator.IsOverAllocation;
+                    Text(indicator.NumericText, badges ? 10 : 16, badges ? 13 : 18);
+                }
+                else
+                {
+                    double fraction = Math.Clamp(indicator.Percent.Value / 100, 0, 1);
+                    for (int y = 0; y < resolution; y++)
+                        for (int x = 0; x < resolution; x++)
+                        {
+                            double dx = (x + .5) / scale - 8, dy = (y + .5) / scale - 8;
+                            double radius = Math.Sqrt(dx * dx + dy * dy);
+                            double angle = (Math.Atan2(dx, -dy) + Math.Tau) % Math.Tau;
+                            if (radius <= 7 && (radius >= 5.7 || angle < fraction * Math.Tau))
+                                coverage[y * resolution + x] = 0xFFFFFF;
+                        }
+                }
+                if (indicator.IsOverAllocation) Badge(1, false);
+                if (indicator.IsPartial) Badge(11, true);
+            }
+
+            // Grayscale coverage, not ClearType, works on any Explorer surface.
+            // Both the HICON and WriteableBitmap consume premultiplied BGRA.
+            var pixels = new uint[size * size];
+            uint foreground = palette.Foreground;
             for (int y = 0; y < size; y++)
                 for (int x = 0; x < size; x++)
                 {
-                    double dx = (x + .5) * 16 / size - 8, dy = (y + .5) * 16 / size - 8;
-                    double radius = Math.Sqrt(dx * dx + dy * dy);
-                    double angle = (Math.Atan2(dx, -dy) + Math.Tau) % Math.Tau;
-                    if (radius <= 7 && (radius >= 5.8 || angle < fraction * Math.Tau))
-                        pixels[y * size + x] = palette.Foreground | 0xFF000000;
+                    uint total = 0;
+                    for (int sy = 0; sy < samples; sy++)
+                        for (int sx = 0; sx < samples; sx++)
+                            total += coverage[(y * samples + sy) * resolution + x * samples + sx] & 255;
+                    uint alpha = (total + samples * samples / 2) / (samples * samples);
+                    pixels[y * size + x] = alpha << 24 |
+                        (((foreground >> 16 & 255) * alpha + 127) / 255) << 16 |
+                        (((foreground >> 8 & 255) * alpha + 127) / 255) << 8 |
+                        ((foreground & 255) * alpha + 127) / 255;
                 }
-            if (indicator.IsOverAllocation) Badge("+", 1);
+            return pixels;
         }
-        if (indicator.IsPartial) Badge("!", 11);
-        return pixels;
+        finally
+        {
+            if (previous != 0 && previous != -1) Win32.SelectObject(dc, previous);
+            if (bitmap != 0) Win32.DeleteObject(bitmap);
+            if (dc != 0) Win32.DeleteDC(dc);
+        }
 
-        void Badge(string text, int x)
+        void Text(string text, int boxHeight, int fontHeight)
         {
-            Rect(x - 1, 10, 5, 6, palette.Background);
-            Text(text, x, 11);
-        }
-        void Text(string text, int left, int top, int sx = 1, int sy = 1)
-        {
-            foreach (char character in text)
+            int width = 0;
+            int available = (int)(14 * scale);
+            for (;;)
             {
-                string glyph = Glyph(character);
-                for (int row = 0; row < 5; row++)
-                    for (int col = 0; col < 3; col++)
-                        if (glyph[row * 3 + col] == '1')
-                            Rect(left + col * sx, top + row * sy, sx, sy, palette.Foreground);
-                left += 4 * sx;
+                nint font = Win32.CreateFont(-(int)(fontHeight * scale), width, 0, 0, 600,
+                    0, 0, 0, 1, 0, 0, 4, 0, "Segoe UI");
+                if (font == 0) throw new Win32Exception("Cannot create tray text font.");
+                nint oldFont = Win32.SelectObject(dc, font);
+                try
+                {
+                    if (oldFont == 0 || oldFont == -1) throw new Win32Exception("Cannot select tray text font.");
+                    var measured = new Win32.RECT();
+                    if (Win32.DrawText(dc, text, text.Length, ref measured, 0x400 | 0x20 | 0x800) == 0)
+                        throw new Win32Exception("Cannot measure tray text.");
+                    if (measured.right > available)
+                    {
+                        if (width == 1) throw new InvalidOperationException("Tray text cannot fit the icon.");
+                        width = width == 0 ? Math.Max(1, available / text.Length) :
+                            Math.Max(1, Math.Min(width - 1, width * available / measured.right));
+                        continue;
+                    }
+                    var bounds = new Win32.RECT
+                        { left = (int)scale, top = 0, right = resolution - (int)scale, bottom = (int)(boxHeight * scale) };
+                    if (Win32.DrawText(dc, text, text.Length, ref bounds, 1 | 4 | 0x20 | 0x800) == 0 ||
+                        Win32.GdiFlush() == 0)
+                        throw new Win32Exception("Cannot draw tray text.");
+                    return;
+                }
+                finally
+                {
+                    if (oldFont != 0 && oldFont != -1) Win32.SelectObject(dc, oldFont);
+                    Win32.DeleteObject(font);
+                }
             }
         }
-        void Rect(int x, int y, int width, int height, uint color)
+
+        void Badge(int x, bool partial)
         {
-            int left = x * size / 16, right = (x + width) * size / 16;
-            int top = y * size / 16, bottom = (y + height) * size / 16;
+            Rect(x - 1, 10, 7, 6, 0);
+            if (partial)
+            {
+                Rect(x + 2, 10.5, 1.2, 3.1, 0xFFFFFF);
+                Rect(x + 2, 14.4, 1.2, 1.2, 0xFFFFFF);
+            }
+            else
+            {
+                Rect(x + 2, 11, 1.2, 4.5, 0xFFFFFF);
+                Rect(x + .3, 12.7, 4.6, 1.2, 0xFFFFFF);
+            }
+        }
+        void Rect(double x, double y, double width, double height, uint color)
+        {
+            int left = Math.Max(0, (int)Math.Round(x * scale)), right = Math.Min(resolution, (int)Math.Round((x + width) * scale));
+            int top = Math.Max(0, (int)Math.Round(y * scale)), bottom = Math.Min(resolution, (int)Math.Round((y + height) * scale));
+            var coverage = new Span<uint>((void*)bits, resolution * resolution);
             for (int py = top; py < bottom; py++)
                 for (int px = left; px < right; px++)
-                    pixels[py * size + px] = color | 0xFF000000;
+                    coverage[py * resolution + px] = color;
         }
     }
-
-    // A three-column pixel face has predictable bounds even at the actual 16px
-    // Shell size. No font fallback, ClearType fringe, or shrinking of large values.
-    private static string Glyph(char value) => value switch
-    {
-        '0' => "111101101101111", '1' => "010110010010111",
-        '2' => "111001111100111", '3' => "111001111001111",
-        '4' => "101101111001001", '5' => "111100111001111",
-        '6' => "111100111101111", '7' => "111001010010010",
-        '8' => "111101111101111", '9' => "111101111001111",
-        '?' => "111001010000010", '!' => "010010010000010",
-        '<' => "001010100010001", '+' => "000010111010000",
-        '%' => "101001010100101",
-        _ => throw new ArgumentOutOfRangeException(nameof(value))
-    };
 }

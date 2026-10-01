@@ -89,7 +89,9 @@ Left-click the tray icon to toggle the flyout or double-click it to open
 **Settings > Usage**; right-click it for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,
-and a manual refresh action. **Accounts** manages connections and
+and a manual refresh action. With no accounts connected, Usage instead shows a
+simple **Add account** prompt without empty totals, diagnostics, or refresh controls.
+**Accounts** manages connections and
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
@@ -120,7 +122,12 @@ available, not zero. Hover for the percentage and included/selected counts;
 reason. These preferences do not filter or change the existing dollar totals.
 
 Numbers are rounded to whole percentages, with `<1` below 1% and `999+` above
-999%. Pies fill to 100%; a `+` on either style marks over-allocation. Tooltips retain the
+999%. Numbers use native font glyphs rather than a pixel font; the percentage
+unit is shown in the tooltip and preview label instead of a tiny extra glyph.
+Both styles are antialiased at the taskbar's pixel size on a transparent canvas.
+The settings preview places them on a taskbar-colored swatch so they remain
+readable when the app and taskbar themes differ.
+Pies fill to 100%; a `+` on either style marks over-allocation. Tooltips retain the
 unsaturated percentage (up to two decimals, with `<0.01%` for smaller nonzero
 values) and label over-allocation. Eligibility is reevaluated at least every
 minute and on refresh/resume, including billing rollover. Windows controls

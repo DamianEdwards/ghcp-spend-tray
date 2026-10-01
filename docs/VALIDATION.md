@@ -1,5 +1,35 @@
 # GHCPSpendTray validation and release gates
 
+## Empty Usage and status-icon refinement (September 30, 2026)
+
+With no connected accounts, Usage shows only the setup message and primary
+Add account action. Loading and failed initialization retain their own
+loading/retry path. The empty native smoke scenario asserts there is no total,
+tray diagnostic block or Refresh control, and invokes Add account to confirm
+the onboarding route. A separate live synthetic UI interaction also confirmed
+the message, absence of the old detail controls, and working setup action.
+
+Status icons now use native Segoe UI glyphs and four-times supersampled shapes,
+downsampled into transparent premultiplied BGRA at the target DPI. Fractional
+coverage replaces the hard-edged pixel font and circles. The numeric style uses
+its space for the number, leaving the percentage unit in its tooltip/preview
+label; partial and over-allocation marks remain distinct. A taskbar-colored
+preview swatch handles different app/taskbar themes without adding a background
+rectangle to the actual Shell icon.
+
+`verify.ps1 -NativeTests` passed with 155 core tests, 14 platform tests and
+774 application assertions under both JIT and executed x64 AOT. Coverage
+includes transparent corners, antialiased coverage, exact color premultiplication,
+native HICON creation and bounded GDI/USER resources. Both architectures
+published and packaged successfully. Populated/empty native UI smoke passed,
+including exact preview-to-renderer pixel parity and the preview background.
+Renderer output was inspected at 16px and 24px with light/dark surfaces.
+
+These samples are renderer previews, not Explorer screenshots. Background
+capture of the new empty page returned black content in this desktop session;
+the accessibility tree and actual Add account navigation were verified instead.
+Real Explorer rendering across the full DPI/theme matrix remains manual.
+
 ## Combined feature integration (September 30, 2026)
 
 The taskbar packaging fix, revised account confirmation/avatar, configurable
@@ -171,14 +201,17 @@ unchanged. ARM64 was cross-published, not executed.
   failed saves and successful preview-to-tray parity. Draft-only changes produce
   no Shell calls and leave the persisted configuration and installed icons unchanged.
 - Native tests create real HICONs at 16, 20, 24, 32, 48 and 64 pixels; check
-  monochrome partial/unavailable geometry and opaque contrasting pixels; and
+  partial/unavailable geometry, transparent corners, fractional antialias
+  coverage and correctly premultiplied foreground colors without ClearType
+  fringes or a baked-in taskbar background; and
   use an injected Shell boundary to check stable GUIDs/callback IDs, mode changes,
   reordering, reselection, rejection cleanup, version-4 recovery and disposal.
   Repeated icon lifetimes/replacements are measured with `GetGuiResources` to
   detect accumulated GDI/USER handles. These checks do not exercise Explorer UI.
 - Preview images share `TrayUsage.Create`, `TrayIconRenderer.Pixels`, DPI sizing
   and the system/high-contrast palette with installed icons. They use a reusable
-  WinUI `WriteableBitmap`, not temporary HICONs, GDI bitmaps or files. The UI smoke
+  WinUI `WriteableBitmap`, not temporary HICONs or files. Native font rendering
+  uses short-lived GDI objects that are released before returning pixels. The UI smoke
   checks exact preview pixel parity, unchanged installed HICONs before Save,
   repeated same-size buffer reuse, native resource counts, and clearing the image
   source when its settings page unmounts.
@@ -194,7 +227,9 @@ Optional renderer samples can be generated from the application harness:
 dotnet run --project tests\GHCPSpendTray.AppTests -c Release --no-build -- --tray-samples C:\Temp\tray-samples.bmp
 ```
 
-The bitmap contains exact 16px output and 2x nearest-neighbor magnifications.
+The bitmap contains exact 16px output and 2x nearest-neighbor magnifications,
+composited on the light/dark palette backgrounds. Append a pixel size (for
+example `24`) after the output path to inspect higher-DPI output.
 Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, and partial 50%;
 rows are light pie, light number, dark pie, dark number. Renderer samples are
 not screenshots of Explorer's notification area.

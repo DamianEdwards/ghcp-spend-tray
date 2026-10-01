@@ -136,21 +136,32 @@ internal static class Program
                 if (shell.Session.Page != SettingsPage.Usage || Find(shell.SettingsWindow!, "UsagePage") is null)
                     throw new InvalidOperationException("Settings did not open on the usage page.");
                 AssertBackAccelerators(shell.SettingsWindow!);
-                if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
-                    throw new InvalidOperationException("Usage refresh control did not render.");
                 if (shell.Session.Dashboard.Accounts.Count == 0)
                 {
-                    if (Find(shell.SettingsWindow!, "UsageAddAccount") is not Button)
+                    if (Find(shell.SettingsWindow!, "UsageAddAccount") is not Button { IsEnabled: true } add ||
+                        Find(shell.SettingsWindow!, "UsageEmptyMessage") is not TextBlock { Text: "Add an account to see your usage" })
                         throw new InvalidOperationException("Usage empty state did not offer account setup.");
-                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "Unavailable" })
-                        throw new InvalidOperationException("Empty usage was shown as zero.");
+                    if (Find(shell.SettingsWindow!, "UsageTotal") is not null ||
+                        Find(shell.SettingsWindow!, "TrayUsageDetails") is not null ||
+                        Find(shell.SettingsWindow!, "RefreshUsage") is not null)
+                        throw new InvalidOperationException("Empty usage showed consumption details or refresh controls.");
+                    InvokeButton(add);
+                    if (shell.Session.Page != SettingsPage.Accounts || !shell.Session.ShowAddForm)
+                        throw new InvalidOperationException("Usage empty-state action did not open account setup.");
+                    shell.Session.TryGoBack();
+                    shell.Session.Navigate(SettingsPage.Usage);
                 }
-                else if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" } ||
-                    Find(shell.SettingsWindow!, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" })
-                    throw new InvalidOperationException("Usage summary and account diagnostics did not render.");
+                else
+                {
+                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" } ||
+                        Find(shell.SettingsWindow!, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" })
+                        throw new InvalidOperationException("Usage summary and account diagnostics did not render.");
+                    if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
+                        throw new InvalidOperationException("Usage refresh control did not render.");
+                    InvokeButton(refresh);
+                }
                 if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
                     throw new InvalidOperationException("Usage page still displayed sampled spending history.");
-                InvokeButton(refresh);
                 SendTraySelection(shell, 0x401);
             });
             await Task.Delay(250);
@@ -466,9 +477,14 @@ internal static class Program
                 throw new InvalidOperationException("Native-size live preview image is missing.");
             byte[] bytes = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
             using (var stream = bitmap.PixelBuffer.AsStream()) stream.ReadExactly(bytes);
-            var expected = TrayIconRenderer.Pixels(icon, preview.Style, bitmap.PixelWidth, TrayIconRenderer.SystemPalette());
+            var palette = TrayIconRenderer.SystemPalette();
+            var expected = TrayIconRenderer.Pixels(icon, preview.Style, bitmap.PixelWidth, palette);
             if (!MemoryMarshal.Cast<byte, uint>(bytes.AsSpan()).SequenceEqual(expected))
                 throw new InvalidOperationException("Preview pixels differ from the actual tray renderer.");
+            if (image.Parent is not Border { Background: SolidColorBrush swatch } ||
+                swatch.Color != Windows.UI.Color.FromArgb(255, (byte)(palette.Background >> 16),
+                    (byte)(palette.Background >> 8), (byte)palette.Background))
+                throw new InvalidOperationException("Transparent preview lacks its taskbar-colored background swatch.");
             if (!AutomationProperties.GetName(image).Contains(icon.Details, StringComparison.Ordinal))
                 throw new InvalidOperationException("Preview lacks accessible identity and availability details.");
         }

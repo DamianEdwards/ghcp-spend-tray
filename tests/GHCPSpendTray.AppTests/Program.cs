@@ -22,6 +22,8 @@ try
     int notifications = 0, assertions = 0;
     TrayTests.Run(Check, root);
     if (args is ["--tray-samples", var samplePath]) TrayTests.WriteSamples(samplePath);
+    else if (args is ["--tray-samples", var scaledPath, var sampleSize])
+        TrayTests.WriteSamples(scaledPath, int.Parse(sampleSize, System.Globalization.CultureInfo.InvariantCulture));
     DashboardView? view = null;
     app.Changed += next => Volatile.Write(ref view, next);
     app.SetNotificationHandler((_, _, _) => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
