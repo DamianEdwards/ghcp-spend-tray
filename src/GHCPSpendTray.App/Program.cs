@@ -1,6 +1,7 @@
 using GHCPSpendTray.App.Native;
 using GHCPSpendTray.App.Platform;
 using GHCPSpendTray.App.UI;
+using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -8,6 +9,9 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace GHCPSpendTray.App;
 
@@ -131,21 +135,33 @@ internal static class Program
                     throw new InvalidOperationException("Settings did not dismiss the flyout.");
                 if (shell.Session.Page != SettingsPage.Usage || Find(shell.SettingsWindow!, "UsagePage") is null)
                     throw new InvalidOperationException("Settings did not open on the usage page.");
-                if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
-                    throw new InvalidOperationException("Usage refresh control did not render.");
+                AssertBackAccelerators(shell.SettingsWindow!);
                 if (shell.Session.Dashboard.Accounts.Count == 0)
                 {
-                    if (Find(shell.SettingsWindow!, "UsageAddAccount") is not Button)
+                    if (Find(shell.SettingsWindow!, "UsageAddAccount") is not Button { IsEnabled: true } add ||
+                        Find(shell.SettingsWindow!, "UsageEmptyMessage") is not TextBlock { Text: "Add an account to see your usage" })
                         throw new InvalidOperationException("Usage empty state did not offer account setup.");
-                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "Unavailable" })
-                        throw new InvalidOperationException("Empty usage was shown as zero.");
+                    if (Find(shell.SettingsWindow!, "UsageTotal") is not null ||
+                        Find(shell.SettingsWindow!, "TrayUsageDetails") is not null ||
+                        Find(shell.SettingsWindow!, "RefreshUsage") is not null)
+                        throw new InvalidOperationException("Empty usage showed consumption details or refresh controls.");
+                    InvokeButton(add);
+                    if (shell.Session.Page != SettingsPage.Accounts || !shell.Session.ShowAddForm)
+                        throw new InvalidOperationException("Usage empty-state action did not open account setup.");
+                    shell.Session.TryGoBack();
+                    shell.Session.Navigate(SettingsPage.Usage);
                 }
-                else if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" } ||
-                    Find(shell.SettingsWindow!, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" })
-                    throw new InvalidOperationException("Usage summary and account diagnostics did not render.");
+                else
+                {
+                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" } ||
+                        Find(shell.SettingsWindow!, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" })
+                        throw new InvalidOperationException("Usage summary and account diagnostics did not render.");
+                    if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
+                        throw new InvalidOperationException("Usage refresh control did not render.");
+                    InvokeButton(refresh);
+                }
                 if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
                     throw new InvalidOperationException("Usage page still displayed sampled spending history.");
-                InvokeButton(refresh);
                 SendTraySelection(shell, 0x401);
             });
             await Task.Delay(250);
@@ -196,8 +212,29 @@ internal static class Program
             await OnUI(shell, () =>
             {
                 var settings = shell.SettingsWindow ?? throw new InvalidOperationException("Settings did not open.");
-                if (Find(settings, "AccountOnboarding") is null || Find(settings, "AccountHostSelection") is not ComboBox)
+                if (Find(settings, "AccountOnboarding") is null ||
+                    Find(settings, "ChangeSignInHost") is not Button changeHost ||
+                    Find(settings, "AccountIdentityConfirmation") is not null)
                     throw new InvalidOperationException("Add-account deep link did not render.");
+                InvokeButton(changeHost);
+            });
+            await Task.Delay(300);
+            await OnUI(shell, () =>
+            {
+                var settings = shell.SettingsWindow!;
+                if (Find(settings, "AccountHostSelection") is not ComboBox || !shell.Session.EditingHost)
+                    throw new InvalidOperationException("Change host did not expose host-specific sign-in settings.");
+                if (Find(settings, "AccountBack") is not Button back)
+                    throw new InvalidOperationException("Onboarding Back action did not render.");
+                InvokeButton(back);
+            });
+            await Task.Delay(300);
+            await OnUI(shell, () =>
+            {
+                if (shell.Session.ShowAddForm || shell.Session.CanGoBack ||
+                    Find(shell.SettingsWindow!, "AccountOnboarding") is not null)
+                    throw new InvalidOperationException("Onboarding Back did not return to the accounts list.");
+                AssertBackAccelerators(shell.SettingsWindow!);
                 shell.Session.Navigate(SettingsPage.Notifications);
             });
             await Task.Delay(500);
@@ -227,18 +264,42 @@ internal static class Program
                 {
                     if (Find(shell.SettingsWindow!, "DetailCredits") is not TextBlock { Text: "2,625" })
                         throw new InvalidOperationException("Expanded account details did not expose labeled data.");
+                    if (Find(shell.SettingsWindow!, "AccountBack") is not Button back)
+                        throw new InvalidOperationException("Account details Back action did not render.");
+                    InvokeButton(back);
+                });
+                await Task.Delay(300);
+                await OnUI(shell, () =>
+                {
+                    if (shell.Session.SelectedAccount is not null || shell.Session.CanGoBack)
+                        throw new InvalidOperationException("Account details Back did not return to accounts.");
                     shell.Session.Navigate(SettingsPage.Notifications);
                 });
                 await Task.Delay(300);
             }
+            await SmokeTraySettingsAsync(shell);
+            await OnUI(shell, () => shell.SettingsWindow!.NativeWindow.Close());
+            await Task.Delay(300);
             await OnUI(shell, () =>
             {
+                if (shell.SettingsWindow is not null || shell.Session.CanGoBack)
+                    throw new InvalidOperationException("Closing settings retained its window or Back target.");
+                shell.ShowSettings(SettingsPage.Notifications);
+            });
+            await Task.Delay(300);
+            await OnUI(shell, () =>
+            {
+                AssertBackAccelerators(shell.SettingsWindow!);
                 if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
                     "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
-                    "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, native controls, " +
+                    "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, " +
+                    "account Back controls and scoped keyboard accelerator registration, native controls, " +
+                    "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
+                    "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
+                    "simulated TaskbarCreated recovery and display-change repaint, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -250,6 +311,17 @@ internal static class Program
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
+    }
+    private static void AssertBackAccelerators(ReactorWindow window)
+    {
+        if (window.NativeWindow.Content is not UIElement root ||
+            root.KeyboardAcceleratorPlacementMode != Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden ||
+            root.KeyboardAccelerators.Count != 2 ||
+            !root.KeyboardAccelerators.Any(a => a.Key == Windows.System.VirtualKey.Left &&
+                a.Modifiers == Windows.System.VirtualKeyModifiers.Menu && a.ScopeOwner == root) ||
+            !root.KeyboardAccelerators.Any(a => a.Key == Windows.System.VirtualKey.GoBack &&
+                a.Modifiers == Windows.System.VirtualKeyModifiers.None && a.ScopeOwner == root))
+            throw new InvalidOperationException("Settings Back accelerators are missing, incorrectly scoped, or exposing a window-wide tooltip.");
     }
     private static nint FlyoutHwnd(ReactorShell shell) =>
         WinRT.Interop.WindowNative.GetWindowHandle((shell.Flyout ??
@@ -276,8 +348,182 @@ internal static class Program
         throw new InvalidOperationException($"Tray flyout did not become {(expected ? "visible" : "hidden")} {stage}.");
     }
 
-    private static void SendTraySelection(ReactorShell shell, int notification) =>
-        Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((1 << 16) | notification));
+    private static async Task SmokeTraySettingsAsync(ReactorShell shell)
+    {
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
+        await Task.Delay(200);
+        nint installedImage = 0;
+        await OnUI(shell, () =>
+        {
+            AssertTrayPreview(shell);
+            SmokePreviewBuffer();
+            installedImage = shell.TrayIcons.Single().ImageHandle;
+            if (Find(shell.SettingsWindow!, "TrayStyle") is not ComboBox style ||
+                Find(shell.SettingsWindow!, "TrayMode") is not ComboBox mode)
+                throw new InvalidOperationException("Native tray settings controls did not render.");
+            style.SelectedIndex = 1;
+            mode.SelectedIndex = 1;
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            AssertTrayPreview(shell);
+            if (shell.TrayIcons.Count != 1 || shell.TrayIcons.Single().ImageHandle != installedImage ||
+                shell.Session.Controller.Settings is not { TrayStyle: TrayIconStyle.Pie, TrayMode: TrayDisplayMode.RollUp })
+                throw new InvalidOperationException("Draft preview changed the installed tray before Save.");
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
+        });
+        await WaitForTraySave();
+        uint retired = 0;
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Controller.Settings is not { TrayStyle: TrayIconStyle.Percentage, TrayMode: TrayDisplayMode.PerAccount } ||
+                shell.TrayIcons.Count != Math.Max(1, shell.Session.Dashboard.Accounts.Count))
+                throw new InvalidOperationException("Tray preferences did not reach the Shell.");
+            var icon = shell.TrayIcons.First();
+            if (icon.AccountKey is not null)
+            {
+                retired = icon.Id;
+                SendTraySelection(shell, 0x401, icon.Id);
+            }
+            // Only this app's icons are re-added; Explorer and other apps are untouched.
+            Win32.SendMessage(shell.TrayHandle, Win32.RegisterWindowMessage("TaskbarCreated"), 0, 0);
+            Win32.SendMessage(shell.TrayHandle, 0x7E, 0, 0);
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            if (retired != 0 && shell.Session.SelectedAccount != shell.TrayIcons.First().AccountKey)
+                throw new InvalidOperationException("Per-account callback opened the wrong identity.");
+            shell.ShowSettings(SettingsPage.General);
+        });
+        await Task.Delay(200);
+        (uint Id, nint Image)[] installedIcons = [];
+        await OnUI(shell, () =>
+        {
+            installedIcons = shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).ToArray();
+            foreach (var account in shell.Session.Dashboard.Accounts)
+            {
+                if (Find(shell.SettingsWindow!, "TrayAccount-" + account.Key) is not CheckBox selection)
+                    throw new InvalidOperationException("Account inclusion checkbox is missing.");
+                selection.IsChecked = false;
+            }
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            AssertTrayPreview(shell);
+            if (!shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).SequenceEqual(installedIcons))
+                throw new InvalidOperationException("Draft exclusions changed installed tray icons.");
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
+        });
+        await WaitForTraySave();
+        await OnUI(shell, () =>
+        {
+            if (shell.TrayIcons.Count != 1 || shell.TrayIcons.First().AccountKey is not null ||
+                shell.Session.Dashboard.Tray?.RollUp.Percent is not null)
+                throw new InvalidOperationException("Empty selection did not retain a neutral access icon.");
+            if (retired != 0)
+            {
+                int revision = shell.Session.Revision;
+                SendTraySelection(shell, 0x401, retired);
+                if (shell.Session.Revision != revision)
+                    throw new InvalidOperationException("A retired callback was processed.");
+            }
+            SendTraySelection(shell, 0x401);
+        });
+        await WaitForFlyoutVisibility(shell, true, "with no selected tray accounts");
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            ((ComboBox)Find(shell.SettingsWindow!, "TrayStyle")!).SelectedIndex = 0;
+            ((ComboBox)Find(shell.SettingsWindow!, "TrayMode")!).SelectedIndex = 0;
+            foreach (var account in shell.Session.Dashboard.Accounts)
+                ((CheckBox)Find(shell.SettingsWindow!, "TrayAccount-" + account.Key)!).IsChecked = true;
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
+        });
+        await WaitForTraySave();
+        Image? retiredPreview = null;
+        await OnUI(shell, () =>
+        {
+            AssertTrayPreview(shell);
+            retiredPreview = (Image)Find(shell.SettingsWindow!, "TrayPreviewIcon-rollup")!;
+            if (shell.TrayIcons.Count != 1 || shell.Session.Controller.Settings.TrayStyle != TrayIconStyle.Pie)
+                throw new InvalidOperationException("Restoring the roll-up pie failed.");
+            shell.Session.Navigate(SettingsPage.Notifications);
+        });
+        await Task.Delay(150);
+        await OnUI(shell, () =>
+        {
+            if (retiredPreview!.Source is not null)
+                throw new InvalidOperationException("Unmounted preview retained its WinUI pixel buffer.");
+        });
+
+        async Task WaitForTraySave()
+        {
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                bool ready = false;
+                await OnUI(shell, () =>
+                {
+                    if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
+                    ready = !shell.Session.Busy && shell.Session.Notice == "Settings saved.";
+                });
+                if (ready) { await Task.Delay(100); return; }
+                await Task.Delay(30);
+            }
+            throw new TimeoutException("Tray settings save did not complete.");
+        }
+    }
+
+    private static void AssertTrayPreview(ReactorShell shell)
+    {
+        var preview = shell.Session.PreviewTray();
+        foreach (var icon in preview.Icons)
+        {
+            string id = "TrayPreviewIcon-" + (icon.AccountKey ?? "rollup");
+            if (Find(shell.SettingsWindow!, id) is not Image { Source: WriteableBitmap bitmap } image ||
+                image.Width != 16 || image.Height != 16)
+                throw new InvalidOperationException("Native-size live preview image is missing.");
+            byte[] bytes = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+            using (var stream = bitmap.PixelBuffer.AsStream()) stream.ReadExactly(bytes);
+            var palette = TrayIconRenderer.SystemPalette();
+            var expected = TrayIconRenderer.Pixels(icon, preview.Style, bitmap.PixelWidth, palette);
+            if (!MemoryMarshal.Cast<byte, uint>(bytes.AsSpan()).SequenceEqual(expected))
+                throw new InvalidOperationException("Preview pixels differ from the actual tray renderer.");
+            if (image.Parent is not Border { Background: SolidColorBrush swatch } ||
+                swatch.Color != Windows.UI.Color.FromArgb(255, (byte)(palette.Background >> 16),
+                    (byte)(palette.Background >> 8), (byte)palette.Background))
+                throw new InvalidOperationException("Transparent preview lacks its taskbar-colored background swatch.");
+            if (!AutomationProperties.GetName(image).Contains(icon.Details, StringComparison.Ordinal))
+                throw new InvalidOperationException("Preview lacks accessible identity and availability details.");
+        }
+    }
+
+    private static void SmokePreviewBuffer()
+    {
+        var image = new Image();
+        var indicator = new TrayIndicator(null, "Synthetic", 50, 1, 2, "Partial", "Partial");
+        TrayPreviewImage.Apply(image, indicator, TrayIconStyle.Pie);
+        var bitmap = image.Source;
+        uint gdi = Win32.GetGuiResources(Win32.GetCurrentProcess(), 0);
+        uint user = Win32.GetGuiResources(Win32.GetCurrentProcess(), 1);
+        for (int i = 0; i < 300; i++)
+        {
+            var next = indicator with { Percent = i % 3 == 0 ? null : i, IncludedAccounts = i % 3 == 0 ? 0 : 1 };
+            var style = i % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage;
+            TrayPreviewImage.Apply(image, next, style);
+            if (!ReferenceEquals(bitmap, image.Source))
+                throw new InvalidOperationException("Same-size preview updates accumulate WinUI bitmaps.");
+        }
+        if (Win32.GetGuiResources(Win32.GetCurrentProcess(), 0) > gdi + 2 ||
+            Win32.GetGuiResources(Win32.GetCurrentProcess(), 1) > user + 2)
+            throw new InvalidOperationException("Preview generation leaked native handles.");
+    }
+
+    private static void SendTraySelection(ReactorShell shell, int notification, uint id = 1) =>
+        Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((id << 16) | (uint)notification));
 
     private static void InvokeButton(Button button)
     {

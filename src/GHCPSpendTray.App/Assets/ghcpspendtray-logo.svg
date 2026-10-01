@@ -1,10 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <title>GHCPSpendTray</title>
-  <desc>Three ivory consumption bars rising within an emerald coin.</desc>
-  <circle cx="256" cy="256" r="236" fill="#0c7959"/>
-  <g fill="#eefff4">
-    <rect x="118" y="272" width="66" height="108" rx="9"/>
-    <rect x="223" y="195" width="66" height="185" rx="9"/>
-    <rect x="328" y="118" width="66" height="262" rx="9"/>
+  <title>GHCPSpendTray - Connected dollar</title>
+  <desc>A white circular rim joins an original dollar sign through its vertical stem. A charcoal gradient fills the disc; everything outside is transparent.</desc>
+  <defs>
+    <linearGradient id="charcoal" x1="96" y1="48" x2="408" y2="468" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#626975"/>
+      <stop offset="0.47" stop-color="#353a43"/>
+      <stop offset="1" stop-color="#14171d"/>
+    </linearGradient>
+  </defs>
+  <g id="disc">
+    <circle cx="256" cy="256" r="228" fill="url(#charcoal)"/>
+  </g>
+  <g id="connected-dollar" fill="none" stroke="#ffffff">
+    <circle id="rim" cx="256" cy="256" r="222" stroke-width="24"/>
+    <path id="stem" d="M 256 35 V 477" stroke-width="24"/>
+    <path id="dollar" d="M 340 172 C 324 141 291 126 250 126 C 199 126 166 151 166 188 C 166 225 201 240 253 253 C 307 266 346 286 346 325 C 346 363 311 389 259 389 C 215 389 179 371 162 340" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 </svg>

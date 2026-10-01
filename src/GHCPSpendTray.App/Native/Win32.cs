@@ -32,6 +32,36 @@ internal static unsafe partial class Win32
     [StructLayout(LayoutKind.Sequential)]
     internal struct RECT { internal int left, top, right, bottom; }
     [StructLayout(LayoutKind.Sequential)]
+    internal struct HIGHCONTRAST { internal uint cbSize, dwFlags; internal nint lpszDefaultScheme; }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BITMAPINFOHEADER
+    {
+        internal uint biSize;
+        internal int biWidth, biHeight;
+        internal ushort biPlanes, biBitCount;
+        internal uint biCompression, biSizeImage;
+        internal int biXPelsPerMeter, biYPelsPerMeter;
+        internal uint biClrUsed, biClrImportant;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ICONINFO
+    {
+        internal int fIcon;
+        internal uint xHotspot, yHotspot;
+        internal nint hbmMask, hbmColor;
+    }
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    internal static partial int SystemParametersInfo(uint action, uint parameter, ref HIGHCONTRAST value, uint flags);
+    [LibraryImport("gdi32.dll", SetLastError = true)]
+    internal static partial nint CreateDIBSection(nint dc, ref BITMAPINFOHEADER info, uint usage,
+        out nint bits, nint section, uint offset);
+    [LibraryImport("gdi32.dll", SetLastError = true)]
+    internal static partial nint CreateBitmap(int width, int height, uint planes, uint bitsPerPixel, void* bits);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nint CreateIconIndirect(ref ICONINFO info);
+    [LibraryImport("user32.dll")]
+    internal static partial int GetSystemMetricsForDpi(int index, uint dpi);
+    [StructLayout(LayoutKind.Sequential)]
     internal struct NOTIFYICONIDENTIFIER
     {
         internal uint cbSize;
@@ -250,6 +280,14 @@ internal static unsafe partial class Win32
     internal static partial int DeleteObject(nint item);
     [LibraryImport("gdi32.dll")]
     internal static partial int DeleteDC(nint dc);
+    [LibraryImport("gdi32.dll")]
+    internal static partial uint SetTextColor(nint dc, uint color);
+    [LibraryImport("gdi32.dll")]
+    internal static partial int SetBkMode(nint dc, int mode);
+    [LibraryImport("gdi32.dll")]
+    internal static partial int GdiFlush();
+    [LibraryImport("user32.dll", EntryPoint = "DrawTextW", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial int DrawText(nint dc, string text, int length, ref RECT bounds, uint format);
     [LibraryImport("gdi32.dll")]
     internal static partial int BitBlt(nint target, int x, int y, int width, int height, nint source, int sourceX, int sourceY, uint rop);
     [LibraryImport("gdi32.dll")]

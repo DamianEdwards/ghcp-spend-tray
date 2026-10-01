@@ -1,3 +1,5 @@
+using GHCPSpendTray.Core;
+
 namespace GHCPSpendTray.App;
 
 internal sealed class AppOperationException(string message) : Exception(message);
@@ -10,12 +12,17 @@ internal sealed record AccountView(string Key, string Name, string Login, string
     decimal? ConsumptionUsd = null, decimal? AllocationUsd = null, string Freshness = "", DateTimeOffset? UpdatedAt = null,
     string? AvatarUrl = null);
 internal sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
-    decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false);
+    decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false,
+    TrayPresentation? Tray = null, IReadOnlyList<AccountState>? TrayStates = null);
 internal sealed record SettingsView(int PollMinutes, string Thresholds, bool Notifications, bool Startup,
     decimal? SpendIncrementUsd = null, bool CanChangeStartup = false,
-    string StartupDescription = "Unavailable in isolated portable mode.");
-internal sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires);
-internal sealed record PendingIdentity(string Host, long UserId, string Login);
+    string StartupDescription = "Unavailable in isolated portable mode.",
+    TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
+    string[]? ExcludedTrayAccounts = null);
+internal sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)
+{
+    public override string ToString() => "DevicePrompt [redacted]";
+}
 
 internal interface IApplicationController : IDisposable
 {
@@ -31,7 +38,7 @@ internal interface IApplicationController : IDisposable
     (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key);
     Task RemoveAsync(string key);
     Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null);
     string? AccountClientId(string key);
     string ResolveHostDescription(string host);

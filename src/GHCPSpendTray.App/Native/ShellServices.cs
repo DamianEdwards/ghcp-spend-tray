@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.App.Native;
 
@@ -52,9 +53,18 @@ internal static unsafe class ShellServices
 
 internal sealed unsafe class TrayIcon : IDisposable
 {
+    internal delegate int ShellCall(uint message, ref Win32.NOTIFYICONDATA data);
     private Win32.NOTIFYICONDATA _data;
     private bool _added;
-    private readonly nint _icon;
+    private bool _disposed;
+    private TrayImage _icon;
+    private readonly ShellCall _shell;
+    private (TrayIndicator Indicator, TrayIconStyle Style, int Size, TrayPalette Palette) _rendered;
+    internal uint Id => _data.uID;
+    internal string? AccountKey { get; }
+    internal string? NotificationAccount { get; set; }
+    internal nint ImageHandle => _icon.DangerousGetHandle();
+    internal Guid Identity => _data.guidItem;
     internal bool ContainsCursor()
     {
         var id = new Win32.NOTIFYICONIDENTIFIER
@@ -79,38 +89,70 @@ internal sealed unsafe class TrayIcon : IDisposable
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot locate the tray icon or pointer.");
         return new() { left = point.x, right = point.x + 1, top = point.y, bottom = point.y + 1 };
     }
-    internal TrayIcon(nint owner, string? portableDirectory = null)
+    internal TrayIcon(nint owner, uint id, string? portableDirectory, TrayIndicator indicator,
+        TrayIconStyle style, int size, TrayPalette palette, ShellCall? shell = null)
     {
-        _icon = Win32.LoadImage(Win32.GetModuleHandle(null), 32512, 1, 32, 32, 0);
-        if (_icon == 0) throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot load the GHCPSpendTray icon.");
+        _shell = shell ?? Win32.ShellNotifyIcon;
+        AccountKey = indicator.AccountKey;
+        _icon = TrayIconRenderer.Create(indicator, style, size, palette);
+        _rendered = (indicator, style, size, palette);
         _data = new Win32.NOTIFYICONDATA
         {
             cbSize = (uint)sizeof(Win32.NOTIFYICONDATA),
-            hWnd = owner, uID = 1, hIcon = _icon, uCallbackMessage = Win32.WM_TRAY,
-            guidItem = portableDirectory is null ? new Guid("5d9db52a-41a0-4b3d-910e-031c331ef83a") :
-                new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("GHCPSpendTray.Tray/" +
-                    Path.GetFullPath(portableDirectory).ToUpperInvariant())).AsSpan(0, 16))
+            hWnd = owner, uID = id, hIcon = ImageHandle, uCallbackMessage = Win32.WM_TRAY,
+            guidItem = StableIdentity(portableDirectory, indicator.AccountKey)
         };
+        fixed (char* tip = _data.szTip) Set(tip, 128, indicator.Tooltip);
         try { Add(); }
-        catch { Win32.DestroyIcon(_icon); throw; }
+        catch { _icon.Dispose(); throw; }
+    }
+    internal static Guid StableIdentity(string? portableDirectory, string? accountKey)
+    {
+        if (portableDirectory is null && accountKey is null)
+            return new("5d9db52a-41a0-4b3d-910e-031c331ef83a");
+        string scope = portableDirectory is null ? "installed" : Path.GetFullPath(portableDirectory).ToUpperInvariant();
+        string identity = "GHCPSpendTray.Tray/" + scope + (accountKey is null ? "" : "/account/" + accountKey);
+        return new(SHA256.HashData(Encoding.UTF8.GetBytes(identity)).AsSpan(0, 16));
     }
     internal void Add()
     {
         _data.uFlags = Win32.NIF_MESSAGE | Win32.NIF_ICON | Win32.NIF_TIP | Win32.NIF_GUID | Win32.NIF_SHOWTIP;
-        fixed (char* tip = _data.szTip) Set(tip, 128, "GHCPSpendTray | Starting");
-        if (Win32.ShellNotifyIcon(Win32.NIM_ADD, ref _data) == 0)
+        if (_shell(Win32.NIM_ADD, ref _data) == 0)
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Windows rejected the tray icon.");
         _added = true;
         _data.uTimeoutOrVersion = 4;
-        if (Win32.ShellNotifyIcon(Win32.NIM_SETVERSION, ref _data) == 0)
+        if (_shell(Win32.NIM_SETVERSION, ref _data) == 0)
+        {
+            Remove();
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot enable keyboard-accessible tray behavior.");
+        }
     }
-    internal void Update(string tooltip)
+    internal void Restore()
     {
-        _data.uFlags = Win32.NIF_TIP | Win32.NIF_GUID | Win32.NIF_SHOWTIP;
-        fixed (char* tip = _data.szTip) Set(tip, 128, tooltip);
-        if (Win32.ShellNotifyIcon(Win32.NIM_MODIFY, ref _data) == 0)
-            Diagnostics.Record("Tray tooltip update rejected by Windows.");
+        Remove();
+        Add();
+    }
+    internal void Update(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette)
+    {
+        if (_added && _rendered == (indicator, style, size, palette)) return;
+        var image = TrayIconRenderer.Create(indicator, style, size, palette);
+        var previous = _data;
+        bool wasAdded = _added;
+        try
+        {
+            _data.hIcon = image.DangerousGetHandle();
+            _data.uFlags = Win32.NIF_ICON | Win32.NIF_TIP | Win32.NIF_GUID | Win32.NIF_SHOWTIP;
+            fixed (char* tip = _data.szTip) Set(tip, 128, indicator.Tooltip);
+            if (!_added || _shell(Win32.NIM_MODIFY, ref _data) == 0)
+            {
+                _added = false;
+                Add();
+            }
+        }
+        catch { _data = previous; _added |= wasAdded; image.Dispose(); throw; }
+        _icon.Dispose();
+        _icon = image;
+        _rendered = (indicator, style, size, palette);
     }
     internal bool Notify(string title, string message)
     {
@@ -118,7 +160,7 @@ internal sealed unsafe class TrayIcon : IDisposable
         _data.dwInfoFlags = Win32.NIIF_INFO | Win32.NIIF_RESPECT_QUIET_TIME;
         fixed (char* value = _data.szInfoTitle) Set(value, 64, title);
         fixed (char* value = _data.szInfo) Set(value, 256, message);
-        var submitted = Win32.ShellNotifyIcon(Win32.NIM_MODIFY, ref _data) != 0;
+        var submitted = _shell(Win32.NIM_MODIFY, ref _data) != 0;
         if (!submitted) Diagnostics.Record("Shell notification submission rejected.");
         return submitted;
     }
@@ -130,12 +172,19 @@ internal sealed unsafe class TrayIcon : IDisposable
         if (length > 0 && char.IsHighSurrogate(value[length - 1])) length--;
         value.AsSpan(0, length).CopyTo(target);
     }
-    public void Dispose()
+    private void Remove()
     {
         if (!_added) return;
         _data.uFlags = Win32.NIF_GUID;
-        Win32.ShellNotifyIcon(Win32.NIM_DELETE, ref _data);
-        Win32.DestroyIcon(_icon);
+        if (_shell(Win32.NIM_DELETE, ref _data) == 0)
+            Diagnostics.Record("Tray removal rejected (the Shell may have restarted).");
         _added = false;
+    }
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Remove();
+        _icon.Dispose();
     }
 }

@@ -60,11 +60,23 @@ try {
             $application = $manifest.SelectSingleNode('//f:Application', $ns)
             if ($application.Executable -ne 'GHCPSpendTray.exe' -or
                 $application.GetAttribute('TrustLevel', $ns.LookupNamespace('u10')) -ne 'mediumIL') { throw 'Expected a full-trust desktop application.' }
-            foreach ($name in @('GHCPSpendTray.exe', 'GHCPSpendTray.pri', 'Reactor.pri', 'Microsoft.UI.Xaml.dll',
+            foreach ($name in @('GHCPSpendTray.exe', 'GHCPSpendTray.pri', 'Reactor.pri', 'resources.pri', 'Microsoft.UI.Xaml.dll',
                 'DWriteCore.dll', 'Assets/GHCPSpendTray.ico', 'Assets/Square44x44Logo.png',
                 'Assets/Square150x150Logo.png', 'Assets/StoreLogo.png', 'LICENSE.txt')) {
                 if ($name -notin $app.Entries.FullName) { throw "Missing application payload: $name" }
             }
+            $iconLayout = Join-Path ([IO.Path]::GetTempPath()) ("GHCPSpendTray-package-icons-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path (Join-Path $iconLayout 'Assets') -Force | Out-Null
+            try {
+                foreach ($iconEntry in $app.Entries | Where-Object {
+                    $_.FullName -cmatch '^(AppxManifest\.xml|resources\.pri|Assets/[^/\\]+\.png)$'
+                }) {
+                    [IO.Compression.ZipFileExtensions]::ExtractToFile($iconEntry,
+                        (Join-Path $iconLayout $iconEntry.FullName.Replace('/', '\')))
+                }
+                & "$PSScriptRoot\test-package-icons.ps1" -Layout $iconLayout
+            }
+            finally { Remove-Item -LiteralPath $iconLayout -Recurse -Force }
             if (@($app.Entries | Where-Object { $_.FullName -match '\.pdb$' }).Count -ne 0) { throw 'Debug symbols belong outside the app package.' }
             $exeStream = $app.GetEntry('GHCPSpendTray.exe').Open()
             $bytesStream = [IO.MemoryStream]::new()
@@ -81,4 +93,4 @@ try {
     }
 }
 finally { $archive.Dispose() }
-Write-Output "PASS: bundle identity, architectures, Native AOT payload, resources and opt-in startup ($Version)."
+Write-Output "PASS: bundle identity, architectures, Native AOT payload, transparent shell resources and opt-in startup ($Version)."

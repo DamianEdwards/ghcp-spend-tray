@@ -1,4 +1,5 @@
 using GHCPSpendTray.App.Platform;
+using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.App.Native;
 
@@ -7,23 +8,49 @@ internal sealed class TrayHost : ShellWindow
 {
     private const nuint SelectionTimer = 1;
     private readonly uint _taskbarCreated;
+    private readonly TrayIconSet _icons;
     private bool _pendingSelection;
+    private uint _selectionId, _activeId = 1, _doubleClickId;
     private long _lastDoubleClick = long.MinValue;
-    private string _tooltip = "GHCPSpendTray | Starting";
-    internal TrayIcon Icon { get; }
-    internal event Action? OpenRequested, SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
-    internal event Action? NotificationClicked;
+    private TrayPresentation _presentation = TrayPresentation.Unavailable;
+    internal IReadOnlyCollection<TrayIcon> Icons => _icons.Icons;
+    internal event Action<string?>? OpenRequested, NotificationClicked;
+    internal event Action? SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
+    internal event Action? AppearanceChanged;
 
     internal TrayHost(string? portableDirectory)
     {
-        Icon = new TrayIcon(Handle, portableDirectory);
-        _taskbarCreated = Win32.RegisterWindowMessage("TaskbarCreated");
-        if (_taskbarCreated == 0) throw new InvalidOperationException("Cannot register taskbar restart recovery.");
+        _icons = new(Handle, portableDirectory);
+        try
+        {
+            _taskbarCreated = Win32.RegisterWindowMessage("TaskbarCreated");
+            if (_taskbarCreated == 0) throw new InvalidOperationException("Cannot register taskbar restart recovery.");
+            Update(_presentation);
+        }
+        catch { Dispose(); throw; }
     }
-    internal void Update(string tooltip) { _tooltip = tooltip; Icon.Update(tooltip); }
+    internal void Update(TrayPresentation presentation)
+    {
+        _presentation = presentation;
+        _icons.Update(presentation, IconSize, TrayIconRenderer.SystemPalette());
+        if (_pendingSelection && _icons.Find(_selectionId) is null) CancelSelection();
+    }
+    internal bool ContainsCursor() => Icons.Any(icon => icon.ContainsCursor());
+    internal bool Notify(string? accountKey, string title, string message)
+    {
+        var icon = _icons.ForAccount(accountKey) ?? _icons.Primary;
+        icon.NotificationAccount = accountKey;
+        return icon.Notify(title, message);
+    }
+    private int IconSize(TrayIcon? icon) =>
+        TrayIconRenderer.SizeForDpi(Monitor(icon).Dpi);
     internal unsafe (PixelRect Anchor, PixelRect Work, uint Dpi) Placement()
     {
-        var rect = Icon.GetBounds();
+        return Monitor(_icons.Find(_activeId) ?? _icons.Primary);
+    }
+    private unsafe (PixelRect Anchor, PixelRect Work, uint Dpi) Monitor(TrayIcon? icon)
+    {
+        var rect = icon?.GetBounds() ?? new Win32.RECT();
         var monitor = Win32.MonitorFromRect(ref rect, 2);
         var info = new Win32.MONITORINFO { cbSize = (uint)sizeof(Win32.MONITORINFO) };
         if (Win32.GetMonitorInfo(monitor, ref info) == 0)
@@ -35,34 +62,42 @@ internal sealed class TrayHost : ShellWindow
     }
     protected override nint? Message(uint message, nuint wParam, nint lParam)
     {
-        if (message == _taskbarCreated) { Icon.Add(); Icon.Update(_tooltip); return 0; }
+        if (message == _taskbarCreated) { CancelSelection(); _icons.Restore(); Update(_presentation); return 0; }
+        if (message is Win32.WM_DPICHANGED or 0x1A or 0x7E or 0x31A)
+        { Update(_presentation); AppearanceChanged?.Invoke(); return 0; }
         if (message == Win32.WM_POWERBROADCAST && wParam is 7 or 18) { ResumeRequested?.Invoke(); return 1; }
         if (message == Win32.WM_TIMER && wParam == SelectionTimer)
         {
             if (!_pendingSelection) return 0;
+            var selected = _icons.Find(_selectionId);
             CancelSelection();
-            OpenRequested?.Invoke();
+            if (selected is not null) { _activeId = selected.Id; OpenRequested?.Invoke(selected.AccountKey); }
             return 0;
         }
         if (message != Win32.WM_TRAY) return null;
         var action = (int)((nuint)lParam & 0xFFFF);
+        uint id = (uint)(((nuint)lParam >> 16) & 0xFFFF);
+        if (_icons.Find(id) is not { } source) return 0;
+        _activeId = id;
         if (action == 0x400)
         {
-            if (_lastDoubleClick != long.MinValue &&
+            if (_doubleClickId == id && _lastDoubleClick != long.MinValue &&
                 Environment.TickCount64 - _lastDoubleClick < Win32.GetDoubleClickTime()) return 0;
-            if (_pendingSelection) { DoubleClick(); return 0; }
+            if (_pendingSelection && _selectionId == id) { DoubleClick(); return 0; }
+            CancelSelection();
             // Shell sends the first selection before it can report a double-click.
             if (Win32.SetTimer(Handle, SelectionTimer, Win32.GetDoubleClickTime(), 0) == 0)
                 throw new InvalidOperationException("Cannot schedule the tray selection.");
             _pendingSelection = true;
+            _selectionId = id;
         }
         else if (action == 0x203)
         {
-            if (_lastDoubleClick == long.MinValue ||
+            if (_doubleClickId != id || _lastDoubleClick == long.MinValue ||
                 Environment.TickCount64 - _lastDoubleClick >= Win32.GetDoubleClickTime()) DoubleClick();
         }
-        else if (action == 0x401) { CancelSelection(); OpenRequested?.Invoke(); }
-        else if (action == 0x405) NotificationClicked?.Invoke();
+        else if (action == 0x401) { CancelSelection(); OpenRequested?.Invoke(source.AccountKey); }
+        else if (action == 0x405) NotificationClicked?.Invoke(source.NotificationAccount);
         else if (action == 0x7B) { CancelSelection(); ContextMenu(); }
         return 0;
     }
@@ -70,6 +105,7 @@ internal sealed class TrayHost : ShellWindow
     {
         CancelSelection();
         _lastDoubleClick = Environment.TickCount64;
+        _doubleClickId = _activeId;
         SettingsRequested?.Invoke();
     }
     private void CancelSelection()
@@ -95,7 +131,7 @@ internal sealed class TrayHost : ShellWindow
             Win32.PostMessage(Handle, 0, 0, 0);
             switch (command)
             {
-                case 1: OpenRequested?.Invoke(); break;
+                case 1: OpenRequested?.Invoke(null); break;
                 case 2: RefreshRequested?.Invoke(); break;
                 case 3: SettingsRequested?.Invoke(); break;
                 case 4: ExitRequested?.Invoke(); break;
@@ -103,5 +139,5 @@ internal sealed class TrayHost : ShellWindow
         }
         finally { Win32.DestroyMenu(menu); }
     }
-    protected override void ReleaseResources() { CancelSelection(); Icon.Dispose(); }
+    protected override void ReleaseResources() { CancelSelection(); _icons.Dispose(); }
 }

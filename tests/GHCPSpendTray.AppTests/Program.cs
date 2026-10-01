@@ -7,6 +7,7 @@ using GHCPSpendTray.App;
 using GHCPSpendTray.Core;
 using GHCPSpendTray.App.Platform;
 using GHCPSpendTray.App.UI;
+using GHCPSpendTray.App.Native;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 
@@ -19,18 +20,26 @@ try
     var credentials = new MemoryCredentials();
     using var app = new ApplicationController(root, true, http, credentials);
     int notifications = 0, assertions = 0;
+    TrayTests.Run(Check, root);
+    if (args is ["--tray-samples", var samplePath]) TrayTests.WriteSamples(samplePath);
+    else if (args is ["--tray-samples", var scaledPath, var sampleSize])
+        TrayTests.WriteSamples(scaledPath, int.Parse(sampleSize, System.Globalization.CultureInfo.InvariantCulture));
     DashboardView? view = null;
     app.Changed += next => Volatile.Write(ref view, next);
     app.SetNotificationHandler((_, _, _) => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
     await app.InitializeAsync();
     Check(app.Settings.PollMinutes == 60, "exact one-hour default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
+    Check(app.Settings.TrayStyle == TrayIconStyle.Pie && app.Settings.TrayMode == TrayDisplayMode.RollUp &&
+        app.Settings.ExcludedTrayAccounts!.Length == 0, "initial tray is an all-account roll-up pie");
     var buildVersion = typeof(SettingsComponent).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
         .InformationalVersion.Split('+', 2)[0];
     Check(UI.Version == buildVersion && !string.IsNullOrWhiteSpace(UI.Version),
         "About version matches the built application, including prerelease labels");
     using (var session = new AppSession(app, action => action()))
     {
+        Check(session.PreviewTray() is { Icons.Count: 1, RollUp.Percent: null },
+            "preview retains neutral access before any data is available");
         Check(session.Page == SettingsPage.Usage, "usage is the initial settings page");
         session.Navigate(SettingsPage.General);
         Check(session.Page == SettingsPage.General, "existing settings pages remain navigable");
@@ -65,6 +74,7 @@ try
     {
         session.AddAccount();
         Check(!session.CustomHost && session.Host == "github.com", "onboarding defaults to github.com");
+        session.ChangeHost();
         session.SelectHost(true);
         Check(session.CustomHost && session.Host == "" && session.ClientId == "", "custom host starts empty");
         session.SetHost("msft.ghe.com");
@@ -119,10 +129,10 @@ try
     Check(app.ResolveHostDescription("MSFT.ghe.com").Contains("https://api.msft.ghe.com/"), "GHE API mapping in controller");
     await Throws<AppOperationException>(() => app.AddAsync("unregistered.ghe.com", false, null,
         _ => throw new InvalidOperationException("Unregistered host must not return a code."),
-        _ => Task.FromResult(true), default));
+        () => { }, default));
     Check(handler.OAuthRequests == 0, "unregistered host fails visibly without a network request or github.com fallback");
     await Throws<AppOperationException>(() => app.AddAsync("github.com", false, null,
-        _ => { }, _ => Task.FromResult(true), default, "other-registration"));
+        _ => { }, () => { }, default, "other-registration"));
     Check(handler.OAuthRequests == 0, "github.com cannot use another OAuth registration");
 
     var credentialLogRoot = Path.Combine(root, "credential-diagnostics");
@@ -130,7 +140,7 @@ try
     credentials.WriteError = new CredentialVaultException(8, "write", "synthetic-secret-must-not-be-logged");
     try
     {
-        await app.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default);
+        await app.AddAsync("github.com", false, null, _ => { }, () => { }, default);
         throw new Exception("Expected credential store exhaustion to fail sign-in.");
     }
     catch (AppOperationException ex)
@@ -147,7 +157,7 @@ try
     credentials.WriteError = new CredentialVaultException(5, "write", "synthetic-secret");
     try
     {
-        await app.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default);
+        await app.AddAsync("github.com", false, null, _ => { }, () => { }, default);
         throw new Exception("Expected credential permission failure.");
     }
     catch (AppOperationException ex)
@@ -170,6 +180,113 @@ try
     Check(!persistedSettings.Contains("synthetic-avatar-token", StringComparison.Ordinal),
         "signed avatar token is never written to settings");
     Check(Volatile.Read(ref view)!.Total.Contains("$53.25"), "three-account consumption total");
+    await Until(() => Volatile.Read(ref view)?.Tray?.RollUp.IncludedAccounts == 3);
+    var tray = Volatile.Read(ref view)!.Tray!;
+    Check(Math.Abs(tray.RollUp.Percent!.Value - 53.25 / 145 * 100) < 1e-10, "controller publishes allocation-weighted tray usage");
+    await app.SaveSettingsAsync(app.Settings with
+    {
+        TrayStyle = TrayIconStyle.Percentage, TrayMode = TrayDisplayMode.PerAccount,
+        ExcludedTrayAccounts = ["github.com:2"]
+    });
+    await Until(() => Volatile.Read(ref view)?.Tray?.Icons.Count == 2);
+    Check((await Load()).Accounts.Single(a => a.Key == "github.com:2").ExcludeFromTray &&
+        (await Load()).TrayStyle == TrayIconStyle.Percentage, "tray style mode and account exclusion persist");
+    using (var traySession = new AppSession(app, action => action()))
+    {
+        traySession.ReloadSettings();
+        Check(traySession.TrayMode == TrayDisplayMode.PerAccount && traySession.ExcludedTrayAccounts.Contains("github.com:2"),
+            "native settings draft reloads account selection and display mode");
+    }
+    handler.FailUsage = true;
+    await app.RefreshAsync("github.com:1");
+    await Until(() => Volatile.Read(ref view)?.Tray?.Accounts.First(a => a.Key == "github.com:1").Percent is null);
+    Check(Volatile.Read(ref view)!.Tray!.RollUp.IsPartial &&
+        Volatile.Read(ref view)!.ConsumptionUsd == 53.25m, "failed refresh invalidates tray percentage but retains dollar accounting");
+    handler.FailUsage = false;
+    await app.RefreshAsync("github.com:1");
+    await Until(() => Volatile.Read(ref view)?.Tray?.RollUp.IncludedAccounts == 2);
+    await app.SaveSettingsAsync(app.Settings with
+        { TrayStyle = TrayIconStyle.Pie, TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] });
+    using (var draft = new AppSession(app, action => action()))
+    {
+        draft.Initialize();
+        await Until(() => draft.Initialized && !draft.Busy);
+        await app.RefreshAsync();
+        await Until(() => draft.Dashboard.Tray?.RollUp.IncludedAccounts == 3);
+        int shellCalls = 0;
+        var palette = new TrayPalette(0xFF000000, 0xFFFFFFFF);
+        using var installed = new TrayIconSet(0, root, (uint _, ref Win32.NOTIFYICONDATA _) => { shellCalls++; return 1; });
+        void UpdateInstalled() => installed.Update(draft.Dashboard.Tray!, _ => 16, palette);
+        draft.DashboardChanged += UpdateInstalled;
+        UpdateInstalled();
+        int beforeCalls = shellCalls;
+        nint originalIcon = installed.Primary.ImageHandle;
+        string beforeSettings = await File.ReadAllTextAsync(Path.Combine(root, "config.json"));
+        draft.TrayStyle = TrayIconStyle.Percentage;
+        draft.Notify();
+        Check(draft.PreviewTray().Style == TrayIconStyle.Percentage, "unsaved style immediately changes the preview");
+        draft.TrayMode = TrayDisplayMode.PerAccount;
+        draft.Notify();
+        Check(draft.PreviewTray().Icons.Count == 3 && draft.PreviewTray().Icons[0].IsOverAllocation,
+            "unsaved mode previews every selected identity and over-allocation");
+        draft.ExcludedTrayAccounts.Add("github.com:2");
+        draft.Notify();
+        var preview = draft.PreviewTray();
+        Check(preview.Icons.Count == 2 && preview.Icons.All(i => i.AccountKey != "github.com:2") &&
+            Math.Abs(preview.RollUp.Percent!.Value - 36.75 / 45 * 100) < 1e-10,
+            "unsaved selection uses the same weighted eligible totals");
+        Check(shellCalls == beforeCalls && installed.Icons.Count == 1 && installed.Primary.ImageHandle == originalIcon &&
+            app.Settings.TrayStyle == TrayIconStyle.Pie && app.Settings.TrayMode == TrayDisplayMode.RollUp &&
+            app.Settings.ExcludedTrayAccounts!.Length == 0 &&
+            await File.ReadAllTextAsync(Path.Combine(root, "config.json")) == beforeSettings,
+            "preview changes never publish installed icons or change controller/persisted settings");
+        draft.ExcludedTrayAccounts.UnionWith(["github.com:1", "msft.ghe.com:3"]);
+        draft.Notify();
+        Check(draft.PreviewTray() is { Icons.Count: 1, RollUp.Percent: null, RollUp.SelectedAccounts: 0 } &&
+            shellCalls == beforeCalls, "deselecting all previews neutral without retiring installed icons");
+        draft.ReloadSettings();
+        Check(draft.PreviewTray().Style == TrayIconStyle.Pie && draft.PreviewTray().Icons.Count == 1 &&
+            draft.PreviewTray().RollUp.IncludedAccounts == 3, "reload discards unsaved preview choices");
+        draft.TrayStyle = TrayIconStyle.Percentage;
+        draft.TrayMode = TrayDisplayMode.PerAccount;
+        draft.ExcludedTrayAccounts.Add("github.com:2");
+        draft.Thresholds = "invalid";
+        draft.SaveGlobal();
+        await Until(() => !draft.Busy);
+        Check(draft.Error is not null && draft.PreviewTray().Style == TrayIconStyle.Percentage &&
+            draft.PreviewTray().Icons.Count == 2 && shellCalls == beforeCalls &&
+            await File.ReadAllTextAsync(Path.Combine(root, "config.json")) == beforeSettings,
+            "failed settings save preserves draft preview but notifies no Shell or persistence changes");
+        draft.Thresholds = app.Settings.Thresholds;
+        draft.SaveGlobal();
+        await Until(() => !draft.Busy);
+        Check(draft.Error is null && shellCalls > beforeCalls && installed.Icons.Count == 2 &&
+            (await Load()).TrayStyle == TrayIconStyle.Percentage &&
+            draft.PreviewTray().Icons.SequenceEqual(draft.Dashboard.Tray!.Icons),
+            "successful save installs exactly the previewed presentation and reloads the saved draft");
+        draft.ExcludedTrayAccounts.Clear();
+        draft.TrayMode = TrayDisplayMode.RollUp;
+        draft.Notify();
+        handler.FailUsage = true;
+        await app.RefreshAsync("github.com:1");
+        await Until(() => draft.Dashboard.Tray!.Accounts.First(a => a.Key == "github.com:1").Percent is null);
+        Check(draft.PreviewTray().RollUp.IsPartial && draft.PreviewTray().RollUp.SelectedAccounts == 3 &&
+            draft.Dashboard.Tray!.RollUp.SelectedAccounts == 2,
+            "underlying failure refreshes partial preview while preserving unsaved account selection");
+        draft.TrayMode = TrayDisplayMode.PerAccount;
+        Check(draft.PreviewTray().Icons.First(i => i.AccountKey == "github.com:1").Percent is null,
+            "per-account preview uses unavailable rather than failed last-known percentages");
+        handler.FailUsage = false;
+        await app.RefreshAsync("github.com:1");
+        await Until(() => draft.Dashboard.Tray!.RollUp.IncludedAccounts == 2);
+        var expiredAt = draft.Dashboard.TrayStates!.Max(s => s.Snapshot!.FetchedAtUtc).AddHours(1).AddTicks(1);
+        Check(draft.PreviewTray(expiredAt).Icons.All(i => i.Percent is null) &&
+            draft.PreviewTray().Icons.All(i => i.Percent is not null),
+            "preview ages out existing snapshots using the actual freshness policy without refreshing");
+        draft.DashboardChanged -= UpdateInstalled;
+    }
+    await app.SaveSettingsAsync(app.Settings with
+        { TrayStyle = TrayIconStyle.Pie, TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] });
     var summary = Volatile.Read(ref view)!.Accounts.Single(account => account.Key == "github.com:1");
     string? picture = summary.AvatarUrl;
     Check(picture is not null && File.Exists(picture) &&
@@ -198,12 +315,13 @@ try
     Check((await Load()).Accounts.Length == 3, "duplicate cannot double-count");
     handler.NextIdentity = "2";
     await Throws<AppOperationException>(() => app.AddAsync("github.com", false, "github.com:1",
-        _ => { }, _ => Task.FromResult(true), default));
+        _ => { }, () => { }, default));
     Check(credentials.Values["github.com:1"].AccessToken == "fixture-1", "wrong-account reconnect preserves credential");
     handler.NextIdentity = "4";
-    await Throws<OperationCanceledException>(() => app.AddAsync("github.com", false, null,
-        _ => { }, _ => Task.FromResult(false), default));
-    Check(credentials.Values.Count == 3, "declined identity is not persisted");
+    using (var cancelSignIn = new CancellationTokenSource())
+        await Throws<OperationCanceledException>(() => app.AddAsync("github.com", false, null,
+            _ => { }, cancelSignIn.Cancel, cancelSignIn.Token));
+    Check(credentials.Values.Count == 3, "cancelled sign-in is not persisted");
     credentials.Values["github.com:1"] = credentials.Values["github.com:1"] with
     {
         ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
@@ -289,7 +407,7 @@ try
     var teamTarget = new VaultCredentials(null).Target(teamAccount);
     Check(teamTarget.Contains("/team-registration/", StringComparison.Ordinal), "custom credentials use selected registration");
     await Throws<AppOperationException>(() => app.AddAsync("team.ghe.com", false, "team.ghe.com:5",
-        _ => { }, _ => Task.FromResult(true), default, "other-registration"));
+        _ => { }, () => { }, default, "other-registration"));
     Check(credentials.Values["team.ghe.com:5"].AccessToken == "fixture-5",
         "reconnect with different registration cannot overwrite existing credentials");
     credentials.Values["team.ghe.com:5"] = credentials.Values["team.ghe.com:5"] with
@@ -322,12 +440,14 @@ try
             "legacy unsupported account can be removed without an unknown credential target");
         handler.NextIdentity = "5";
         await legacyApp.AddAsync("team.ghe.com", false, "team.ghe.com:5",
-            _ => { }, _ => Task.FromResult(true), default, "team-registration");
+            _ => { }, () => { }, default, "team-registration");
         Check((await legacyStore.LoadSettingsAsync()).Value.Accounts.Single().OAuthClientId == "team-registration",
             "legacy unsupported account reconnect saves its explicit host registration");
     }
     foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         Check(!(await File.ReadAllTextAsync(file)).Contains("fixture-", StringComparison.Ordinal), "no token in persisted files");
+    assertions += await BackNavigationTests.RunAsync(root);
+    assertions += await AccountSignInTests.RunAsync(Path.Combine(root, "sign-in"));
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");
 
     void Check(bool condition, string description)
@@ -346,7 +466,7 @@ try
         handler.NextIdentity = id;
         await app.AddAsync(host, false, reconnectKey,
             prompt => Check(prompt.VerificationUri.Host == host.ToLowerInvariant() && prompt.Code == "TEST-CODE", "validated device prompt"),
-            identity => Task.FromResult(identity.UserId > 0), default, clientId);
+            () => { }, default, clientId);
     }
     async Task<AppSettings> Load() => (await new JsonStore(root).LoadSettingsAsync()).Value;
     static async Task Until(Func<bool> predicate)
@@ -386,6 +506,10 @@ sealed class FixtureHttp : HttpMessageHandler
     internal bool FailAvatar { get; set; }
     internal bool RedirectAvatar { get; set; }
     internal bool InvalidAvatar { get; set; }
+    internal bool FailUsage { get; set; }
+    internal bool OversizedAvatar { get; set; }
+    internal TaskCompletionSource? AvatarGate { get; set; }
+    internal int AvatarRequests;
     internal int RefreshRequests { get; private set; }
     internal int OAuthRequests => OAuthClientIds.Count;
     internal List<string> OAuthClientIds { get; } = [];
@@ -395,13 +519,15 @@ sealed class FixtureHttp : HttpMessageHandler
         if (uri.AbsolutePath.StartsWith("/u/", StringComparison.Ordinal) ||
             uri.AbsolutePath.StartsWith("/avatars/u/", StringComparison.Ordinal))
         {
+            Interlocked.Increment(ref AvatarRequests);
+            if (AvatarGate is { } gate) await gate.Task.WaitAsync(cancellationToken);
             if (request.Headers.Authorization is not null || uri.Query != "?token=synthetic-avatar-token&size=64")
                 throw new InvalidOperationException("Avatar request must use only its signed URL.");
             if (FailAvatar) return new(HttpStatusCode.Forbidden);
             if (RedirectAvatar) return new(HttpStatusCode.Redirect);
             return new(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(InvalidAvatar
+                Content = new ByteArrayContent(OversizedAvatar ? new byte[1024 * 1024 + 1] : InvalidAvatar
                     ? "not an image"u8.ToArray() : [137, 80, 78, 71, 13, 10, 26, 10, AvatarRevision])
                 { Headers = { ContentType = new("image/png") } }
             };
@@ -459,6 +585,7 @@ sealed class FixtureHttp : HttpMessageHandler
             }
             else if (uri.AbsolutePath == "/copilot_internal/user")
             {
+                if (FailUsage) throw new HttpRequestException("Synthetic offline fixture.");
                 int credits = id switch { "1" => 2625, "2" => 1650, _ => 1050 };
                 int entitlement = id switch { "1" => 2500, "2" => 10000, _ => 2000 };
                 var reset = new DateTimeOffset(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1);

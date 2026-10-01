@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>GHCPSpendTray - Connected dollar, small optical master</title>
+  <desc>A heavier white rim and dollar, enlarged open counters, and a shorter dollar body preserve the connected identity at 16-24 pixels. Transparent outside the disc.</desc>
+  <defs>
+    <linearGradient id="charcoal" x1="96" y1="48" x2="408" y2="468" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#626975"/>
+      <stop offset="0.47" stop-color="#353a43"/>
+      <stop offset="1" stop-color="#14171d"/>
+    </linearGradient>
+  </defs>
+  <g id="disc">
+    <circle cx="256" cy="256" r="228" fill="url(#charcoal)"/>
+  </g>
+  <g id="connected-dollar" fill="none" stroke="#ffffff">
+    <circle id="rim" cx="256" cy="256" r="218" stroke-width="32"/>
+    <path id="stem" d="M 256 35 V 477" stroke-width="30"/>
+    <path id="dollar" d="M 339 181 C 323 152 291 140 252 140 C 203 140 174 162 174 194 C 174 227 207 239 253 251 C 305 264 338 283 338 318 C 338 351 307 375 258 375 C 217 375 185 359 169 332" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

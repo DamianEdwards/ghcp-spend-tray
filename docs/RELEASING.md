@@ -126,8 +126,38 @@ architecture packages. Signature verification uses Windows SDK SignTool.
 
 The `windows-2025` runner needs Visual Studio x64/ARM64 C++ tools and a Windows SDK
 22621 or newer. `actions/setup-dotnet` installs the SDK pinned in `global.json`.
-The same prerequisites apply locally. Python is only needed to regenerate
-checked-in artwork, not for CI builds.
+The same prerequisites apply locally. Node.js/npm is only needed to regenerate
+checked-in artwork, not for .NET builds or packaging.
+
+### Packaged shell icons
+
+The approved connected-dollar SVG masters in `src\GHCPSpendTray.App\Assets`
+are the source for the application ICO, in-app logo, badge, Store logos and
+the `Square44x44Logo.targetsize-*` PNGs. Regenerate or check them with the
+pinned, development-only renderer:
+
+```powershell
+npm --prefix .\tools ci --no-audit --no-fund
+npm --prefix .\tools run generate
+npm --prefix .\tools run check
+```
+
+The small optical master is used at 16-24 pixels; larger sizes use the regular
+master. ICO frames embed the same PNG bytes as their shell counterparts.
+Keep the default, `altform-unplated`,
+and `altform-lightunplated` variants at all 14 sizes, even though both themes
+use identical artwork. Transparent source pixels and the manifest's
+`BackgroundColor="transparent"` alone do not prevent Windows from adding an
+accent-color plate; the shell needs the qualified unplated candidates.
+See [Windows app icon construction](https://learn.microsoft.com/windows/apps/design/iconography/app-icon-construction).
+
+The app project copies these assets into each published payload.
+`package.ps1` uses Windows SDK MakePri and `packaging\priconfig.xml` to generate
+`resources.pri` after assigning the final package identity. This shell index
+maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates. It is
+separate from the existing `GHCPSpendTray.pri` and `Reactor.pri` runtime
+resources, which must remain in the package. `test-package.ps1` extracts and
+checks the actual icon PNGs and shell PRI from both architecture packages.
 
 ## Release a version
 
