@@ -126,13 +126,25 @@ architecture packages. Signature verification uses Windows SDK SignTool.
 
 The `windows-2025` runner needs Visual Studio x64/ARM64 C++ tools and a Windows SDK
 22621 or newer. `actions/setup-dotnet` installs the SDK pinned in `global.json`.
-The same prerequisites apply locally. Python is only needed to regenerate
-checked-in artwork, not for CI builds.
+The same prerequisites apply locally. Node.js/npm is only needed to regenerate
+checked-in artwork, not for .NET builds or packaging.
 
 ### Packaged shell icons
 
-`python .\tools\generate-logo.py` regenerates the existing coin/bar artwork and
-the `Square44x44Logo.targetsize-*` PNGs. Keep the default, `altform-unplated`,
+The approved connected-dollar SVG masters in `src\GHCPSpendTray.App\Assets`
+are the source for the application ICO, in-app logo, badge, Store logos and
+the `Square44x44Logo.targetsize-*` PNGs. Regenerate or check them with the
+pinned, development-only renderer:
+
+```powershell
+npm --prefix .\tools ci --no-audit --no-fund
+npm --prefix .\tools run generate
+npm --prefix .\tools run check
+```
+
+The small optical master is used at 16-24 pixels; larger sizes use the regular
+master. ICO frames embed the same PNG bytes as their shell counterparts.
+Keep the default, `altform-unplated`,
 and `altform-lightunplated` variants at all 14 sizes, even though both themes
 use identical artwork. Transparent source pixels and the manifest's
 `BackgroundColor="transparent"` alone do not prevent Windows from adding an

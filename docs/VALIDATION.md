@@ -1,5 +1,37 @@
 # GHCPSpendTray validation and release gates
 
+## Combined feature integration (September 30, 2026)
+
+The taskbar packaging fix, revised account confirmation/avatar, configurable
+tray indicators with unsaved previews, approved connected-dollar artwork and
+standard Back input are integrated and checked together.
+
+- `verify.ps1 -NativeTests`: warning-free Release build, 155 core tests,
+  14 platform tests and 638 application assertions under JIT and executed x64
+  Native AOT.
+- `package.ps1`: x64 and ARM64 Native AOT publishing and unsigned development
+  bundle validation passed. Both packages contain the new transparent dollar
+  assets and final-identity shell resource index.
+- The SVG generator's check mode reproduces every checked-in raster and ICO.
+  All seven sizes in the approved concept preview match byte-for-byte. The
+  executable ICO embeds the exact same PNGs as the corresponding package
+  target-size assets; release-tooling checks enforce this relationship.
+- The combined x64 published executable passed both populated and empty
+  portable native UI smoke scenarios, including Back-window recreation, tray
+  callbacks, draft-preview pixel parity, Save isolation and resource cleanup.
+- Direct UI interaction against the integrated application with synthetic HTTP
+  and in-memory credentials exercised avatar confirmation, connecting/success,
+  Alt+Left from an account text field, live numeric/per-account/empty-selection
+  previews, and Save. The synthetic settings file retained the original tray
+  choices during preview and changed only after Save. The new dollar artwork
+  was inspected in the window icon and About page.
+
+No real OAuth flow, package installation, OS preference changes, Explorer
+restart or ARM64 execution was performed in this integration pass. Physical
+mouse Back, installed/pinned taskbar behavior and the full multi-monitor/theme
+matrix remain manual acceptance items. Synthetic review windows were closed;
+the user's installed app and account data were not modified.
+
 ## Local evidence (September 24, 2026)
 
 | Check | Evidence |
@@ -64,8 +96,9 @@ foreground-permission behavior.
 
 ## Packaged taskbar icon regression (September 30, 2026)
 
-The original 44px PNG has transparent corners, and all original artwork,
-including the window ICO, is unchanged. The package now includes default,
+The approved connected-dollar artwork replaces the original bars in the
+application ICO, in-app logo and package assets. All shell icons retain
+transparent corners. The package includes default,
 unplated, and light-unplated candidates at 16, 20, 24, 30, 32, 36, 40, 48, 60,
 64, 72, 80, 96, and 256 pixels. A separate package-identity `resources.pri`
 indexes these under `Files/Assets/Square44x44Logo.png`.
