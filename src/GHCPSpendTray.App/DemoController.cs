@@ -44,11 +44,11 @@ internal sealed class DemoController(string directory, bool empty = false) : IAp
                 ConsumptionUsd = dashboard.Accounts[i].ConsumptionUsd!.Value,
                 AllocationUsd = dashboard.Accounts[i].AllocationUsd, PercentConsumed = dashboard.Accounts[i].Percent
             }
-        });
+        }).ToArray();
         Changed?.Invoke(dashboard with { Tray = TrayUsage.Create(new()
         {
             Accounts = accounts, TrayStyle = Settings.TrayStyle, TrayMode = Settings.TrayMode
-        }, states, now) });
+        }, states, now), TrayStates = states });
         return Task.CompletedTask;
     }
     public Task RefreshAccountAsync(string accountKey) => RefreshAsync(accountKey);

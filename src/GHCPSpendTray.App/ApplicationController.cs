@@ -440,7 +440,7 @@ internal sealed class ApplicationController : IApplicationController, INotificat
                 if (last != default) tooltip += $"\nOldest update {last.ToLocalTime():HH:mm}";
                 Changed?.Invoke(new(title, status, tooltip, accountViews,
                     total.IncludedAccounts == 0 ? null : total.ConsumptionUsd, total.IsComplete, total.IsLastKnown,
-                    TrayUsage.Create(_settings, states, now)));
+                    TrayUsage.Create(_settings, states, now), states));
             }
             finally { _render.Release(); }
         }

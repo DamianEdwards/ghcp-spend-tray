@@ -7,6 +7,7 @@ using GHCPSpendTray.App;
 using GHCPSpendTray.Core;
 using GHCPSpendTray.App.Platform;
 using GHCPSpendTray.App.UI;
+using GHCPSpendTray.App.Native;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 
@@ -35,6 +36,8 @@ try
         "About version matches the built application, including prerelease labels");
     using (var session = new AppSession(app, action => action()))
     {
+        Check(session.PreviewTray() is { Icons.Count: 1, RollUp.Percent: null },
+            "preview retains neutral access before any data is available");
         Check(session.Page == SettingsPage.Usage, "usage is the initial settings page");
         session.Navigate(SettingsPage.General);
         Check(session.Page == SettingsPage.General, "existing settings pages remain navigable");
@@ -168,6 +171,86 @@ try
     handler.FailUsage = false;
     await app.RefreshAsync("github.com:1");
     await Until(() => Volatile.Read(ref view)?.Tray?.RollUp.IncludedAccounts == 2);
+    await app.SaveSettingsAsync(app.Settings with
+        { TrayStyle = TrayIconStyle.Pie, TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] });
+    using (var draft = new AppSession(app, action => action()))
+    {
+        draft.Initialize();
+        await Until(() => draft.Initialized && !draft.Busy);
+        await app.RefreshAsync();
+        await Until(() => draft.Dashboard.Tray?.RollUp.IncludedAccounts == 3);
+        int shellCalls = 0;
+        var palette = new TrayPalette(0xFF000000, 0xFFFFFFFF);
+        using var installed = new TrayIconSet(0, root, (uint _, ref Win32.NOTIFYICONDATA _) => { shellCalls++; return 1; });
+        void UpdateInstalled() => installed.Update(draft.Dashboard.Tray!, _ => 16, palette);
+        draft.DashboardChanged += UpdateInstalled;
+        UpdateInstalled();
+        int beforeCalls = shellCalls;
+        nint originalIcon = installed.Primary.ImageHandle;
+        string beforeSettings = await File.ReadAllTextAsync(Path.Combine(root, "config.json"));
+        draft.TrayStyle = TrayIconStyle.Percentage;
+        draft.Notify();
+        Check(draft.PreviewTray().Style == TrayIconStyle.Percentage, "unsaved style immediately changes the preview");
+        draft.TrayMode = TrayDisplayMode.PerAccount;
+        draft.Notify();
+        Check(draft.PreviewTray().Icons.Count == 3 && draft.PreviewTray().Icons[0].IsOverAllocation,
+            "unsaved mode previews every selected identity and over-allocation");
+        draft.ExcludedTrayAccounts.Add("github.com:2");
+        draft.Notify();
+        var preview = draft.PreviewTray();
+        Check(preview.Icons.Count == 2 && preview.Icons.All(i => i.AccountKey != "github.com:2") &&
+            Math.Abs(preview.RollUp.Percent!.Value - 36.75 / 45 * 100) < 1e-10,
+            "unsaved selection uses the same weighted eligible totals");
+        Check(shellCalls == beforeCalls && installed.Icons.Count == 1 && installed.Primary.ImageHandle == originalIcon &&
+            app.Settings.TrayStyle == TrayIconStyle.Pie && app.Settings.TrayMode == TrayDisplayMode.RollUp &&
+            app.Settings.ExcludedTrayAccounts!.Length == 0 &&
+            await File.ReadAllTextAsync(Path.Combine(root, "config.json")) == beforeSettings,
+            "preview changes never publish installed icons or change controller/persisted settings");
+        draft.ExcludedTrayAccounts.UnionWith(["github.com:1", "msft.ghe.com:3"]);
+        draft.Notify();
+        Check(draft.PreviewTray() is { Icons.Count: 1, RollUp.Percent: null, RollUp.SelectedAccounts: 0 } &&
+            shellCalls == beforeCalls, "deselecting all previews neutral without retiring installed icons");
+        draft.ReloadSettings();
+        Check(draft.PreviewTray().Style == TrayIconStyle.Pie && draft.PreviewTray().Icons.Count == 1 &&
+            draft.PreviewTray().RollUp.IncludedAccounts == 3, "reload discards unsaved preview choices");
+        draft.TrayStyle = TrayIconStyle.Percentage;
+        draft.TrayMode = TrayDisplayMode.PerAccount;
+        draft.ExcludedTrayAccounts.Add("github.com:2");
+        draft.Thresholds = "invalid";
+        draft.SaveGlobal();
+        await Until(() => !draft.Busy);
+        Check(draft.Error is not null && draft.PreviewTray().Style == TrayIconStyle.Percentage &&
+            draft.PreviewTray().Icons.Count == 2 && shellCalls == beforeCalls &&
+            await File.ReadAllTextAsync(Path.Combine(root, "config.json")) == beforeSettings,
+            "failed settings save preserves draft preview but notifies no Shell or persistence changes");
+        draft.Thresholds = app.Settings.Thresholds;
+        draft.SaveGlobal();
+        await Until(() => !draft.Busy);
+        Check(draft.Error is null && shellCalls > beforeCalls && installed.Icons.Count == 2 &&
+            (await Load()).TrayStyle == TrayIconStyle.Percentage &&
+            draft.PreviewTray().Icons.SequenceEqual(draft.Dashboard.Tray!.Icons),
+            "successful save installs exactly the previewed presentation and reloads the saved draft");
+        draft.ExcludedTrayAccounts.Clear();
+        draft.TrayMode = TrayDisplayMode.RollUp;
+        draft.Notify();
+        handler.FailUsage = true;
+        await app.RefreshAsync("github.com:1");
+        await Until(() => draft.Dashboard.Tray!.Accounts.First(a => a.Key == "github.com:1").Percent is null);
+        Check(draft.PreviewTray().RollUp.IsPartial && draft.PreviewTray().RollUp.SelectedAccounts == 3 &&
+            draft.Dashboard.Tray!.RollUp.SelectedAccounts == 2,
+            "underlying failure refreshes partial preview while preserving unsaved account selection");
+        draft.TrayMode = TrayDisplayMode.PerAccount;
+        Check(draft.PreviewTray().Icons.First(i => i.AccountKey == "github.com:1").Percent is null,
+            "per-account preview uses unavailable rather than failed last-known percentages");
+        handler.FailUsage = false;
+        await app.RefreshAsync("github.com:1");
+        await Until(() => draft.Dashboard.Tray!.RollUp.IncludedAccounts == 2);
+        var expiredAt = draft.Dashboard.TrayStates!.Max(s => s.Snapshot!.FetchedAtUtc).AddHours(1).AddTicks(1);
+        Check(draft.PreviewTray(expiredAt).Icons.All(i => i.Percent is null) &&
+            draft.PreviewTray().Icons.All(i => i.Percent is not null),
+            "preview ages out existing snapshots using the actual freshness policy without refreshing");
+        draft.DashboardChanged -= UpdateInstalled;
+    }
     await app.SaveSettingsAsync(app.Settings with
         { TrayStyle = TrayIconStyle.Pie, TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] });
     var summary = Volatile.Read(ref view)!.Accounts.Single(account => account.Key == "github.com:1");

@@ -9,6 +9,9 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace GHCPSpendTray.App;
 
@@ -274,6 +277,7 @@ internal static class Program
                     "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, " +
                     "account Back controls and scoped keyboard accelerator registration, native controls, " +
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
+                    "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
                     "simulated TaskbarCreated recovery and display-change repaint, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
@@ -326,13 +330,25 @@ internal static class Program
     {
         await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
         await Task.Delay(200);
+        nint installedImage = 0;
         await OnUI(shell, () =>
         {
+            AssertTrayPreview(shell);
+            SmokePreviewBuffer();
+            installedImage = shell.TrayIcons.Single().ImageHandle;
             if (Find(shell.SettingsWindow!, "TrayStyle") is not ComboBox style ||
                 Find(shell.SettingsWindow!, "TrayMode") is not ComboBox mode)
                 throw new InvalidOperationException("Native tray settings controls did not render.");
             style.SelectedIndex = 1;
             mode.SelectedIndex = 1;
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            AssertTrayPreview(shell);
+            if (shell.TrayIcons.Count != 1 || shell.TrayIcons.Single().ImageHandle != installedImage ||
+                shell.Session.Controller.Settings is not { TrayStyle: TrayIconStyle.Pie, TrayMode: TrayDisplayMode.RollUp })
+                throw new InvalidOperationException("Draft preview changed the installed tray before Save.");
             InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
         });
         await WaitForTraySave();
@@ -360,14 +376,23 @@ internal static class Program
             shell.ShowSettings(SettingsPage.General);
         });
         await Task.Delay(200);
+        (uint Id, nint Image)[] installedIcons = [];
         await OnUI(shell, () =>
         {
+            installedIcons = shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).ToArray();
             foreach (var account in shell.Session.Dashboard.Accounts)
             {
                 if (Find(shell.SettingsWindow!, "TrayAccount-" + account.Key) is not CheckBox selection)
                     throw new InvalidOperationException("Account inclusion checkbox is missing.");
                 selection.IsChecked = false;
             }
+        });
+        await Task.Delay(200);
+        await OnUI(shell, () =>
+        {
+            AssertTrayPreview(shell);
+            if (!shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).SequenceEqual(installedIcons))
+                throw new InvalidOperationException("Draft exclusions changed installed tray icons.");
             InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
         });
         await WaitForTraySave();
@@ -397,11 +422,20 @@ internal static class Program
             InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
         });
         await WaitForTraySave();
+        Image? retiredPreview = null;
         await OnUI(shell, () =>
         {
+            AssertTrayPreview(shell);
+            retiredPreview = (Image)Find(shell.SettingsWindow!, "TrayPreviewIcon-rollup")!;
             if (shell.TrayIcons.Count != 1 || shell.Session.Controller.Settings.TrayStyle != TrayIconStyle.Pie)
                 throw new InvalidOperationException("Restoring the roll-up pie failed.");
             shell.Session.Navigate(SettingsPage.Notifications);
+        });
+        await Task.Delay(150);
+        await OnUI(shell, () =>
+        {
+            if (retiredPreview!.Source is not null)
+                throw new InvalidOperationException("Unmounted preview retained its WinUI pixel buffer.");
         });
 
         async Task WaitForTraySave()
@@ -419,6 +453,46 @@ internal static class Program
             }
             throw new TimeoutException("Tray settings save did not complete.");
         }
+    }
+
+    private static void AssertTrayPreview(ReactorShell shell)
+    {
+        var preview = shell.Session.PreviewTray();
+        foreach (var icon in preview.Icons)
+        {
+            string id = "TrayPreviewIcon-" + (icon.AccountKey ?? "rollup");
+            if (Find(shell.SettingsWindow!, id) is not Image { Source: WriteableBitmap bitmap } image ||
+                image.Width != 16 || image.Height != 16)
+                throw new InvalidOperationException("Native-size live preview image is missing.");
+            byte[] bytes = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+            using (var stream = bitmap.PixelBuffer.AsStream()) stream.ReadExactly(bytes);
+            var expected = TrayIconRenderer.Pixels(icon, preview.Style, bitmap.PixelWidth, TrayIconRenderer.SystemPalette());
+            if (!MemoryMarshal.Cast<byte, uint>(bytes.AsSpan()).SequenceEqual(expected))
+                throw new InvalidOperationException("Preview pixels differ from the actual tray renderer.");
+            if (!AutomationProperties.GetName(image).Contains(icon.Details, StringComparison.Ordinal))
+                throw new InvalidOperationException("Preview lacks accessible identity and availability details.");
+        }
+    }
+
+    private static void SmokePreviewBuffer()
+    {
+        var image = new Image();
+        var indicator = new TrayIndicator(null, "Synthetic", 50, 1, 2, "Partial", "Partial");
+        TrayPreviewImage.Apply(image, indicator, TrayIconStyle.Pie);
+        var bitmap = image.Source;
+        uint gdi = Win32.GetGuiResources(Win32.GetCurrentProcess(), 0);
+        uint user = Win32.GetGuiResources(Win32.GetCurrentProcess(), 1);
+        for (int i = 0; i < 300; i++)
+        {
+            var next = indicator with { Percent = i % 3 == 0 ? null : i, IncludedAccounts = i % 3 == 0 ? 0 : 1 };
+            var style = i % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage;
+            TrayPreviewImage.Apply(image, next, style);
+            if (!ReferenceEquals(bitmap, image.Source))
+                throw new InvalidOperationException("Same-size preview updates accumulate WinUI bitmaps.");
+        }
+        if (Win32.GetGuiResources(Win32.GetCurrentProcess(), 0) > gdi + 2 ||
+            Win32.GetGuiResources(Win32.GetCurrentProcess(), 1) > user + 2)
+            throw new InvalidOperationException("Preview generation leaked native handles.");
     }
 
     private static void SendTraySelection(ReactorShell shell, int notification, uint id = 1) =>

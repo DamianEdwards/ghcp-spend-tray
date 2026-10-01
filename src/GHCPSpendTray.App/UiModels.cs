@@ -13,7 +13,7 @@ internal sealed record AccountView(string Key, string Name, string Login, string
     string? AvatarUrl = null);
 internal sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
     decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false,
-    TrayPresentation? Tray = null);
+    TrayPresentation? Tray = null, IReadOnlyList<AccountState>? TrayStates = null);
 internal sealed record SettingsView(int PollMinutes, string Thresholds, bool Notifications, bool Startup,
     decimal? SpendIncrementUsd = null, bool CanChangeStartup = false,
     string StartupDescription = "Unavailable in isolated portable mode.",

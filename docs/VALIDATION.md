@@ -120,7 +120,7 @@ per-account icons, and persisted account inclusion. Static application branding
 and packaging assets are unchanged.
 
 `.\tools\verify.ps1 -NativeTests` passed: Release build without warnings, release
-tooling checks, 155 core tests, 14 platform tests and 550 application assertions
+tooling checks, 155 core tests, 14 platform tests and 562 application assertions
 under both JIT and executed x64 Native AOT. Sequential x64 and ARM64 app publishing
 passed with AOT warnings treated as errors. Populated and empty portable smoke
 scenarios passed against the final x64 executable; startup registration was
@@ -133,13 +133,22 @@ unchanged. ARM64 was cross-published, not executed.
   selections, fractional/over-allocation values and sums exceeding decimal range.
 - Synthetic controller coverage checks native settings draft reload, persisted
   exclusions, weighted presentation and failed refreshes without changing
-  last-known dollar totals.
+  last-known dollar totals. Live-preview coverage checks unsaved style, mode and
+  selection, neutral fallback, partial/unavailable observations, time-based expiry,
+  failed saves and successful preview-to-tray parity. Draft-only changes produce
+  no Shell calls and leave the persisted configuration and installed icons unchanged.
 - Native tests create real HICONs at 16, 20, 24, 32, 48 and 64 pixels; check
   monochrome partial/unavailable geometry and opaque contrasting pixels; and
   use an injected Shell boundary to check stable GUIDs/callback IDs, mode changes,
   reordering, reselection, rejection cleanup, version-4 recovery and disposal.
   Repeated icon lifetimes/replacements are measured with `GetGuiResources` to
   detect accumulated GDI/USER handles. These checks do not exercise Explorer UI.
+- Preview images share `TrayUsage.Create`, `TrayIconRenderer.Pixels`, DPI sizing
+  and the system/high-contrast palette with installed icons. They use a reusable
+  WinUI `WriteableBitmap`, not temporary HICONs, GDI bitmaps or files. The UI smoke
+  checks exact preview pixel parity, unchanged installed HICONs before Save,
+  repeated same-size buffer reuse, native resource counts, and clearing the image
+  source when its settings page unmounts.
 - The isolated UI smoke path exercises the real WinUI style/mode/account controls,
   per-account keyboard callbacks, retired callbacks, no-selection access, and
   simulated `TaskbarCreated`/display-change messages against this app's own icons.

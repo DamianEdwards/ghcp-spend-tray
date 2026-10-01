@@ -97,6 +97,11 @@ In **Settings > General > System tray**, choose **Pie chart** or **Percentage
 number**, one roll-up or per-account icons, and the connected accounts to include.
 Choose **Save changes** to apply and persist the preferences. By default all
 accounts, including newly connected accounts, contribute to a single pie.
+The **Live preview** updates immediately as you change the draft style, icon mode,
+or included accounts. It uses current usage and the same native-size pixels as
+the real icons, with labels identifying each account. Previewing does not change
+the notification area or save anything; a failed save leaves the existing tray
+configuration unchanged. Freshness and availability updates also reach the preview.
 Per-account icons open their account details on click; **Open GHCPSpendTray**
 in any icon's context menu still opens the flyout. Double-click, keyboard access,
 refresh, Settings, notifications and Exit remain available. If no accounts are

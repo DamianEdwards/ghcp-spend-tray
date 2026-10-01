@@ -18,6 +18,7 @@ internal sealed class AppSession : IDisposable
     internal DashboardView Dashboard { get; private set; } = new("Loading", "Loading accounts...", "GHCPSpendTray | Loading", []);
     internal SettingsPage Page { get; private set; } = SettingsPage.Usage;
     internal event Action? Changed;
+    internal event Action? DashboardChanged;
     internal Action<SettingsPage>? OpenSettings { get; set; }
     internal Action? HideFlyout { get; set; }
     internal Func<bool>? TestNotification { get; set; }
@@ -64,7 +65,26 @@ internal sealed class AppSession : IDisposable
         if (!_disposed) _dispatch(() => { if (!_disposed) action(); });
     }
     internal void Notify() { Revision++; Changed?.Invoke(); }
-    private void OnDashboard(DashboardView view) => Post(() => { Dashboard = view; Notify(); });
+    private void OnDashboard(DashboardView view) => Post(() =>
+    {
+        Dashboard = view;
+        DashboardChanged?.Invoke();
+        Notify();
+    });
+    internal TrayPresentation PreviewTray(DateTimeOffset? now = null)
+    {
+        var states = Dashboard.TrayStates ?? [];
+        return TrayUsage.Create(new()
+        {
+            PollIntervalMinutes = Controller.Settings.PollMinutes,
+            TrayStyle = TrayStyle,
+            TrayMode = TrayMode,
+            Accounts = states.Select(state => state.Account with
+            {
+                ExcludeFromTray = ExcludedTrayAccounts.Contains(state.Account.Key)
+            }).ToArray()
+        }, states, now ?? DateTimeOffset.UtcNow);
+    }
     internal void Initialize() => Run(Controller.InitializeAsync, () =>
     {
         Initialized = true;
@@ -280,7 +300,7 @@ internal sealed class AppSession : IDisposable
     internal void SetError(string message) { Error = message; Notice = null; Notify(); }
     internal void ReportTrayError()
     {
-        const string message = "Windows could not update the tray display. Open Settings or refresh to retry.";
+        const string message = "Windows could not update the tray display. Refresh to retry.";
         if (Error != message) SetError(message);
     }
     internal void OpenLink(string uri, nint owner)

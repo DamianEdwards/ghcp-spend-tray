@@ -16,6 +16,7 @@ internal sealed class TrayHost : ShellWindow
     internal IReadOnlyCollection<TrayIcon> Icons => _icons.Icons;
     internal event Action<string?>? OpenRequested, NotificationClicked;
     internal event Action? SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
+    internal event Action? AppearanceChanged;
 
     internal TrayHost(string? portableDirectory)
     {
@@ -42,7 +43,7 @@ internal sealed class TrayHost : ShellWindow
         return icon.Notify(title, message);
     }
     private int IconSize(TrayIcon? icon) =>
-        Math.Clamp(Win32.GetSystemMetricsForDpi(49, Monitor(icon).Dpi), 16, 256);
+        TrayIconRenderer.SizeForDpi(Monitor(icon).Dpi);
     internal unsafe (PixelRect Anchor, PixelRect Work, uint Dpi) Placement()
     {
         return Monitor(_icons.Find(_activeId) ?? _icons.Primary);
@@ -63,7 +64,7 @@ internal sealed class TrayHost : ShellWindow
     {
         if (message == _taskbarCreated) { CancelSelection(); _icons.Restore(); Update(_presentation); return 0; }
         if (message is Win32.WM_DPICHANGED or 0x1A or 0x7E or 0x31A)
-        { Update(_presentation); return 0; }
+        { Update(_presentation); AppearanceChanged?.Invoke(); return 0; }
         if (message == Win32.WM_POWERBROADCAST && wParam is 7 or 18) { ResumeRequested?.Invoke(); return 1; }
         if (message == Win32.WM_TIMER && wParam == SelectionTimer)
         {

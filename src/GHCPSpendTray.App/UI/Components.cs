@@ -240,6 +240,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                             Session.Notify();
                         }, $"{account.Name} ({account.Host})").AutomationName($"Include {account.Login} on {account.Host} in tray")
                         .AutomationId("TrayAccount-" + account.Key).WithKey(account.Key)).ToArray()),
+            TrayPreview(),
             UI.Copy("! means a partial roll-up; ? means unavailable. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for the percentage; Usage has all inclusion details.").FontSize(12),
             UI.Copy("A neutral icon remains when nothing is selected. Windows controls which icons appear in the notification area or its overflow.").FontSize(12)
         )),
@@ -248,6 +249,28 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             Button("Open data folder", () => Session.OpenLink(Session.Controller.DataDirectory, owner))),
         UI.Copy("Windows manages installation and removal. Install a newer signed package to update; GitHub builds do not check for updates.")
     );
+    private Element TrayPreview()
+    {
+        var preview = Session.PreviewTray();
+        return VStack(8,
+            TextBlock("Live preview").SemiBold(),
+            UI.Copy("Draft choices using current usage. Icons are shown at tray size; apply with Save changes.").FontSize(12),
+            VStack(8, preview.Icons.Select(icon =>
+            {
+                var account = preview.Accounts.FirstOrDefault(a => a.Key == icon.AccountKey);
+                string label = account is null ? "Roll-up" : $"{account.Name} ({account.Host})";
+                return Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
+                    new TrayPreviewElement().Set(image => TrayPreviewImage.Apply(image, icon, preview.Style))
+                        .Width(16).Height(16).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0)
+                        .AutomationId("TrayPreviewIcon-" + (icon.AccountKey ?? "rollup"))
+                        .AutomationName($"{label}: {icon.Details}").ToolTip(icon.Details).Grid(column: 0),
+                    TextBlock($"{label} - {icon.ValueText}" +
+                        (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over allocation)" : ""))
+                        .TextWrapping().FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 1))
+                    .WithKey(icon.AccountKey ?? "rollup");
+            }).ToArray())
+        ).AutomationId("TrayLivePreview");
+    }
     private Element Notifications() => VStack(18,
         UI.Section("Windows notifications", "Alerts apply independently to each account.",
             ToggleSwitch(Session.Notifications, value => { Session.Notifications = value; Session.Notify(); })

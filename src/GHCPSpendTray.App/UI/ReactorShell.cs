@@ -51,7 +51,8 @@ internal sealed class ReactorShell : IDisposable
             if (key is not null) _session.EditAccount(key);
             else ShowFlyout();
         };
-        _session.Changed += () =>
+        _tray.AppearanceChanged += _session.Notify;
+        _session.DashboardChanged += () =>
         {
             try { _tray.Update(_session.Dashboard.Tray ?? TrayPresentation.Unavailable); }
             catch (Exception ex)

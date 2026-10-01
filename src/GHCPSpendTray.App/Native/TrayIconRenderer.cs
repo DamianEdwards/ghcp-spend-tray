@@ -16,6 +16,8 @@ internal sealed class TrayImage : SafeHandleZeroOrMinusOneIsInvalid
 
 internal static class TrayIconRenderer
 {
+    internal static int SizeForDpi(uint dpi) => Math.Clamp(Win32.GetSystemMetricsForDpi(49, dpi), 16, 256);
+
     internal static unsafe TrayPalette SystemPalette()
     {
         var contrast = new Win32.HIGHCONTRAST { cbSize = (uint)sizeof(Win32.HIGHCONTRAST) };
