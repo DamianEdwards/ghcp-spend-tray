@@ -183,7 +183,10 @@ Top-level settings pages have no Back history and leave the input unhandled.
 
 The native UI smoke path checks both visible account Back controls and the
 settings-scoped Alt+Left and GoBack keyboard accelerator registration after
-rerenders and settings-window recreation. Physical input delivery is a separate
+rerenders and settings-window recreation. It also requires hidden accelerator
+placement on the window root: the shortcuts remain active without WinUI's
+automatic Alt+Left tooltip following the pointer across unrelated controls.
+Ordinary control tooltips remain enabled. Physical input delivery is a separate
 manual acceptance check (posting Win32 mouse messages did not generate WinUI
 pointer events in the local smoke environment):
 with focus in a text box, verify Alt+Left and mouse XButton1 perform the same

@@ -156,6 +156,8 @@ internal sealed class ReactorShell : IDisposable
             }, () => new SettingsComponent(_session));
             if (_settings.NativeWindow.Content is UIElement root)
             {
+                // Window-wide shortcuts must not generate a tooltip over every child control.
+                root.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
                 var altLeft = new KeyboardAccelerator
                     { Key = VirtualKey.Left, Modifiers = VirtualKeyModifiers.Menu, ScopeOwner = root };
                 var back = new KeyboardAccelerator { Key = VirtualKey.GoBack, ScopeOwner = root };

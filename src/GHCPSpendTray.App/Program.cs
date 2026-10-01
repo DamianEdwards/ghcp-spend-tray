@@ -315,12 +315,13 @@ internal static class Program
     private static void AssertBackAccelerators(ReactorWindow window)
     {
         if (window.NativeWindow.Content is not UIElement root ||
+            root.KeyboardAcceleratorPlacementMode != Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden ||
             root.KeyboardAccelerators.Count != 2 ||
             !root.KeyboardAccelerators.Any(a => a.Key == Windows.System.VirtualKey.Left &&
                 a.Modifiers == Windows.System.VirtualKeyModifiers.Menu && a.ScopeOwner == root) ||
             !root.KeyboardAccelerators.Any(a => a.Key == Windows.System.VirtualKey.GoBack &&
                 a.Modifiers == Windows.System.VirtualKeyModifiers.None && a.ScopeOwner == root))
-            throw new InvalidOperationException("Settings Back keyboard accelerators are missing, duplicated or incorrectly scoped.");
+            throw new InvalidOperationException("Settings Back accelerators are missing, incorrectly scoped, or exposing a window-wide tooltip.");
     }
     private static nint FlyoutHwnd(ReactorShell shell) =>
         WinRT.Interop.WindowNative.GetWindowHandle((shell.Flyout ??
