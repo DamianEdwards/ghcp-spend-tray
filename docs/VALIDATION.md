@@ -92,3 +92,18 @@ and the exact minimum granted scopes remain unverified. `read:user` is the
 implemented starting scope, not a documented entitlement to
 `/copilot_internal/user`; that endpoint is undocumented and can change.
 Do not supply secrets or unredacted account/financial data for validation.
+
+## Credential Manager write failures
+
+If sign-in fails with Windows error 8 (`ERROR_NOT_ENOUGH_MEMORY`), the user's
+Windows credential store may have reached its capacity even when RAM and disk
+space are available. This is not an OAuth rejection. The app records the failed
+credential operation and native error code in `logs\diagnostics.log`, without
+credential targets, tokens, account identities, or exception messages.
+
+Open **Control Panel > Credential Manager > Windows Credentials** and remove
+only entries you recognize as unused, then retry sign-in. The app does not delete
+other applications' credentials or fall back to plaintext token storage.
+Synthetic application tests cover actionable error-8 guidance, redacted
+diagnostics, unchanged handling of other errors, and preserving configuration
+when the credential write fails.
