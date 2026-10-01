@@ -174,6 +174,16 @@ Markdown without running the SDK setup, build, tests, or packaging. Other
 changes and manual Verify runs perform the full checks; the Release workflow
 also verifies its source before publishing.
 
+Verify runs managed/Native AOT tests and packaging/startup smoke on separate
+Windows runners after change detection. Each job caches only NuGet packages,
+keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
+and build outputs are never cached. Builds and publishes remain sequential
+within each checkout. The final **Verification** job requires both Windows
+jobs to succeed for source changes or manual runs, and permits them to be
+skipped only for Markdown-only changes. Failed change detection or Markdown
+lint, cancelled jobs and unexpected skips fail the gate. Branch protection
+and the release-source check continue to use the same **Verification** name.
+
 1. Merge to `main` and wait for **Verify / Verification** to succeed for the
    exact source commit. For non-Markdown changes, it runs JIT and x64 Native
    AOT tests, publishes both architectures, and builds and validates an unsigned
@@ -348,7 +358,7 @@ listing: review existing listing text before automating an update. Only the
 the five GitHub **What's Changed** titles become the Store release notes;
 review the release body before submission.
 
-The **Verification** CI job exercises both development and Store-shaped packaging,
+The **Verify** workflow exercises both development and Store-shaped packaging,
 using a synthetic Store identity without production credentials or API calls.
 The offline release-selection tests reject drafts, mutable releases, missing or
 duplicate assets, mismatched source/version metadata, and GitHub API failures.

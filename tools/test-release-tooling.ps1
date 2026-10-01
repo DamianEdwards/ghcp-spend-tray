@@ -28,6 +28,40 @@ Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' | ForEach-Object {
     $errors += $parseErrors
 }
 if ($errors.Count) { throw ($errors | Out-String) }
+$gate = Join-Path $PSScriptRoot 'assert-verification.ps1'
+$results = @('success', 'failure', 'cancelled', 'skipped')
+foreach ($runValidation in @('true', 'false', '')) {
+    foreach ($changes in $results) {
+        foreach ($tests in $results) {
+            foreach ($package in $results) {
+                $needs = @{
+                    changes = @{ result = $changes; outputs = @{ run_validation = $runValidation } }
+                    tests = @{ result = $tests }
+                    package = @{ result = $package }
+                } | ConvertTo-Json -Depth 3
+                $expected = $changes -eq 'success' -and (
+                    ($runValidation -eq 'true' -and $tests -eq 'success' -and $package -eq 'success') -or
+                    ($runValidation -eq 'false' -and $tests -eq 'skipped' -and $package -eq 'skipped'))
+                $accepted = $true
+                try { & $gate -NeedsJson $needs | Out-Null }
+                catch { $accepted = $false }
+                if ($accepted -ne $expected) {
+                    throw "Incorrect verification gate: validation=$runValidation changes=$changes tests=$tests package=$package"
+                }
+            }
+        }
+    }
+}
+foreach ($needs in @('invalid', '{}',
+    '{"changes":{"result":"success","outputs":{"run_validation":"true"}}}',
+    '{"changes":{"result":"success","outputs":{"run_validation":"false"}}}',
+    '{"changes":{"result":"success","outputs":{}},"tests":{"result":"success"},"package":{"result":"success"}}')) {
+    $rejected = $false
+    try { & $gate -NeedsJson $needs | Out-Null }
+    catch { $rejected = $true }
+    if (-not $rejected) { throw 'Incomplete verification results were accepted.' }
+}
+Write-Output 'PASS: verification gate rejects failures, cancellations, unexpected skips and missing results.'
 & "$PSScriptRoot\test-store-tooling.ps1"
 & "$PSScriptRoot\test-store-publishing.ps1"
 & "$PSScriptRoot\test-store-submission-status.ps1"

@@ -14,10 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verification
-    runs-on: windows-2025
-    timeout-minutes: 40
+  changes:
+    name: Change detection and Markdown
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run_validation: ${{ steps.changes.outputs.run_validation }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -53,21 +55,56 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: "**/*.{md,markdown}"
+
+  tests:
+    name: Managed and Native AOT tests
+    needs: changes
+    if: needs.changes.outputs.run_validation == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        if: steps.changes.outputs.run_validation == 'true'
         with:
           global-json-file: global.json
+      - name: Cache test NuGet packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~\.nuget\packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-tests-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-tests-
       - name: Verify managed and Native AOT tests
-        if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: .\tools\verify.ps1 -NativeTests
+
+  package:
+    name: Packaging and startup smoke
+    needs: changes
+    if: needs.changes.outputs.run_validation == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Cache packaging NuGet packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~\.nuget\packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-package-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-package-
       - name: Build and validate both MSIX architectures
-        if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: .\tools\package.ps1
       - name: Launch packaged x64 smoke scenarios
         id: package_smoke
-        if: steps.changes.outputs.run_validation == 'true'
         timeout-minutes: 5
         shell: powershell
         run: |
@@ -98,15 +135,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Retain unsigned development bundle
-        if: steps.changes.outputs.run_validation == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: unsigned-development-msix
           path: artifacts/release/*.msixbundle
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
       - name: Exercise Store packaging without credentials or submission
-        if: steps.changes.outputs.run_validation == 'true'
         shell: pwsh
         run: |
           $publisher = 'CN=11111111-1111-1111-1111-111111111111'
@@ -115,3 +151,19 @@ jobs:
           .\tools\stage-store-package.ps1 -Bundle .\artifacts\release\GHCPSpendTray-0.1.0.msixbundle `
             -Version 0.1.0 -SourceCommit $env:GITHUB_SHA -StoreId 000000000000 `
             -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
+
+  verify:
+    name: Verification
+    needs: [changes, tests, package]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - name: Require all applicable checks
+        shell: pwsh
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: ./tools/assert-verification.ps1 -NeedsJson $env:NEEDS_JSON
