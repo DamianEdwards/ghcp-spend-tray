@@ -3,10 +3,12 @@
 ## Streamlined account sign-in (October 1, 2026)
 
 `verify.ps1 -NativeTests` passed with a warning-free Release build, 155 core
-tests, 14 platform tests and 776 application assertions under managed and
+tests, 14 platform tests and 785 application assertions under managed and
 executed x64 Native AOT. x64/ARM64 Native AOT publishing and package resource
 validation passed. The portable UI smoke retains coverage for the account
 entry points, Change host editor, Back controls and existing usage/tray flows.
+This includes the latest `main` Credential Manager capacity/error diagnostics;
+its regression cases use the automatic sign-in callback contract.
 
 Direct native UI interaction against the real controller with synthetic HTTP
 and in-memory credentials verified that a single Add account click generates

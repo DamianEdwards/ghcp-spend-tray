@@ -140,7 +140,7 @@ try
     credentials.WriteError = new CredentialVaultException(8, "write", "synthetic-secret-must-not-be-logged");
     try
     {
-        await app.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default);
+        await app.AddAsync("github.com", false, null, _ => { }, () => { }, default);
         throw new Exception("Expected credential store exhaustion to fail sign-in.");
     }
     catch (AppOperationException ex)
@@ -157,7 +157,7 @@ try
     credentials.WriteError = new CredentialVaultException(5, "write", "synthetic-secret");
     try
     {
-        await app.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default);
+        await app.AddAsync("github.com", false, null, _ => { }, () => { }, default);
         throw new Exception("Expected credential permission failure.");
     }
     catch (AppOperationException ex)
