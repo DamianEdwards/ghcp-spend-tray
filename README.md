@@ -69,6 +69,13 @@ Use **General > Launch at login** to opt in; macOS may require approval in
 **System Settings > General > Login Items**. Notifications also require macOS
 permission and can be suppressed by Focus.
 
+**Notifications > macOS Permission** shows whether notifications are allowed.
+Use **Enable Notifications** to request access at a time you choose. If access
+was previously denied, **Open Notification Settings** takes you to the macOS
+controls; enable **Allow Notifications** there and return to the app. The status
+refreshes automatically. Quiet delivery is identified separately from banners.
+Background refreshes never open permission prompts or System Settings.
+
 In **General > Menu Bar**, choose a pie or percentage, a single weighted roll-up
 or one icon per selected account, and the accounts to include. The live preview
 uses the shared allocation rules; only **Save** applies it to the menu bar.

@@ -140,7 +140,7 @@ enum ModelTests {
 }
 
 @MainActor
-private final class FixtureBridge: ApplicationBridge {
+final class FixtureBridge: ApplicationBridge {
     var requests: [[String: Any]] = []
     var events: [BridgeEvent] = []
     var lastRequest: [String: Any] { requests.last! }

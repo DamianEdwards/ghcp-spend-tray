@@ -92,6 +92,11 @@ struct FlyoutView: View {
             if let tray = model.dashboard?.tray {
                 Text(tray.rollUp.details).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
+            if !model.demo && model.settings?.notifications == true,
+               let permission = model.notificationPermission, !permission.canSend {
+                Button("Set Up Notifications...") { model.openSettings(.notifications) }
+                    .font(.caption)
+            }
             StatusMessage(model: model)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -327,6 +332,23 @@ struct PreferencesView: View {
     var body: some View {
         Form {
             if notifications {
+                Section("macOS Permission") {
+                    if model.demo {
+                        Text("Notification permissions and delivery are disabled in demonstration mode.")
+                            .foregroundStyle(.secondary)
+                    } else if let permission = model.notificationPermission {
+                        Label(permission.title, systemImage: permission.canSend ? "bell.badge" : "bell.slash")
+                            .font(.headline)
+                        Text(permission.explanation).font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button(permission.actionTitle) { Task { await model.configureNotifications() } }
+                                .disabled(model.notificationBusy)
+                            if model.notificationBusy { ProgressView().controlSize(.small) }
+                        }
+                    } else {
+                        ProgressView("Checking notification permission...").controlSize(.small)
+                    }
+                }
                 Section("Notifications") {
                     Toggle("Enable consumption alerts", isOn: $enabled)
                     TextField("Percentage thresholds", text: $thresholds)
@@ -334,7 +356,9 @@ struct PreferencesView: View {
                     TextField("USD increment", text: $increment, prompt: Text("Disabled"))
                     Text("For example, 50 alerts at $50, $100, and so on. Per-account preferences can override or disable these alerts.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button("Send Test Notification") { model.testNotification() }
+                    Button("Send Test Notification") { Task { await model.testNotification() } }
+                        .disabled(model.demo || model.notificationBusy || model.notificationPermission == nil ||
+                                  model.notificationPermission == .denied || model.notificationPermission == .unavailable)
                     Text("macOS permission and Focus settings determine whether notifications appear.").font(.caption).foregroundStyle(.secondary)
                 }
             } else {
@@ -390,6 +414,10 @@ struct PreferencesView: View {
         .onChange(of: trayMode) { _, _ in preview() }
         .onChange(of: excludedAccounts) { _, _ in preview() }
         .onReceive(model.$dashboard) { _ in preview() }
+        .task(id: notifications) { if notifications { await model.refreshNotificationPermission() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if notifications { Task { await model.refreshNotificationPermission() } }
+        }
     }
 
     private func load() {

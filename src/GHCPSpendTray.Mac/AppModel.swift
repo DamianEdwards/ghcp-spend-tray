@@ -52,6 +52,8 @@ final class AppModel: ObservableObject {
     @Published var reconnectClientId: String?
     @Published var page: SettingsPage = .usage
     @Published var selectedAccount: String?
+    @Published var notificationPermission: NotificationPermission?
+    @Published var notificationBusy = false
     let directory: URL
     let demo: Bool
     var showSettings: (() -> Void)?
@@ -62,15 +64,19 @@ final class AppModel: ObservableObject {
     private var cancellingSignIn = false
     private var closed = false
     private let bridge: any ApplicationBridge
+    private let notifications: any NotificationService
+    private var permissionRevision = 0
     var copyToClipboard: (String) -> Bool = { value in
         NSPasteboard.general.clearContents()
         return NSPasteboard.general.setString(value, forType: .string)
     }
 
-    init(directory: URL, demo: Bool, bridge: any ApplicationBridge = NativeApplicationBridge()) {
+    init(directory: URL, demo: Bool, bridge: any ApplicationBridge = NativeApplicationBridge(),
+         notifications: any NotificationService = NativeNotifications()) {
         self.directory = directory
         self.demo = demo
         self.bridge = bridge
+        self.notifications = notifications
     }
 
     func start(empty: Bool) {
@@ -79,6 +85,7 @@ final class AppModel: ObservableObject {
         }
         perform("initialize", fields: ["directory": directory.path, "demo": demo, "empty": empty]) { [weak self] event in
             self?.initialized = event.error == nil
+            Task { await self?.refreshNotificationPermission() }
         }
     }
 
@@ -146,7 +153,14 @@ final class AppModel: ObservableObject {
                         var reply: [String: Any]
                         do {
                             guard !self.demo else { throw AppError.message("Platform side effects are disabled in demonstration mode.") }
-                            reply = try await Platform.handle(event)
+                            if event.operation == "notification" {
+                                let accepted = try await self.notifications.send(
+                                    title: event.title ?? "GHCPSpendTray", message: event.message ?? "", key: event.key)
+                                reply = ["accepted": accepted]
+                                await self.refreshNotificationPermission()
+                            } else {
+                                reply = try await Platform.handle(event)
+                            }
                         } catch {
                             reply = ["error": (error as? AppError)?.errorDescription ?? "The macOS operation failed. Check system permissions."]
                         }
@@ -278,14 +292,60 @@ final class AppModel: ObservableObject {
         if !NSWorkspace.shared.open(directory) { error = "Could not open the local data folder." }
     }
 
-    func testNotification() {
-        guard !demo else { error = "Notifications are disabled in demonstration mode."; return }
-        Task {
-            do {
-                if try await Platform.notify(title: "GHCPSpendTray test", message: "Consumption alerts are enabled.", key: nil) {
-                    notice = "Submitted to macOS. Focus settings may suppress display."
-                } else { error = "Notifications are not allowed. Enable them in System Settings > Notifications > GHCPSpendTray." }
-            } catch { self.error = "macOS rejected the test notification. Check notification permissions." }
+    func refreshNotificationPermission() async {
+        guard !demo && !closed && !notificationBusy else { return }
+        permissionRevision += 1
+        let revision = permissionRevision
+        let permission = await notifications.status()
+        guard !closed && revision == permissionRevision else { return }
+        notificationPermission = permission
+    }
+
+    func configureNotifications() async {
+        guard !demo && !closed && !notificationBusy else { return }
+        notificationBusy = true
+        permissionRevision += 1
+        error = nil
+        notice = nil
+        defer { notificationBusy = false }
+        do {
+            let permission = await notifications.status()
+            notificationPermission = permission
+            if permission == .notDetermined {
+                try await notifications.requestAuthorization()
+                notificationPermission = await notifications.status()
+            } else {
+                try notifications.openSettings()
+            }
+        } catch {
+            self.error = (error as? AppError)?.errorDescription ?? "macOS could not request notification permission. Try again or open Notification Settings."
+        }
+    }
+
+    func testNotification() async {
+        guard !demo && !closed && !notificationBusy else { return }
+        notificationBusy = true
+        permissionRevision += 1
+        error = nil
+        notice = nil
+        defer { notificationBusy = false }
+        do {
+            var permission = await notifications.status()
+            if permission == .notDetermined {
+                try await notifications.requestAuthorization()
+                permission = await notifications.status()
+            }
+            notificationPermission = permission
+            guard permission.canSend else { return }
+            if try await notifications.send(title: "GHCPSpendTray test", message: "Your test notification arrived.", key: nil) {
+                notice = permission == .quiet
+                    ? "Sent to Notification Center. Enable banners in Notification Settings to see pop-ups."
+                    : "Submitted to macOS. Focus settings may suppress display."
+            } else {
+                notificationPermission = await notifications.status()
+            }
+        } catch {
+            self.error = "macOS rejected the test notification. Try again or open Notification Settings."
         }
     }
 

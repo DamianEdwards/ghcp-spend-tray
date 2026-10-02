@@ -1,7 +1,6 @@
 import AppKit
 import Security
 import ServiceManagement
-import UserNotifications
 
 enum KeychainStore {
     static let service = "com.damianedwards.GHCPSpendTray"
@@ -77,46 +76,6 @@ enum Platform {
         ]
     }
 
-    static func notify(title: String, message: String, key: String?) async throws -> Bool {
-        let center = UNUserNotificationCenter.current()
-        var authorization = await authorizationStatus(center)
-        if authorization == .notDetermined {
-            let allowed: Bool = try await withCheckedThrowingContinuation { continuation in
-                center.requestAuthorization(options: [.alert, .sound]) { allowed, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume(returning: allowed) }
-                }
-            }
-            if !allowed { return false }
-            authorization = await authorizationStatus(center)
-        }
-        guard authorization == .authorized || authorization == .provisional else {
-            return false
-        }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = message
-        content.sound = .default
-        if let key { content.userInfo = ["accountKey": key] }
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            center.add(request) { error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume() }
-            }
-        }
-        return true
-    }
-
-    private static func authorizationStatus(_ center: UNUserNotificationCenter) async -> UNAuthorizationStatus {
-        // Older SDKs do not make UNNotificationSettings Sendable; transfer only the enum.
-        await withCheckedContinuation { continuation in
-            center.getNotificationSettings { settings in
-                continuation.resume(returning: settings.authorizationStatus)
-            }
-        }
-    }
-
     static func handle(_ event: BridgeEvent) async throws -> [String: Any] {
         switch event.operation {
         case "startup.read":
@@ -142,13 +101,6 @@ enum Platform {
             default: try KeychainStore.delete(target)
             }
             return [:]
-        case "notification":
-            do {
-                let accepted = try await notify(title: event.title ?? "GHCPSpendTray", message: event.message ?? "", key: event.key)
-                return ["accepted": accepted]
-            } catch {
-                throw AppError.message("macOS rejected the notification. Check System Settings > Notifications > GHCPSpendTray.")
-            }
         default:
             throw AppError.message("Unknown macOS platform request.")
         }
