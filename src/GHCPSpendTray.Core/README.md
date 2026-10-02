@@ -38,9 +38,12 @@ the public metadata for platform Credential Manager payloads.
 
 Onboarding is explicit: resolve host; select `GitHubOAuth.ResolveClientId(host, account.OAuthClientId)`;
 `BeginAsync`; show user code and validated verification URL; `PollAsync`;
-`GetIdentityAsync`; `FetchWithTokenAsync`; confirm immutable identity; save credentials
+`GetIdentityAsync`; `FetchWithTokenAsync`; verify immutable identity; save credentials
 and settings; refresh. Account keys include canonical host and immutable numeric ID,
 allowing multiple users on one host without double counting.
+The app starts github.com device authorization on Add account, displays and copies
+the code, and saves automatically after browser authorization. It does not request
+a second identity confirmation. Changing the host cancels the current attempt.
 For reconnect, await `PauseAccountAsync(key)` before replacing the saved credential.
 It cancels and drains in-flight work without changing persistent settings or credentials.
 Then call `UpdateSettings` with the account still present to resume monitoring.

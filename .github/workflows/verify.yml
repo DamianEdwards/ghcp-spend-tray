@@ -16,7 +16,8 @@ concurrency:
 jobs:
   changes:
     name: Changed platforms
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       windows: ${{ steps.changes.outputs.windows }}
       macos: ${{ steps.changes.outputs.macos }}
@@ -40,7 +41,7 @@ jobs:
     name: Markdown
     needs: changes
     if: needs.changes.outputs.markdown == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -49,8 +50,8 @@ jobs:
         with:
           globs: "**/*.{md,markdown}"
 
-  windows:
-    name: Windows
+  tests:
+    name: Windows managed and Native AOT tests
     needs: changes
     if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
@@ -62,12 +63,71 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+      - name: Cache test NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~\.nuget\packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-tests-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-tests-
       - name: Verify managed and Native AOT tests
         shell: pwsh
         run: .\tools\verify.ps1 -NativeTests
+
+  package:
+    name: Windows packaging and startup smoke
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Cache packaging NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~\.nuget\packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-package-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-package-
       - name: Build and validate both MSIX architectures
         shell: pwsh
         run: .\tools\package.ps1
+      - name: Launch packaged x64 smoke scenarios
+        id: package_smoke
+        timeout-minutes: 5
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $logDirectory = Join-Path $env:RUNNER_TEMP 'GHCPSpendTray-package-smoke'
+          New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+          Start-Transcript -Path (Join-Path $logDirectory 'smoke.log')
+          try {
+              # Developer Mode is enabled only on this disposable hosted runner.
+              $unlock = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
+              New-Item -Path $unlock -Force | Out-Null
+              New-ItemProperty -Path $unlock -Name AllowDevelopmentWithoutDevLicense `
+                -PropertyType DWord -Value 1 -Force | Out-Null
+              $makeappx = .\tools\get-windows-sdk-tool.ps1 -Name makeappx.exe
+              $layout = '.\artifacts\package-smoke-layout'
+              & $makeappx unpack /p .\artifacts\msix\packages\GHCPSpendTray-0.1.0-x64.msix `
+                /d $layout /o | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'Cannot extract packaged smoke-test payload.' }
+              .\tools\smoke-test-package.ps1 -Layout $layout
+          }
+          finally { Stop-Transcript }
+      - name: Retain packaged smoke diagnostics
+        if: ${{ always() && steps.package_smoke.outcome != 'skipped' && steps.package_smoke.outcome != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-smoke-diagnostics
+          path: ${{ runner.temp }}/GHCPSpendTray-package-smoke/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Retain unsigned development bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -75,6 +135,7 @@ jobs:
           path: artifacts/release/*.msixbundle
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
       - name: Exercise Store packaging without credentials or submission
         shell: pwsh
         run: |
@@ -102,6 +163,13 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+      - name: Cache macOS NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-macos-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-macos-
       - name: Verify shared engine, native bridge, universal app and synthetic UI
         run: bash tools/macos/verify.sh
       - name: Archive development app
@@ -118,24 +186,16 @@ jobs:
 
   verify:
     name: Verification
-    needs: [changes, markdown, windows, macos]
+    needs: [changes, markdown, tests, package, macos]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - name: Require all relevant checks
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - name: Require all applicable checks
+        shell: pwsh
         env:
-          CHANGES: ${{ needs.changes.result }}
-          WINDOWS_NEEDED: ${{ needs.changes.outputs.windows }}
-          MACOS_NEEDED: ${{ needs.changes.outputs.macos }}
-          MARKDOWN_NEEDED: ${{ needs.changes.outputs.markdown }}
-          WINDOWS: ${{ needs.windows.result }}
-          MACOS: ${{ needs.macos.result }}
-          MARKDOWN: ${{ needs.markdown.result }}
-        run: |
-          python3 - <<'PY'
-          import os
-          assert os.environ["CHANGES"] == "success", "Change detection failed"
-          for platform in ("WINDOWS", "MACOS", "MARKDOWN"):
-              if os.environ[platform + "_NEEDED"] == "true":
-                  assert os.environ[platform] == "success", platform + " checks failed"
-          PY
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: ./tools/assert-verification.ps1 -NeedsJson $env:NEEDS_JSON

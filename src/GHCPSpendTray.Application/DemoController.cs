@@ -1,3 +1,5 @@
+using GHCPSpendTray.Core;
+
 namespace GHCPSpendTray.Shared;
 
 public sealed class DemoController(string directory, bool empty = false) : IApplicationController
@@ -12,10 +14,11 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
         var now = DateTimeOffset.UtcNow;
         if (empty)
         {
-            Changed?.Invoke(new("No accounts", "Synthetic demonstration only.", "GHCPSpendTray DEMO | No accounts", []));
+            Changed?.Invoke(new("No accounts", "Synthetic demonstration only.", "GHCPSpendTray DEMO | No accounts", [],
+                Tray: TrayUsage.Create(new() { TrayStyle = Settings.TrayStyle, TrayMode = Settings.TrayMode }, [], now)));
             return Task.CompletedTask;
         }
-        Changed?.Invoke(new("DEMO - MTD consumption: $42.75 | 2/2 accounts",
+        var dashboard = new DashboardView("DEMO - MTD consumption: $42.75 | 2/2 accounts",
             "Synthetic demonstration only. No network, real account data, installation, or startup changes.",
             "GHCPSpendTray DEMO | MTD $42.75 | 2 accounts", [
             new("github.com:1", "Personal (demo)", "demo-user", "github.com",
@@ -24,7 +27,28 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
             new("example.ghe.com:2", "Work (demo)", "demo-work", "example.ghe.com",
                 new(1650m, 16.5m, 100m, 16.5m, false, now, null, now.AddHours(1), "synthetic", true, null),
                 16.5m, 16.5m, 100m, "Fresh", now)
-        ], 42.75m, true));
+        ], 42.75m, true);
+        var accounts = dashboard.Accounts.Select((a, i) => new Account
+        {
+            Host = a.Host, UserId = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Login = a.Login, DisplayName = a.Name,
+            ExcludeFromTray = Settings.ExcludedTrayAccounts?.Contains(a.Key, StringComparer.Ordinal) == true
+        }).ToArray();
+        var states = accounts.Select((a, i) => new AccountState
+        {
+            Account = a, Status = AccountStatus.Fresh, Snapshot = new()
+            {
+                AccountKey = a.Key, FetchedAtUtc = now, PeriodId = BillingPeriods.Resolve(now, null),
+                CreditsUsed = dashboard.Accounts[i].Details.CreditsUsed!.Value,
+                Entitlement = dashboard.Accounts[i].AllocationUsd * 100,
+                ConsumptionUsd = dashboard.Accounts[i].ConsumptionUsd!.Value,
+                AllocationUsd = dashboard.Accounts[i].AllocationUsd, PercentConsumed = dashboard.Accounts[i].Percent
+            }
+        }).ToArray();
+        Changed?.Invoke(dashboard with { Tray = TrayUsage.Create(new()
+        {
+            Accounts = accounts, TrayStyle = Settings.TrayStyle, TrayMode = Settings.TrayMode
+        }, states, now), TrayStates = states });
         return Task.CompletedTask;
     }
     public Task RefreshAccountAsync(string accountKey) => RefreshAsync(accountKey);
@@ -37,7 +61,7 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key) => ("Demonstration", "", null);
     public Task RemoveAsync(string key) => throw new AppOperationException("Synthetic accounts cannot be removed in demonstration mode.");
     public Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
-        Action<DevicePrompt> prompt, Func<PendingIdentity, Task<bool>> confirm, CancellationToken cancellationToken,
+        Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null) =>
         throw new AppOperationException("Authentication is disabled in demonstration mode. Start normal portable mode to sign in.");
     public string? AccountClientId(string key) => throw new AppOperationException("Authentication is disabled in demonstration mode.");

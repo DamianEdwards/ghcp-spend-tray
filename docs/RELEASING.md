@@ -133,8 +133,46 @@ architecture packages. Signature verification uses Windows SDK SignTool.
 
 The `windows-2025` runner needs Visual Studio x64/ARM64 C++ tools and a Windows SDK
 22621 or newer. `actions/setup-dotnet` installs the SDK pinned in `global.json`.
-The same prerequisites apply locally. Python is only needed to regenerate
-checked-in artwork, not for CI builds.
+The same prerequisites apply locally. Node.js/npm is only needed to regenerate
+checked-in artwork, not for .NET builds or packaging.
+
+### Packaged shell icons
+
+The approved connected-dollar SVG masters in `src\GHCPSpendTray.App\Assets`
+are the source for the application ICO, in-app logo, badge, Store logos and
+the `Square44x44Logo.targetsize-*` PNGs. Regenerate or check them with the
+pinned, development-only renderer:
+
+```powershell
+npm --prefix .\tools ci --no-audit --no-fund
+npm --prefix .\tools run generate
+npm --prefix .\tools run check
+```
+
+The small optical master is used at 16-24 pixels; larger sizes use the regular
+master. ICO frames embed the same PNG bytes as their shell counterparts.
+Keep the default, `altform-unplated`,
+and `altform-lightunplated` variants at all 14 sizes, even though both themes
+use identical artwork. Transparent source pixels and the manifest's
+`BackgroundColor="transparent"` alone do not prevent Windows from adding an
+accent-color plate; the shell needs the qualified unplated candidates.
+See [Windows app icon construction](https://learn.microsoft.com/windows/apps/design/iconography/app-icon-construction).
+
+The app project copies these assets into each published payload.
+`package.ps1` uses Windows SDK MakePri and `packaging\priconfig.xml` to generate
+`resources.pri` after assigning the final package identity. This primary index
+maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates **and merges
+the generated `GHCPSpendTray.pri`**, including WinUI/Reactor XAML and localized
+resources, into the package's resource map. The original `GHCPSpendTray.pri`
+and `Reactor.pri` must also remain in the package. An icon-only `resources.pri`
+shadows runtime resource resolution and crashes packaged WinUI at startup,
+even when all the separate PRI/XBF files are present.
+
+`test-package.ps1` extracts and checks the actual icon PNGs, primary PRI and
+startup XBF files from both architecture packages. Its startup-resource checks
+run for development, signed GitHub and Store bundles. After changing resource
+generation, also run the isolated packaged smoke test documented in
+`docs/VALIDATION.md`: portable activation does not exercise this lookup path.
 
 ## Release a Windows version
 
@@ -148,10 +186,27 @@ succeed and fails if change detection fails. Release workflows check that gate
 on the pinned main commit and rerun their own platform's verification before
 publishing, even when its previous main checks were legitimately skipped.
 
+Verify runs managed/Native AOT tests and packaging/startup smoke on separate
+Windows runners after change detection. Each job caches only NuGet packages,
+keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
+and build outputs are never cached. Builds and publishes remain sequential
+within each checkout. Mac runners also cache NuGet packages by architecture.
+The final **Verification** job requires both Windows jobs for Windows-relevant
+changes, both Mac runners for Mac-relevant changes, and Markdown lint when
+applicable. Every unneeded job must be skipped; missing or invalid routing
+decisions fail closed. Failed change detection or Markdown
+lint, cancelled jobs and unexpected skips fail the gate. Branch protection
+and the release-source check continue to use the same **Verification** name.
+
 1. Merge to `main` and wait for **Verify / Verification** to succeed for the
    exact source commit. For Windows-relevant changes, it runs JIT and x64 Native
    AOT tests, publishes both architectures, and builds and validates an unsigned
-   development bundle.
+   development bundle. It then extracts the built x64 MSIX, registers the
+   isolated development package, and runs both populated and empty synthetic
+   packaged UI smoke scenarios. Crashes, missing results, nonzero exit codes
+   and timeouts fail verification; the registration is removed afterward.
+   Developer Mode is enabled only on the disposable hosted runner, and the
+   `packaged-smoke-diagnostics` artifact retains the transcript.
 2. Run **Actions > Release Windows > Run workflow** from `main`. Supply an increasing
    three-part version, such as `0.2.0`, and select whether it is a prerelease.
    Every release, including previews, needs a higher numeric package version;
@@ -321,7 +376,7 @@ listing: review existing listing text before automating an update. Only the
 the five GitHub **What's Changed** titles become the Store release notes;
 review the release body before submission.
 
-The **Verification** CI job exercises both development and Store-shaped packaging,
+The **Verify** workflow exercises both development and Store-shaped packaging,
 using a synthetic Store identity without production credentials or API calls.
 The offline release-selection tests reject drafts, mutable releases, missing or
 duplicate assets, mismatched source/version metadata, and GitHub API failures.
@@ -342,7 +397,8 @@ open artifacts/macos/GHCPSpendTray.app
 
 The build sequentially publishes the C# Native AOT shared library for
 `osx-arm64` and `osx-x64`, compiles each SwiftUI frontend slice, and creates a
-universal `.app` with `lipo`. Both binaries and their runtime are bundled;
+universal `.app` with `lipo`. Its ICNS uses the shared dollar artwork and the
+optically tuned small PNGs, not a separate Mac logo. Both binaries and their runtime are bundled;
 users need neither .NET nor Rosetta on their native architecture. macOS 14 is
 the minimum deployment target. Keychain, notifications, and login-item calls
 are implemented natively in Swift; the shared C# application controller handles

@@ -3,7 +3,8 @@ import Security
 
 @main
 enum PlatformTests {
-    static func main() throws {
+    @MainActor static func main() throws {
+        try ModelTests.run()
         func check(_ condition: Bool, _ message: String) throws {
             if !condition { throw AppError.message(message) }
         }

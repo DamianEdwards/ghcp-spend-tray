@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Reflection;
+using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
+using Microsoft.UI.Reactor.Layout;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using static Microsoft.UI.Reactor.Factories;
@@ -19,9 +21,11 @@ internal static class UI
     internal static Element Logo(double size) => Image(Path.Combine(AppContext.BaseDirectory, "Assets", "ghcpspendtray-logo.png"))
         .Width(size).Height(size).AutomationName("GHCPSpendTray");
     internal static Element AccountPicture(AccountView account, double size) =>
-        (PersonPicture().DisplayName(account.Login) with { ProfilePicture = account.AvatarUrl })
-            .Width(size).Height(size).AutomationName($"Account {account.Login}")
-            .AutomationId("AccountAvatar-" + account.Key);
+        AccountPicture(account.Login, account.AvatarUrl, account.Key, size);
+    internal static Element AccountPicture(string login, string? avatarPath, string key, double size) =>
+        (PersonPicture().DisplayName(login) with { ProfilePicture = avatarPath })
+            .Width(size).Height(size).AutomationName($"Account {login}")
+            .AutomationId("AccountAvatar-" + key);
     internal static ButtonElement Glyph(string glyph, string label, Action action) =>
         Button(Icon(FontIcon(glyph, "Segoe Fluent Icons", 18)), action)
             .Width(40).Height(40).Padding(0).AutomationName(label).ToolTip(label);
@@ -31,7 +35,42 @@ internal static class UI
             control.Grid(column: 1).VAlign(VerticalAlignment.Center)));
     internal static Element? Feedback(AppSession state, bool showNotice = true) => state.Error is { } error
         ? InfoBar("Unable to complete", error).Error().IsClosable(false)
-        : showNotice && state.Notice is { } notice ? InfoBar("", notice).Informational().IsClosable(false) : null;
+        : showNotice && state.Notice is { } notice
+            ? state.NoticeIsSuccess
+                ? InfoBar("Complete!", notice).Success().IsClosable(false).AutomationId("AccountConnectionComplete")
+                : InfoBar("", notice).Informational().IsClosable(false)
+            : null;
+    internal static Element DeviceSignIn(AppSession state, DevicePrompt device, nint owner)
+    {
+        int remaining = Math.Max(0, (int)(device.Expires - DateTimeOffset.UtcNow).TotalSeconds);
+        return Card(VStack(16,
+            FlexRow(
+                TextBlock($"Signing in to {device.VerificationUri.Host}").FontSize(16).SemiBold()
+                    .TextWrapping().AutomationId("ActiveSignInHost").Flex(shrink: 1),
+                state.ReconnectKey is null
+                    ? Button("Change host", state.ChangeHost).AutomationId("ChangeSignInHost").Flex(shrink: 0)
+                    : null) with
+            {
+                Wrap = FlexWrap.Wrap, ColumnGap = 12, RowGap = 8, AlignItems = FlexAlign.Center
+            },
+            TextBlock("Enter this code in your browser").FontSize(20).SemiBold().TextWrapping(),
+            TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled()
+                .AutomationName("Device authorization code").AutomationId("DeviceCode"),
+            state.ClipboardError is { } error
+                ? InfoBar("Copy the code", error).Warning().IsClosable(false).AutomationId("CodeCopyFeedback")
+                : state.CodeCopied
+                    ? InfoBar("", "Code copied to clipboard.").Success().IsClosable(false).AutomationId("CodeCopyFeedback")
+                    : null,
+            FlexRow(
+                Button("Open browser", () => state.OpenSignInBrowser(owner))
+                    .AccentButton().AutomationId("OpenSignInBrowser").Flex(shrink: 0),
+                Button("Copy code", state.CopyCode).AutomationId("CopySignInCode").Flex(shrink: 0)) with
+            {
+                Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8, AlignItems = FlexAlign.FlexStart
+            },
+            Copy($"Waiting for authorization. Code expires in {remaining} seconds.").FontSize(12)
+        )).AutomationId("DeviceSignIn");
+    }
     internal static string? AccountWarning(AccountView account)
     {
         if (account.Freshness == "Fresh") return account.Details.Message;
@@ -170,26 +209,35 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     private Element Usage()
     {
         var model = Session.Dashboard;
+        if (!Session.Initialized)
+            return VStack(16,
+                Session.Error is null
+                    ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Loading your accounts..."))
+                    : Button("Try loading again", Session.Initialize).HAlign(HorizontalAlignment.Left)
+            ).AutomationId("UsagePage");
+        if (model.Accounts.Count == 0)
+            return VStack(16,
+                TextBlock("Add an account to see your usage").FontSize(22).SemiBold().TextWrapping()
+                    .AutomationId("UsageEmptyMessage"),
+                UI.Copy("Connect your GitHub account to start tracking Copilot consumption."),
+                Button(HStack(8, Icon("Add"), TextBlock("Add account")), Session.AddAccount)
+                    .AccentButton().AutomationName("Add account").AutomationId("UsageAddAccount")
+                    .HAlign(HorizontalAlignment.Left)
+            ).Padding(0, 16).AutomationId("UsagePage");
         return VStack(18,
             Card(VStack(10,
                 UI.Copy("This month's consumption"),
                 TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId("UsageTotal"),
-                UI.Copy(model.Accounts.Count == 0 ? "No current consumption to display." :
-                    model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
+                UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
                     model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable"),
                 UI.Copy(model.Status).FontSize(12),
+                UI.Copy((model.Tray ?? TrayPresentation.Unavailable).RollUp.Details)
+                    .AutomationId("TrayUsageDetails"),
                 UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12),
                 Button(Session.Busy ? "Refreshing..." : "Refresh consumption", () => Session.Refresh())
                     .AutomationName("Refresh consumption").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Left)
                     .IsEnabled(Session.Initialized && !Session.Busy))),
-            !Session.Initialized
-                ? Session.Error is null
-                    ? UI.Copy("Loading your accounts...")
-                    : Button("Try loading again", Session.Initialize).HAlign(HorizontalAlignment.Left)
-                : model.Accounts.Count == 0
-                    ? Button("Add account", Session.AddAccount).AutomationId("UsageAddAccount")
-                        .HAlign(HorizontalAlignment.Left)
-                    : VStack(16, model.Accounts.Select(UsageAccount).ToArray())
+            VStack(16, model.Accounts.Select(UsageAccount).ToArray())
         ).AutomationId("UsagePage");
     }
     private Element UsageAccount(AccountView account) => Card(VStack(12,
@@ -215,10 +263,60 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             UI.Copy("Check each account every 5 to 1440 minutes. The default is one hour."),
             TextBox(Session.PollMinutes, value => Session.PollMinutes = value).Width(180)
                 .HAlign(HorizontalAlignment.Left).AutomationName("Refresh interval in minutes"))),
-        HStack(10, Button("Save changes", Session.SaveGlobal).IsEnabled(Session.Initialized && !Session.Busy),
+        Card(VStack(12,
+            TextBlock("System tray").SemiBold(),
+            UI.Copy("Show fresh allocation usage, independently of the dollar totals. New accounts are included by default."),
+            TextBlock("Icon style"),
+            ComboBox(["Pie chart", "Percentage number"], (int)Session.TrayStyle,
+                index => { if (index >= 0) { Session.TrayStyle = (TrayIconStyle)index; Session.Notify(); } })
+                .AutomationName("Tray icon style").AutomationId("TrayStyle"),
+            TextBlock("Icons to show"),
+            ComboBox(["One roll-up icon", "One icon per selected account"], (int)Session.TrayMode,
+                index => { if (index >= 0) { Session.TrayMode = (TrayDisplayMode)index; Session.Notify(); } })
+                .AutomationName("Tray display mode").AutomationId("TrayMode"),
+            TextBlock("Included accounts"),
+            Session.Dashboard.Accounts.Count == 0 ? UI.Copy("Connect an account to show its usage.") :
+                VStack(8, Session.Dashboard.Accounts.Select(account =>
+                    CheckBox(!Session.ExcludedTrayAccounts.Contains(account.Key),
+                        value =>
+                        {
+                            if (value == true) Session.ExcludedTrayAccounts.Remove(account.Key);
+                            else Session.ExcludedTrayAccounts.Add(account.Key);
+                            Session.Notify();
+                        }, $"{account.Name} ({account.Host})").AutomationName($"Include {account.Login} on {account.Host} in tray")
+                        .AutomationId("TrayAccount-" + account.Key).WithKey(account.Key)).ToArray()),
+            TrayPreview(),
+            UI.Copy("! means a partial roll-up; ? means unavailable. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for the percentage; Usage has all inclusion details.").FontSize(12),
+            UI.Copy("A neutral icon remains when nothing is selected. Windows controls which icons appear in the notification area or its overflow.").FontSize(12)
+        )),
+        HStack(10, Button("Save changes", Session.SaveGlobal).AutomationId("SaveGeneralSettings")
+                .IsEnabled(Session.Initialized && !Session.Busy),
             Button("Open data folder", () => Session.OpenLink(Session.Controller.DataDirectory, owner))),
         UI.Copy("Windows manages installation and removal. Install a newer signed package to update; GitHub builds do not check for updates.")
     );
+    private Element TrayPreview()
+    {
+        var preview = Session.PreviewTray();
+        return VStack(8,
+            TextBlock("Live preview").SemiBold(),
+            UI.Copy("Draft choices using current usage. Icons are shown at tray size; apply with Save changes.").FontSize(12),
+            VStack(8, preview.Icons.Select(icon =>
+            {
+                var account = preview.Accounts.FirstOrDefault(a => a.Key == icon.AccountKey);
+                string label = account is null ? "Roll-up" : $"{account.Name} ({account.Host})";
+                return Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
+                    Border(new TrayPreviewElement().Set(image => TrayPreviewImage.Apply(image, icon, preview.Style))
+                        .Width(16).Height(16)
+                        .AutomationId("TrayPreviewIcon-" + (icon.AccountKey ?? "rollup"))
+                        .AutomationName($"{label}: {icon.Details}").ToolTip(icon.Details))
+                        .Padding(2).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0).Grid(column: 0),
+                    TextBlock($"{label} - {icon.ValueText}" +
+                        (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over allocation)" : ""))
+                        .TextWrapping().FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 1))
+                    .WithKey(icon.AccountKey ?? "rollup");
+            }).ToArray())
+        ).AutomationId("TrayLivePreview");
+    }
     private Element Notifications() => VStack(18,
         UI.Section("Windows notifications", "Alerts apply independently to each account.",
             ToggleSwitch(Session.Notifications, value => { Session.Notifications = value; Session.Notify(); })
@@ -257,55 +355,55 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     }
     private Element AddForm(nint owner)
     {
-        string remaining = Session.Prompt is { } prompt
-            ? Math.Max(0, (int)(prompt.Expires - DateTimeOffset.UtcNow).TotalSeconds).ToString(CultureInfo.InvariantCulture) : "";
         return VStack(18,
             TextBlock(Session.ReconnectKey is null ? "Connect an account" : "Reconnect account").FontSize(22).SemiBold(),
-            UI.Copy("Authorize the OAuth application registered for this host in your browser. No password or token needs to be pasted here."),
-            TextBlock("GitHub host").SemiBold(),
-            ComboBox(["github.com", "Custom..."], Session.CustomHost ? 1 : 0,
-                index => Session.SelectHost(index == 1))
-                .AutomationName("GitHub host").AutomationId("AccountHostSelection")
-                .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
-            Session.CustomHost
-                ? VStack(8,
-                    TextBox(Session.Host, Session.SetHost, "sample.ghe.com")
-                        .AutomationName("Custom GitHub hostname").AutomationId("AccountHost")
+            Session.EditingHost
+                ? VStack(18,
+                    UI.Copy("Choose the GitHub host to sign in to."),
+                    TextBlock("GitHub host").SemiBold(),
+                    ComboBox(["github.com", "Custom..."], Session.CustomHost ? 1 : 0,
+                        index => Session.SelectHost(index == 1))
+                        .AutomationName("GitHub host").AutomationId("AccountHostSelection")
                         .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
-                    TextBlock("OAuth Client ID").SemiBold(),
-                    TextBox(Session.ClientId, Session.SetClientId, "Host-specific OAuth Client ID")
-                        .AutomationName("Host-specific OAuth Client ID").AutomationId("AccountClientId")
-                        .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null))
-                : null,
-            UI.Copy(Session.HostDescription()).FontSize(12),
-            CheckBox(Session.OfflineAccess, value => { Session.OfflineAccess = value; Session.Notify(); },
-                "Request offline_access where supported").IsEnabled(!Session.SigningIn),
-            UI.Copy("Sign-in requests basic identity access. Enterprise registrations and application policies are host-specific."),
-            Session.Identity is { } identity
-                ? Card(VStack(12, TextBlock("Confirm this account").FontSize(20).SemiBold(),
-                    TextBlock($"{identity.Login} on {identity.Host}").TextWrapping(),
-                    UI.Copy($"Immutable user ID: {identity.UserId}. Consumption access was checked."),
-                    HStack(10, Button("Connect this account", () => Session.ConfirmIdentity(true)),
-                        Button("Wrong account", () => Session.ConfirmIdentity(false)))))
+                    Session.CustomHost
+                        ? VStack(8,
+                            TextBox(Session.Host, Session.SetHost, "sample.ghe.com")
+                                .AutomationName("Custom GitHub hostname").AutomationId("AccountHost")
+                                .IsEnabled(!Session.SigningIn && Session.ReconnectKey is null),
+                            TextBlock("OAuth Client ID").SemiBold(),
+                            TextBox(Session.ClientId, Session.SetClientId, "Host-specific OAuth Client ID")
+                                .AutomationName("Host-specific OAuth Client ID").AutomationId("AccountClientId")
+                                .IsEnabled(!Session.SigningIn))
+                        : null,
+                    UI.Copy(Session.HostDescription()).FontSize(12),
+                    CheckBox(Session.OfflineAccess, value => { Session.OfflineAccess = value; Session.Notify(); },
+                        "Request offline_access where supported").IsEnabled(!Session.SigningIn),
+                    UI.Copy("Sign-in requests basic identity access. Enterprise registrations and application policies are host-specific."))
                 : Session.Prompt is { } device
-                    ? Card(VStack(12,
-                        UI.Copy("Enter this code on GitHub"),
-                        TextBlock(device.Code).FontSize(32).SemiBold().IsTextSelectionEnabled().AutomationName("Device authorization code"),
-                        HStack(10, Button("Copy code", () => Session.CopyCode(owner)),
-                            Button("Open browser", () => Session.OpenLink(device.VerificationUri.AbsoluteUri, owner))),
-                        UI.Copy($"Expires in {remaining} seconds. Waiting for authorization...")))
-                    : Session.SigningIn ? HStack(12, ProgressRing().Width(24).Height(24), UI.Copy("Requesting device sign-in...")) : null,
-            HStack(10,
-                Button("Start device sign-in", Session.StartSignIn).IsEnabled(!Session.SigningIn && !Session.Busy),
-                Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () =>
-                {
-                    if (Session.SigningIn) Session.CancelSignIn();
-                    else { Session.CloseSettings(); Session.Navigate(SettingsPage.Accounts); }
-                }).AutomationName(Session.SigningIn ? "Cancel sign-in" : "Back to accounts"))
+                    ? UI.DeviceSignIn(Session, device, owner)
+                    : Session.SigningIn
+                        ? HStack(12, ProgressRing().Width(24).Height(24),
+                            UI.Copy(Session.ConnectingAccount ? "Finishing your connection..." : $"Generating a sign-in code for {Session.Host}..."))
+                            .AutomationId("SignInProgress")
+                        : UI.Copy("Start sign-in to generate a new code."),
+            FlexRow(
+                !Session.SigningIn
+                    ? Button(Session.EditingHost ? "Start sign-in" : "Try again", Session.StartSignIn)
+                        .AccentButton().IsEnabled(!Session.Busy).AutomationId("StartSignIn")
+                        .AutomationName(Session.EditingHost ? "Start sign-in" : "Try again").Flex(shrink: 0)
+                    : null,
+                Session.ReconnectKey is null && Session.Prompt is null && !Session.EditingHost && !Session.ConnectingAccount
+                    ? Button("Change host", Session.ChangeHost).AutomationId("ChangeSignInHost").Flex(shrink: 0)
+                    : null,
+                Button(Session.SigningIn ? "Cancel sign-in" : "Back to accounts", () => Session.TryGoBack())
+                    .AutomationName(Session.SigningIn ? "Cancel sign-in" : "Back to accounts").AutomationId("AccountBack").Flex(shrink: 0)) with
+            {
+                Wrap = FlexWrap.Wrap, ColumnGap = 10, RowGap = 8, AlignItems = FlexAlign.FlexStart
+            }
         ).AutomationId("AccountOnboarding");
     }
     private Element AccountDetails(AccountView account, nint owner) => VStack(18,
-        HStack(10, Button("Back", () => { Session.CloseSettings(); Session.Navigate(SettingsPage.Accounts); }),
+        HStack(10, Button("Back", () => Session.TryGoBack()).AutomationId("AccountBack"),
             UI.AccountPicture(account, 48),
             VStack(2, TextBlock(account.Name).FontSize(22).SemiBold(), UI.Copy(account.Host).FontSize(12))
                 .VAlign(VerticalAlignment.Center)),

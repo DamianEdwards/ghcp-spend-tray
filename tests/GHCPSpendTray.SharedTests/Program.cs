@@ -33,20 +33,32 @@ try
         Check(controller.Settings.PollMinutes == 15, "Startup failure preserves settings.");
         startup.Reject = false;
 
+        int authorized = 0;
         await controller.AddAsync("github.com", false, null, prompt => Check(prompt.Code == "SYNTHETIC", "Device prompt crosses shared boundary."),
-            identity => Task.FromResult(identity.Login == "synthetic-user"), default);
+            () => authorized++, default);
+        Check(authorized == 1 && credentials.Values.Count == 1, "Browser approval saves the verified identity without another confirmation.");
         await controller.RefreshAsync();
         Check(dashboard?.ConsumptionUsd == 26.25m && dashboard.Accounts[0].Percent == 105m, "Account consumption and allocation.");
         Check(notifications == 1, "Percentage and dollar milestones coalesce.");
         await controller.RefreshAsync();
         Check(notifications == 1, "Alert ledger prevents duplicate notifications.");
         Check(credentials.Values.Count == 1, "Credentials are persisted through injected platform store.");
-        await Reject<AppOperationException>(() => controller.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(true), default));
+        Check(dashboard?.Tray?.RollUp.Percent == 105 && dashboard.Tray.RollUp.IsOverAllocation, "Shared dashboard includes truthful tray allocation.");
+        await controller.SaveSettingsAsync(controller.Settings with
+        {
+            TrayStyle = TrayIconStyle.Percentage, TrayMode = TrayDisplayMode.PerAccount, ExcludedTrayAccounts = ["github.com:1"]
+        });
+        Check(dashboard?.Tray?.Icons.Count == 1 && dashboard.Tray.RollUp.Percent is null, "Excluding all accounts retains unavailable roll-up.");
+        Check((await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].ExcludeFromTray, "Tray exclusions persist.");
+        await controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default);
+        Check(controller.Settings.ExcludedTrayAccounts?.SequenceEqual(["github.com:1"]) == true, "Reconnect preserves tray exclusion.");
+        await Reject<AppOperationException>(() => controller.AddAsync("github.com", false, null, _ => { }, () => { }, default));
         handler.UserId = "2";
-        await Reject<AppOperationException>(() => controller.AddAsync("github.com", false, "github.com:1", _ => { }, _ => Task.FromResult(true), default));
+        await Reject<AppOperationException>(() => controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default));
         Check(credentials.Values["github.com:1"].AccessToken == "synthetic-token-1", "Wrong identity reconnect preserves credential.");
-        await Reject<OperationCanceledException>(() => controller.AddAsync("github.com", false, null, _ => { }, _ => Task.FromResult(false), default));
-        Check(credentials.Values.Count == 1, "Unconfirmed identity is not saved.");
+        using (var cancel = new CancellationTokenSource())
+            await Reject<OperationCanceledException>(() => controller.AddAsync("github.com", false, null, _ => cancel.Cancel(), () => { }, cancel.Token));
+        Check(credentials.Values.Count == 1, "Cancelled sign-in is not saved.");
         await controller.SaveAccountAsync("github.com:1", "Example", "60, 90", 0m);
         Check(controller.AccountSettings("github.com:1") == ("Example", "60, 90", 0m), "Per-account inheritance and disable settings.");
         handler.UserId = "1";
@@ -78,8 +90,27 @@ try
         Check((await Complete(bridge, "unknown")).Error is not null, "Unknown commands fail explicitly.");
         bridge.Send(new() { Id = "auth", Method = "signin", Host = "github.com" });
         Check((await Complete(bridge, "auth")).Error?.Contains("disabled") == true, "Demo never performs authentication.");
-        Check(bridge.Send(new() { Method = "signin.confirm", Accepted = true }).Error is not null, "Confirmation without pending sign-in rejected.");
+        bridge.Send(new() { Id = "obsolete", Method = "signin.confirm" });
+        Check((await Complete(bridge, "obsolete")).Error is not null, "Obsolete confirmation command is rejected.");
         Check(bridge.Send(new() { Method = "platform.reply", TargetId = "expired", Reply = new() }).Error is null, "Late canceled platform reply is safe.");
+
+        var draft = saved.Settings! with { TrayStyle = TrayIconStyle.Percentage, TrayMode = TrayDisplayMode.PerAccount,
+            ExcludedTrayAccounts = ["example.ghe.com:2"] };
+        bridge.Send(new() { Id = "preview", Method = "tray.preview", Settings = draft });
+        var preview = (await Complete(bridge, "preview")).Tray!;
+        Check(preview.Style == TrayIconStyle.Percentage && preview.Icons.Single().AccountKey == "github.com:1",
+            "Preview uses draft style, mode and account selection.");
+        Check(preview.RollUp.Percent == 105 && preview.RollUp.IsOverAllocation, "Preview retains over-allocation.");
+        bridge.Send(new() { Id = "unchanged", Method = "refresh" });
+        Check((await Complete(bridge, "unchanged")).Settings!.TrayStyle == TrayIconStyle.Pie, "Preview does not change saved settings.");
+        bridge.Send(new() { Id = "apply", Method = "settings.save", Settings = draft });
+        Check((await Complete(bridge, "apply")).Settings!.TrayMode == TrayDisplayMode.PerAccount, "Tray save updates settings.");
+        draft = draft with { TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] };
+        bridge.Send(new() { Id = "rollup", Method = "tray.preview", Settings = draft });
+        Check((await Complete(bridge, "rollup")).Tray!.RollUp.Percent == 34.2, "Roll-up uses weighted allocation, not mean percentage.");
+        draft = draft with { ExcludedTrayAccounts = ["github.com:1", "example.ghe.com:2"] };
+        bridge.Send(new() { Id = "none", Method = "tray.preview", Settings = draft });
+        Check((await Complete(bridge, "none")).Tray!.Icons.Single().NumericText == "?", "Unavailable preview is not zero.");
     }
     using (var bridge = new BridgeRuntime())
     {

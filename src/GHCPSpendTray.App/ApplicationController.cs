@@ -12,6 +12,15 @@ internal sealed class ApplicationController : Shared.ApplicationController
         ICredentialStore? credentials = null)
         : base(directory, portable, credentials ?? new VaultCredentials(portable ? directory : null),
             http, async () => await StartupRegistration.CreateAsync(), Diagnostics.Record) { }
+
+    protected override AppOperationException SafeError(Exception ex)
+    {
+        if (ex is CredentialVaultException credential)
+            Diagnostics.Record($"Credential Manager {credential.Operation} failed (Win32 error {credential.NativeErrorCode}).");
+        return ex is CredentialVaultException { Operation: "write", NativeErrorCode: 8 }
+            ? new("Windows Credential Manager could not save the credentials (Windows error 8). Its credential store may be full. Open Control Panel > Credential Manager > Windows Credentials, remove only entries you recognize as unused, then try signing in again.")
+            : base.SafeError(ex);
+    }
 }
 
 internal sealed class VaultCredentials(string? portableDirectory) : ICredentialStore

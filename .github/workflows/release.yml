@@ -216,4 +216,7 @@ jobs:
           else { $arguments += @('--prerelease=false', '--latest') }
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
-          "Published signed GHCPSpendTray $env:RELEASE_VERSION from $env:GITHUB_SHA." >> $env:GITHUB_STEP_SUMMARY
+          $repositoryUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+          $releaseUrl = "$repositoryUrl/releases/tag/v$env:RELEASE_VERSION"
+          $commitUrl = "$repositoryUrl/commit/$env:GITHUB_SHA"
+          "Published signed [GHCPSpendTray $env:RELEASE_VERSION]($releaseUrl) from [``$($env:GITHUB_SHA.Substring(0, 7))``]($commitUrl)." >> $env:GITHUB_STEP_SUMMARY

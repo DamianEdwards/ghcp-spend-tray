@@ -2,20 +2,6 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 
-enum SettingsPage: String, CaseIterable, Identifiable {
-    case usage = "Usage", accounts = "Accounts", general = "General", notifications = "Notifications", about = "About"
-    var id: String { rawValue }
-    var icon: String {
-        switch self {
-        case .usage: return "chart.bar"
-        case .accounts: return "person.crop.circle"
-        case .general: return "gear"
-        case .notifications: return "bell"
-        case .about: return "info.circle"
-        }
-    }
-}
-
 struct AccountAvatar: View {
     let account: AccountData
     var body: some View {
@@ -89,7 +75,7 @@ struct FlyoutView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: "gauge.with.dots.needle.67percent")
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 24, height: 24)
                 Text("Copilot consumption").font(.headline)
                 Spacer()
                 Button { model.openSettings() } label: { Image(systemName: "gearshape") }
@@ -102,6 +88,9 @@ struct FlyoutView: View {
             if let dashboard = model.dashboard, !dashboard.isComplete {
                 Text(dashboard.isLastKnown ? "Last-known / partial consumption" : "Partial / unavailable consumption")
                     .font(.caption).foregroundStyle(.orange)
+            }
+            if let tray = model.dashboard?.tray {
+                Text(tray.rollUp.details).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             StatusMessage(model: model)
             ScrollView {
@@ -170,11 +159,27 @@ struct SettingsView: View {
 struct UsageView: View {
     @ObservedObject var model: AppModel
     var body: some View {
+        if model.dashboard?.accounts.isEmpty == true {
+            VStack(spacing: 16) {
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 72, height: 72)
+                Text("Add an account to see your usage").font(.title2)
+                Text("Connect your GitHub account to start tracking Copilot consumption.").foregroundStyle(.secondary)
+                Button("Add Account...") { model.addAccount() }.buttonStyle(.borderedProminent).disabled(model.busy)
+            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            usage
+        }
+    }
+
+    private var usage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Usage").font(.largeTitle)
                 Text(model.dashboard?.total ?? "Consumption unavailable").font(.title2)
                 Text(model.dashboard?.status ?? "").foregroundStyle(.secondary)
+                if let tray = model.dashboard?.tray {
+                    Text(tray.rollUp.details).font(.caption).textSelection(.enabled)
+                }
                 HStack {
                     Button("Refresh Now") { model.perform("refresh") }.disabled(model.busy)
                     Button("Add Account...") { model.addAccount() }.disabled(model.busy)
@@ -313,6 +318,12 @@ struct PreferencesView: View {
     @State private var increment = ""
     @State private var enabled = true
     @State private var startup = false
+    @State private var trayStyle: TrayIconStyle = .pie
+    @State private var trayMode: TrayDisplayMode = .rollUp
+    @State private var excludedAccounts = Set<String>()
+    @State private var trayPreview: TrayPresentation?
+    @State private var previewRevision = 0
+    @State private var loaded = false
     var body: some View {
         Form {
             if notifications {
@@ -335,10 +346,50 @@ struct PreferencesView: View {
                     Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() }.disabled(model.demo)
                     Button("Open Data Folder") { model.openDataFolder() }
                 }
+                Section("Menu Bar") {
+                    Text("Show fresh allocation usage independently of dollar totals. New accounts are included by default.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("Icon style", selection: $trayStyle) {
+                        Text("Pie chart").tag(TrayIconStyle.pie)
+                        Text("Percentage number").tag(TrayIconStyle.percentage)
+                    }
+                    Picker("Icons to show", selection: $trayMode) {
+                        Text("One roll-up icon").tag(TrayDisplayMode.rollUp)
+                        Text("One icon per selected account").tag(TrayDisplayMode.perAccount)
+                    }
+                    ForEach(model.dashboard?.accounts ?? []) { account in
+                        Toggle("\(account.name) (\(account.host))", isOn: Binding(
+                            get: { !excludedAccounts.contains(account.key) },
+                            set: { include in
+                                if include { excludedAccounts.remove(account.key) }
+                                else { excludedAccounts.insert(account.key) }
+                            }))
+                    }
+                    Text("Live Preview").font(.headline)
+                    if let preview = trayPreview {
+                        ForEach(preview.icons) { icon in
+                            HStack {
+                                Image(nsImage: TrayIconRenderer.image(icon, style: preview.style))
+                                    .help(icon.details).accessibilityLabel(icon.details)
+                                Text("\(icon.accountKey == nil ? "Roll-up" : icon.name): \(icon.valueText)" +
+                                     (icon.isPartial ? " (partial)" : "") + (icon.isOverAllocation ? " (over allocation)" : ""))
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    Text("Preview changes apply to the menu bar only after Save. ! means partial, ? means unavailable, and + means over allocation. Numbers are rounded; hover over an icon for details.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("A neutral icon remains when nothing is selected. macOS may hide icons on a crowded menu bar; reopen GHCPSpendTray to access Settings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Button("Save") { save() }.disabled(model.busy)
         }.formStyle(.grouped).onAppear { load() }
         .onChange(of: notifications) { _, _ in load() }
+        .onChange(of: trayStyle) { _, _ in preview() }
+        .onChange(of: trayMode) { _, _ in preview() }
+        .onChange(of: excludedAccounts) { _, _ in preview() }
+        .onReceive(model.$dashboard) { _ in preview() }
     }
 
     private func load() {
@@ -348,6 +399,25 @@ struct PreferencesView: View {
         increment = decimalText(value.spendIncrementUsd)
         enabled = value.notifications
         startup = value.startup
+        trayStyle = value.trayStyle
+        trayMode = value.trayMode
+        excludedAccounts = Set(value.excludedTrayAccounts ?? [])
+        loaded = true
+        preview()
+    }
+
+    private func preview() {
+        guard loaded && !notifications, var value = model.settings else { return }
+        value.trayStyle = trayStyle
+        value.trayMode = trayMode
+        value.excludedTrayAccounts = Array(excludedAccounts)
+        previewRevision += 1
+        let revision = previewRevision
+        do {
+            model.send("tray.preview", fields: ["settings": try jsonObject(value)]) { event in
+                if revision == previewRevision { trayPreview = event.tray }
+            }
+        } catch { model.error = "Could not prepare the menu-bar preview." }
     }
 
     private func save() {
@@ -363,6 +433,9 @@ struct PreferencesView: View {
                 }
                 value.pollMinutes = interval
                 value.startup = startup
+                value.trayStyle = trayStyle
+                value.trayMode = trayMode
+                value.excludedTrayAccounts = Array(excludedAccounts)
             }
             model.perform("settings.save", fields: ["settings": try jsonObject(value)]) { _ in load() }
         } catch { model.error = error.localizedDescription }
@@ -372,41 +445,40 @@ struct PreferencesView: View {
 struct SignInView: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var host = "github.com"
-    @State private var clientId = ""
-    @State private var offline = false
-    @State private var checkedHost = ""
-    @State private var destinations = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(model.reconnect == nil ? "Connect Account" : "Reconnect Account").font(.title)
             StatusMessage(model: model)
-            Form {
-                TextField("GitHub host", text: $host).disabled(model.signingIn || model.reconnect != nil)
-                TextField("OAuth client ID", text: $clientId, prompt: Text("Built in for github.com and msft.ghe.com"))
-                    .disabled(model.signingIn || model.reconnectClientId != nil)
-                Toggle("Request offline access (refresh tokens)", isOn: $offline).disabled(model.signingIn)
-            }
-            Text("For other enterprise hosts, use an approved host-specific OAuth app with Device Flow enabled. No client secret is needed.")
-                .font(.caption).foregroundStyle(.secondary)
-            Button("Check Destinations") {
-                let candidate = host
-                model.send("host.describe", fields: ["host": candidate]) { event in
-                    if let text = event.text { destinations = text; checkedHost = candidate }
+            if model.editingHost {
+                Form {
+                    TextField("GitHub host", text: Binding(get: { model.signInHost }, set: model.setHost))
+                        .disabled(model.signingIn || model.reconnect != nil)
+                    TextField("OAuth client ID", text: $model.signInClientId, prompt: Text("Built in for github.com and msft.ghe.com"))
+                        .disabled(model.signingIn || model.reconnectClientId != nil)
+                    Toggle("Request offline access (refresh tokens)", isOn: $model.offlineAccess).disabled(model.signingIn)
                 }
-            }.disabled(model.signingIn)
-            if !destinations.isEmpty && checkedHost == host {
-                Text(destinations).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                Text(model.hostDescription).font(.caption).textSelection(.enabled)
+                Text("For other enterprise hosts, use an approved host-specific OAuth app with Device Flow enabled. No client secret is needed.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Start Sign-In") { model.startSignIn() }.buttonStyle(.borderedProminent)
+                    .disabled(model.busy || model.signInHost.isEmpty)
+            } else {
+                HStack {
+                    Text("Signing in to \(model.signInHost)").font(.headline)
+                    Spacer()
+                    if model.reconnect == nil && !model.connectingAccount {
+                        Button("Change Host") { model.changeHost() }
+                    }
+                }
             }
             if let prompt = model.prompt {
                 Text("Enter this code on the authorization page:").font(.headline)
                 HStack {
                     Text(prompt.code).font(.system(.title, design: .monospaced)).textSelection(.enabled)
-                    Button("Copy Code") {
-                        NSPasteboard.general.clearContents()
-                        if !NSPasteboard.general.setString(prompt.code, forType: .string) { model.error = "Could not copy the device code." }
-                    }
+                    Button(model.codeCopied ? "Copy Again" : "Copy Code") { model.copyCode() }
                 }
+                if model.codeCopied { Text("Code copied to clipboard.").font(.caption).foregroundStyle(.secondary) }
+                if let error = model.clipboardError { Text(error).font(.caption).foregroundStyle(.orange) }
                 Text(prompt.verificationUri).textSelection(.enabled).font(.caption)
                 Button("Open Authorization Page") { model.openURL(prompt.verificationUri) }
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -414,16 +486,13 @@ struct SignInView: View {
                     Text("Code expires in \(seconds / 60)m \(seconds % 60)s. Verify the OAuth app before approving.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } else if let identity = model.identity {
-                Text("Confirm this account before saving:").font(.headline)
-                Text("\(identity.login) @ \(identity.host)\nGitHub user ID: \(identity.userId)").textSelection(.enabled)
-                Button("Confirm and Save Account") { model.send("signin.confirm", fields: ["accepted": true]) }
-                    .buttonStyle(.borderedProminent)
-            } else if model.signingIn {
-                HStack { ProgressView().controlSize(.small); Text("Waiting for GitHub...") }
-            } else {
-                Button("Start Device Sign-In") { model.startSignIn(host: host, clientId: clientId, offline: offline) }
-                    .buttonStyle(.borderedProminent).disabled(checkedHost != host || checkedHost.isEmpty || model.busy)
+            } else if model.signingIn && !model.editingHost {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(model.connectingAccount ? "Finishing your connection..." : "Generating a sign-in code...")
+                }
+            } else if !model.editingHost {
+                Button("Try Again") { model.startSignIn() }.buttonStyle(.borderedProminent).disabled(model.busy)
             }
             HStack {
                 Spacer()
@@ -432,12 +501,6 @@ struct SignInView: View {
             }
         }
         .padding(24).frame(width: 540)
-        .onAppear { host = model.reconnect?.host ?? "github.com"; clientId = model.reconnectClientId ?? "" }
-        .onChange(of: host) { _, _ in
-            if model.reconnect == nil { clientId = "" }
-            checkedHost = ""
-            destinations = ""
-        }
         .interactiveDismissDisabled(model.signingIn)
     }
 }

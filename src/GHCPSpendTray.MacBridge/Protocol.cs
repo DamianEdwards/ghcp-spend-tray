@@ -21,7 +21,6 @@ public sealed record Command
     public SettingsView? Settings { get; init; }
     public string? TargetId { get; init; }
     public PlatformReply? Reply { get; init; }
-    public bool Accepted { get; init; }
 }
 
 public sealed record PlatformReply
@@ -46,8 +45,9 @@ public sealed record BridgeEvent
     public DashboardView? Dashboard { get; init; }
     public SettingsView? Settings { get; init; }
     public AccountPreferences? Preferences { get; init; }
+    public TrayPresentation? Tray { get; init; }
     public DevicePrompt? Prompt { get; init; }
-    public PendingIdentity? Identity { get; init; }
+    public bool Cancelled { get; init; }
     public string? Operation { get; init; }
     public string? Target { get; init; }
     public TokenSet? Tokens { get; init; }

@@ -1,8 +1,13 @@
 using GHCPSpendTray.App.Native;
 using GHCPSpendTray.App.Platform;
+using GHCPSpendTray.Core;
+using Microsoft.UI.Input;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.System;
 
@@ -15,11 +20,11 @@ internal sealed class ReactorShell : IDisposable
     private ReactorWindow? _flyout, _settings;
     private bool _exiting;
     private long _flyoutPresentation;
-    private string? _notificationAccount;
     internal AppSession Session => _session;
     internal ReactorWindow? Flyout => _flyout;
     internal ReactorWindow? SettingsWindow => _settings;
     internal nint TrayHandle => _tray.Handle;
+    internal IReadOnlyCollection<TrayIcon> TrayIcons => _tray.Icons;
 
     internal ReactorShell(IApplicationController controller)
     {
@@ -30,26 +35,43 @@ internal sealed class ReactorShell : IDisposable
                 Diagnostics.Record("Reactor UI dispatcher rejected an operation.");
         });
         _session.OpenSettings = ShowSettings;
+        _session.CopyToClipboard = text =>
+        {
+            var window = _settings ?? throw new InvalidOperationException("Settings is not open.");
+            ShellServices.CopyText(WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow), text);
+        };
         _session.HideFlyout = () => _flyout?.Hide();
-        _session.TestNotification = () => _tray.Icon.Notify("GHCPSpendTray test", "Windows accepted this test notification request.");
-        _tray.OpenRequested += () => _session.Post(ToggleFlyout);
+        _session.TestNotification = () => _tray.Notify(null, "GHCPSpendTray test", "Windows accepted this test notification request.");
+        _tray.OpenRequested += key => _session.Post(() =>
+        {
+            if (key is not null) _session.EditAccount(key);
+            else ToggleFlyout();
+        });
         _tray.SettingsRequested += () => ShowSettings(SettingsPage.Usage);
         _tray.RefreshRequested += () => _session.Refresh();
         _tray.ExitRequested += Exit;
         _tray.ResumeRequested += () => _session.Run(controller.ResumeAsync);
-        _tray.NotificationClicked += () =>
+        _tray.NotificationClicked += key =>
         {
-            if (_notificationAccount is { } key) _session.EditAccount(key);
+            if (key is not null) _session.EditAccount(key);
             else ShowFlyout();
         };
-        _session.Changed += () => _tray.Update(_session.Dashboard.Tooltip);
+        _tray.AppearanceChanged += _session.Notify;
+        _session.DashboardChanged += () =>
+        {
+            try { _tray.Update(_session.Dashboard.Tray ?? TrayPresentation.Unavailable); }
+            catch (Exception ex)
+            {
+                Diagnostics.Record($"Tray display update failed ({ex.GetType().Name}).");
+                _session.ReportTrayError();
+            }
+        };
         controller.SetNotificationHandler((key, title, text) =>
         {
             var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _session.Post(() =>
             {
-                _notificationAccount = key;
-                completion.TrySetResult(_tray.Icon.Notify(title, text));
+                completion.TrySetResult(_tray.Notify(key, title, text));
             });
             return completion.Task;
         });
@@ -107,7 +129,7 @@ internal sealed class ReactorShell : IDisposable
     {
         var window = _flyout;
         var presentation = _flyoutPresentation;
-        var trayClick = _tray.Icon.ContainsCursor();
+        var trayClick = _tray.ContainsCursor();
         // Showing/activating and Shell focus changes can reenter deactivation. Check the
         // settled native foreground window, not Reactor's cached activation/visibility flags.
         _session.Post(() =>
@@ -115,7 +137,7 @@ internal sealed class ReactorShell : IDisposable
             if (_exiting || window is null || !ReferenceEquals(window, _flyout) ||
                 presentation != _flyoutPresentation) return;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow);
-            if (Win32.GetForegroundWindow() != hwnd && !trayClick && !_tray.Icon.ContainsCursor()) window.Hide();
+            if (Win32.GetForegroundWindow() != hwnd && !trayClick && !_tray.ContainsCursor()) window.Hide();
         });
     }
     internal void ShowSettings(SettingsPage page)
@@ -132,6 +154,24 @@ internal sealed class ReactorShell : IDisposable
                 CornerStyle = WindowCornerStyle.Rounded,
                 Icon = WindowIcon.FromPath(Path.Combine(AppContext.BaseDirectory, "Assets", "GHCPSpendTray.ico"))
             }, () => new SettingsComponent(_session));
+            if (_settings.NativeWindow.Content is UIElement root)
+            {
+                // Window-wide shortcuts must not generate a tooltip over every child control.
+                root.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+                var altLeft = new KeyboardAccelerator
+                    { Key = VirtualKey.Left, Modifiers = VirtualKeyModifiers.Menu, ScopeOwner = root };
+                var back = new KeyboardAccelerator { Key = VirtualKey.GoBack, ScopeOwner = root };
+                altLeft.Invoked += (_, e) => e.Handled = TryGoBack(root);
+                back.Invoked += (_, e) => e.Handled = TryGoBack(root);
+                root.KeyboardAccelerators.Add(altLeft);
+                root.KeyboardAccelerators.Add(back);
+                root.PointerPressed += (_, e) =>
+                {
+                    if (e.GetCurrentPoint(root).Properties.PointerUpdateKind == PointerUpdateKind.XButton1Pressed &&
+                        TryGoBack(root))
+                        e.Handled = true;
+                };
+            }
             _settings.Closed += (_, _) => { _settings = null; _session.CloseSettings(); };
             _settings.NativeWindow.Activated += (_, e) =>
             {
@@ -143,6 +183,18 @@ internal sealed class ReactorShell : IDisposable
             };
         }
         _settings.Show(); _settings.Activate();
+    }
+    private bool TryGoBack(UIElement root) =>
+        VisualTreeHelper.GetOpenPopupsForXamlRoot(root.XamlRoot).Count == 0 &&
+        !HasOverlayPane(root) && _session.TryGoBack();
+
+    private static bool HasOverlayPane(DependencyObject element)
+    {
+        if (element is NavigationView navigation)
+            return navigation.IsPaneOpen && navigation.DisplayMode != NavigationViewDisplayMode.Expanded;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++)
+            if (HasOverlayPane(VisualTreeHelper.GetChild(element, i))) return true;
+        return false;
     }
     internal void Exit()
     {

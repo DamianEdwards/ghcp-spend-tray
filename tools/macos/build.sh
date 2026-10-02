@@ -53,9 +53,17 @@ cp PRIVACY.md "$app/Contents/Resources/PRIVACY.md"
 iconset="$PWD/artifacts/macos/AppIcon.iconset"
 mkdir -p "$iconset"
 for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png \
+    artwork=src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png
+    if [[ -f "src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-$size.png" ]]; then
+        artwork="src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-$size.png"
+    fi
+    sips -z "$size" "$size" "$artwork" \
         --out "$iconset/icon_${size}x${size}.png" >/dev/null
-    sips -z "$((size * 2))" "$((size * 2))" src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png \
+    artwork=src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png
+    if [[ -f "src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-$((size * 2)).png" ]]; then
+        artwork="src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-$((size * 2)).png"
+    fi
+    sips -z "$((size * 2))" "$((size * 2))" "$artwork" \
         --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"

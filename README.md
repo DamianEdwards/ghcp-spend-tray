@@ -19,6 +19,8 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 ## Features
 
 - A tray flyout with per-account consumption and allocation meters.
+- Configurable pie-chart or percentage tray icons: one weighted roll-up by
+  default, or one icon per selected account.
 - Multiple accounts, including different identities on the same GitHub host.
 - Account avatars in the flyout and account settings when available, with
   initials when an image cannot be shown.
@@ -67,6 +69,13 @@ Use **General > Launch at login** to opt in; macOS may require approval in
 **System Settings > General > Login Items**. Notifications also require macOS
 permission and can be suppressed by Focus.
 
+In **General > Menu Bar**, choose a pie or percentage, a single weighted roll-up
+or one icon per selected account, and the accounts to include. The live preview
+uses the shared allocation rules; only **Save** applies it to the menu bar.
+The monochrome template graphics adapt to macOS light/dark menu-bar appearance.
+Per-account icons open account settings. If macOS hides icons on a crowded
+menu bar, reopening GHCPSpendTray brings its settings window forward.
+
 Updates are manual: quit GHCPSpendTray, then replace the app in Applications
 with a newer macOS release. Its stable bundle identifier preserves access to
 local settings, history, and Keychain credentials. Windows (`v*`) and macOS
@@ -77,11 +86,25 @@ migrates the other's local data. The Mac app does not use the App Store.
 
 1. Open the tray flyout and choose the connect button, or open
    **Settings > Accounts > Add account**.
-2. Enter the GitHub host and check the authentication and API destinations
-   displayed by the app. Start device sign-in, then enter the displayed code on
-   the host's GitHub authorization page in your browser. Verify the OAuth app
-   shown on the consent screen before approving it.
-3. Confirm the GitHub login and user ID displayed by GHCPSpendTray, then save.
+2. A github.com sign-in code is generated immediately and copied to the clipboard.
+   Select **Open browser** (**Open Authorization Page** on Mac), paste the code
+   on GitHub, and authorize GHCPSpendTray.
+   Check the account and OAuth app shown on GitHub before approving. If copying
+   failed, use **Copy code** to retry or select and copy the displayed code yourself.
+3. Return to GHCPSpendTray. The account is verified and saved automatically after
+   browser authorization; a success message appears when setup finishes. There is no
+   additional in-app confirmation.
+
+The code panel identifies the active host above the code instructions, with
+**Change host** beside it. For an enterprise account, select it to cancel the github.com attempt,
+choose the host and its OAuth Client ID, check the displayed destinations, then
+select **Start sign-in**. New Add account actions always start with github.com.
+**Reconnect** starts immediately using the account's original host and registration;
+a different browser identity is rejected rather than overwriting that account.
+**Cancel sign-in** stops the current attempt, and **Try again** generates a new code.
+Sign-in failures are reported in the UI and diagnostic logs without logging
+device codes, tokens, or server response bodies. Clipboard failures are visible
+and can be retried without restarting sign-in.
 
 The app has built-in public OAuth registrations for `github.com` and
 `msft.ghe.com`; it does not use `gh` credentials or ask for a client secret.
@@ -109,16 +132,54 @@ unavailable data rather than treating it as zero. See
 
 ## Use and notifications
 
-Left-click the tray icon to toggle the flyout or double-click it to open
+On Windows, left-click the tray icon to toggle the flyout or double-click it to open
 **Settings > Usage**; right-click it for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,
-and a manual refresh action. **Accounts** manages connections and
+and a manual refresh action. With no accounts connected, Usage instead shows a
+simple **Add account** prompt without empty totals, diagnostics, or refresh controls.
+**Accounts** manages connections and
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
 is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
+
+In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
+number**, one roll-up or per-account icons, and the connected accounts to include.
+Choose **Save changes** to apply and persist the preferences. By default all
+accounts, including newly connected accounts, contribute to a single pie.
+The **Live preview** updates immediately as you change the draft style, icon mode,
+or included accounts. It uses current usage and the same native-size pixels as
+the real icons, with labels identifying each account. Previewing does not change
+the notification area or save anything; a failed save leaves the existing tray
+configuration unchanged. Freshness and availability updates also reach the preview.
+Per-account icons open their account details on click; **Open GHCPSpendTray**
+in any icon's context menu still opens the flyout. Double-click, keyboard access,
+refresh, Settings, notifications and Exit remain available. If no accounts are
+selected or connected, a neutral access icon remains.
+
+The roll-up percentage is **eligible consumption divided by the same accounts'
+eligible allocation**, not an average of account percentages. Only valid, fresh,
+current-period observations with known, finite positive allocation qualify.
+Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
+excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
+available, not zero. Hover for the percentage and included/selected counts;
+**Settings > Usage** lists every selected account and its inclusion or exclusion
+reason. These preferences do not filter or change the existing dollar totals.
+
+Numbers are rounded to whole percentages, with `<1` below 1% and `999+` above
+999%. Numbers use native font glyphs rather than a pixel font; the percentage
+unit is shown in the tooltip and preview label instead of a tiny extra glyph.
+Both styles are antialiased at the taskbar's pixel size on a transparent canvas.
+The settings preview places them on a taskbar-colored swatch so they remain
+readable when the app and taskbar themes differ.
+Pies fill to 100%; a `+` on either style marks over-allocation. Tooltips retain the
+unsaturated percentage (up to two decimals, with `<0.01%` for smaller nonzero
+values) and label over-allocation. Eligibility is reevaluated at least every
+minute and on refresh/resume, including billing rollover. Windows controls
+notification-area overflow and icon visibility; the app cannot force icons to
+remain unhidden.
 
 In **Settings > Notifications**, you can also set a USD increment (for example,
 `50` for alerts at $50, $100, and so on). An account can inherit that value,

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GHCPSpendTray.Core;
 using GHCPSpendTray.Shared;
 
 namespace GHCPSpendTray.MacBridge;
@@ -13,7 +14,6 @@ public sealed class BridgeRuntime : IDisposable
     private DashboardView? _dashboard;
     private bool _stateChanged;
     private CancellationTokenSource? _signIn;
-    private TaskCompletionSource<bool>? _confirmation;
     private Task? _work;
     private int _busy;
     private bool _disposed;
@@ -36,13 +36,24 @@ public sealed class BridgeRuntime : IDisposable
                 lock (_stateGate) _signIn?.Cancel();
                 return new();
             }
-            if (command.Method == "signin.confirm")
+            if (command.Method == "tray.preview")
             {
+                var settings = command.Settings ?? throw new ArgumentException("Missing preview settings.");
+                TrayPresentation tray;
                 lock (_stateGate)
                 {
-                    if (_confirmation is null) throw new AppOperationException("No identity is awaiting confirmation.");
-                    _confirmation.TrySetResult(command.Accepted);
+                    var states = _dashboard?.TrayStates ?? [];
+                    tray = TrayUsage.Create(new()
+                    {
+                        PollIntervalMinutes = Controller.Settings.PollMinutes,
+                        TrayStyle = settings.TrayStyle, TrayMode = settings.TrayMode,
+                        Accounts = states.Select(s => s.Account with
+                        {
+                            ExcludeFromTray = settings.ExcludedTrayAccounts?.Contains(s.Account.Key, StringComparer.Ordinal) == true
+                        }).ToArray()
+                    }, states, DateTimeOffset.UtcNow);
                 }
+                _events.Enqueue(new() { Kind = "completed", Id = command.Id, Tray = tray });
                 return new();
             }
             if (command.Method == "host.describe")
@@ -65,6 +76,8 @@ public sealed class BridgeRuntime : IDisposable
             if (string.IsNullOrEmpty(command.Id)) throw new ArgumentException("Missing command identifier.");
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
                 throw new AppOperationException("Another operation is still running.");
+            if (command.Method == "signin")
+                lock (_stateGate) _signIn = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             _work = Task.Run(() => ExecuteAsync(command));
             return new();
         }
@@ -76,6 +89,7 @@ public sealed class BridgeRuntime : IDisposable
     private async Task ExecuteAsync(Command command)
     {
         string? error = null;
+        bool cancelled = false;
         try
         {
             switch (command.Method)
@@ -111,23 +125,16 @@ public sealed class BridgeRuntime : IDisposable
                     await Controller.RemoveAsync(Required(command.Key));
                     break;
                 case "signin":
-                    using (var signIn = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token))
+                    CancellationTokenSource signIn;
+                    lock (_stateGate) signIn = _signIn!;
+                    try
                     {
-                        lock (_stateGate) _signIn = signIn;
-                        try
-                        {
-                            await Controller.AddAsync(Required(command.Host), command.OfflineAccess, command.Key,
-                                prompt => _events.Enqueue(new() { Kind = "prompt", Id = command.Id, Prompt = prompt }),
-                                identity =>
-                                {
-                                    var confirmation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                                    lock (_stateGate) _confirmation = confirmation;
-                                    _events.Enqueue(new() { Kind = "identity", Id = command.Id, Identity = identity });
-                                    return confirmation.Task.WaitAsync(signIn.Token);
-                                }, signIn.Token, command.ClientId);
-                        }
-                        finally { lock (_stateGate) { _signIn = null; _confirmation = null; } }
+                        await Controller.AddAsync(Required(command.Host), command.OfflineAccess, command.Key,
+                            prompt => _events.Enqueue(new() { Kind = "prompt", Id = command.Id, Prompt = prompt }),
+                            () => _events.Enqueue(new() { Kind = "authorized", Id = command.Id }),
+                            signIn.Token, command.ClientId);
                     }
+                    finally { lock (_stateGate) { _signIn = null; signIn.Dispose(); } }
                     break;
                 default:
                     throw new AppOperationException("Unknown application command.");
@@ -135,14 +142,14 @@ public sealed class BridgeRuntime : IDisposable
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested || command.Method == "signin")
         {
-            error = "Sign-in canceled or expired. Nothing new was connected.";
+            cancelled = true;
         }
         catch (Exception ex) { error = SafeMessage(ex); }
         finally
         {
             lock (_stateGate) _stateChanged = true;
             Interlocked.Exchange(ref _busy, 0);
-            _events.Enqueue(new() { Kind = "completed", Id = command.Id, Error = error, Settings = _controller?.Settings });
+            _events.Enqueue(new() { Kind = "completed", Id = command.Id, Error = error, Cancelled = cancelled, Settings = _controller?.Settings });
         }
     }
 
@@ -160,7 +167,7 @@ public sealed class BridgeRuntime : IDisposable
             if (_stateChanged && _controller is not null)
             {
                 _stateChanged = false;
-                result.Add(new() { Kind = "state", Dashboard = _dashboard, Settings = _controller.Settings });
+                result.Add(new() { Kind = "state", Dashboard = _dashboard is null ? null : _dashboard with { TrayStates = null }, Settings = _controller.Settings });
             }
         }
         return result.ToArray();

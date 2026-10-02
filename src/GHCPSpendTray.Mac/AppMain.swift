@@ -6,7 +6,7 @@ import UserNotifications
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     private var model: AppModel?
-    private var statusItem: NSStatusItem?
+    private var statusItems: [String: NSStatusItem] = [:]
     private let popover = NSPopover()
     private var settingsWindow: NSWindow?
     private var instanceLock: Int32 = -1
@@ -61,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let model = AppModel(directory: directory, demo: demo)
             self.model = model
             model.showSettings = { [weak self] in self?.openSettings() }
-            model.dashboardChanged = { [weak self] dashboard in self?.statusItem?.button?.toolTip = dashboard.tooltip }
+            model.dashboardChanged = { [weak self] dashboard in self?.updateMenuBar(dashboard.tray) }
             setupMenuBar(model)
             UNUserNotificationCenter.current().delegate = self
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak model] _ in
@@ -86,16 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     }
 
     private func setupMenuBar(_ model: AppModel) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem = item
-        if let button = item.button {
-            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.67percent", accessibilityDescription: "GHCPSpendTray")
-            button.image?.isTemplate = true
-            button.toolTip = "GHCPSpendTray | Loading"
-            button.target = self
-            button.action = #selector(togglePopover)
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
+        updateMenuBar(nil)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: FlyoutView(model: model))
         let mainMenu = NSMenu()
@@ -119,8 +110,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         NSApplication.shared.mainMenu = mainMenu
     }
 
-    @objc private func togglePopover() {
-        guard let button = statusItem?.button else { return }
+    private func updateMenuBar(_ presentation: TrayPresentation?) {
+        let icons = presentation?.icons ?? [.unavailable]
+        let keys = Set(icons.map(\.id))
+        for key in Array(statusItems.keys) where !keys.contains(key) {
+            if popover.isShown { popover.performClose(nil) }
+            if let item = statusItems.removeValue(forKey: key) { NSStatusBar.system.removeStatusItem(item) }
+        }
+        for icon in icons {
+            let item: NSStatusItem
+            if let existing = statusItems[icon.id] { item = existing }
+            else {
+                item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+                statusItems[icon.id] = item
+            }
+            guard let button = item.button else {
+                model?.error = "macOS could not create a menu-bar indicator. Reopen the app to access Settings."
+                continue
+            }
+            button.image = TrayIconRenderer.image(icon, style: presentation?.style ?? .pie)
+            button.toolTip = icon.tooltip
+            button.setAccessibilityLabel(icon.details)
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+    }
+
+    @objc private func togglePopover(_ button: NSStatusBarButton) {
+        guard let item = statusItems.values.first(where: { $0.button === button }) else { return }
         if NSApplication.shared.currentEvent?.type == .rightMouseUp {
             popover.performClose(nil)
             let menu = NSMenu()
@@ -132,9 +150,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit GHCPSpendTray", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             menu.autoenablesItems = false
-            statusItem?.menu = menu
+            item.menu = menu
             button.performClick(nil)
-            statusItem?.menu = nil
+            item.menu = nil
+        } else if let key = statusItems.first(where: { $0.value === item })?.key, key != "rollup" {
+            model?.selectedAccount = key
+            model?.openSettings(.accounts)
         } else if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -164,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
-        if model.initialized && !model.busy { model.perform("resume") }
+        if model.initialized && !model.busy && !model.showingSignIn { model.perform("resume") }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -212,7 +233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                   dashboard.consumptionUsd == (empty ? nil : Decimal(string: "42.75")),
                   money(dashboard.consumptionUsd) == (empty ? "Unavailable" : "$42.75"),
                   model.settings?.startup == false else { throw AppError.message("Synthetic dashboard contract failed.") }
-            guard statusItem?.button != nil else { throw AppError.message("Menu bar item was not created.") }
+            guard statusItems.count == 1, statusItems["rollup"]?.button?.image?.isTemplate == true else {
+                throw AppError.message("Adaptive menu bar indicator was not created.")
+            }
             openSettings()
             try await waitUntil { !model.busy }
             for page in SettingsPage.allCases {
@@ -234,6 +257,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 try await waitUntil { !model.busy }
                 guard model.error == nil, model.settings?.pollMinutes == 15, model.settings?.spendIncrementUsd == 50 else {
                     throw AppError.message("Settings did not round-trip across the native bridge.")
+                }
+                settings.trayStyle = .percentage
+                settings.trayMode = .perAccount
+                var preview: TrayPresentation?
+                model.send("tray.preview", fields: ["settings": try jsonObject(settings)]) { preview = $0.tray }
+                try await waitUntil { preview != nil }
+                guard self.statusItems.count == 1, model.settings?.trayStyle == .pie else {
+                    throw AppError.message("Draft tray preview changed the real menu bar.")
+                }
+                model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
+                try await waitUntil { !model.busy && self.statusItems.count == (self.empty ? 1 : 2) }
+                guard model.error == nil, model.settings?.trayStyle == .percentage,
+                      model.dashboard?.tray?.rollUp.percent == (empty ? nil : 34.2) else {
+                    throw AppError.message("Saved menu-bar options did not update native indicators.")
+                }
+                if !empty {
+                    guard let button = statusItems["github.com:1"]?.button else {
+                        throw AppError.message("Account menu-bar item missing.")
+                    }
+                    togglePopover(button)
+                    try await waitUntil { !model.busy }
+                    guard model.selectedAccount == "github.com:1", model.page == .accounts else {
+                        throw AppError.message("Per-account indicator did not navigate to the account.")
+                    }
+                    settings.excludedTrayAccounts = ["github.com:1"]
+                    model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
+                    try await waitUntil { !model.busy && self.statusItems.count == 1 }
+                    guard statusItems["example.ghe.com:2"] != nil && model.dashboard?.consumptionUsd == Decimal(string: "42.75") else {
+                        throw AppError.message("Account selection changed dollar totals or failed to remove its indicator.")
+                    }
+                }
+                settings.excludedTrayAccounts = model.dashboard?.accounts.map(\.key)
+                model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
+                try await waitUntil { !model.busy && self.statusItems["rollup"] != nil }
+                guard statusItems.count == 1, model.dashboard?.tray?.rollUp.percent == nil else {
+                    throw AppError.message("Unavailable access indicator did not replace excluded accounts.")
                 }
             }
             model.addAccount()

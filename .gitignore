@@ -20,7 +20,10 @@ TestResults/
 .DS_Store
 Thumbs.db
 
-# Python icon-generator cache
+# Development-only SVG renderer
+**/node_modules/
+
+# Legacy icon-generator cache
 __pycache__/
 *.py[cod]
 

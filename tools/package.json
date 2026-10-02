@@ -1,0 +1,12 @@
+{
+  "name": "ghcpspendtray-artwork",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-icons.mjs",
+    "check": "node generate-icons.mjs --check"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2"
+  }
+}

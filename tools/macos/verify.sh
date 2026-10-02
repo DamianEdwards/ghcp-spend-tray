@@ -13,6 +13,11 @@ done
 bash tools/macos/build.sh
 xcrun swiftc -swift-version 6 -warnings-as-errors -O \
     src/GHCPSpendTray.Mac/Models.swift src/GHCPSpendTray.Mac/Platform.swift \
-    tests/GHCPSpendTray.MacTests/PlatformTests.swift -o artifacts/macos/platform-tests
+    src/GHCPSpendTray.Mac/AppModel.swift src/GHCPSpendTray.Mac/TrayIconRenderer.swift \
+    -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
+    tests/GHCPSpendTray.MacTests/*.swift \
+    artifacts/macos/GHCPSpendTray.app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib \
+    -Xlinker -rpath -Xlinker @executable_path/GHCPSpendTray.app/Contents/Frameworks \
+    -o artifacts/macos/platform-tests
 artifacts/macos/platform-tests
 python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app

@@ -2,6 +2,34 @@ import AppKit
 import SwiftUI
 
 @MainActor
+protocol ApplicationBridge {
+    func request(_ fields: [String: Any]) throws -> Receipt
+    func poll() throws -> [BridgeEvent]
+    func shutdown()
+}
+
+@MainActor
+final class NativeApplicationBridge: ApplicationBridge {
+    func request(_ fields: [String: Any]) throws -> Receipt {
+        let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+        guard let text = String(data: data, encoding: .utf8) else { throw AppError.message("Cannot encode the application request.") }
+        return try text.withCString { pointer in
+            guard let response = ghcp_request(pointer) else { throw AppError.message("The shared engine returned no response.") }
+            defer { ghcp_free(response) }
+            return try JSONDecoder().decode(Receipt.self, from: Data(String(cString: response).utf8))
+        }
+    }
+
+    func poll() throws -> [BridgeEvent] {
+        guard let response = ghcp_poll() else { throw AppError.message("The shared engine stopped responding.") }
+        defer { ghcp_free(response) }
+        return try JSONDecoder().decode([BridgeEvent].self, from: Data(String(cString: response).utf8))
+    }
+
+    func shutdown() { ghcp_shutdown() }
+}
+
+@MainActor
 final class AppModel: ObservableObject {
     @Published var dashboard: Dashboard?
     @Published var settings: SettingsData?
@@ -10,8 +38,15 @@ final class AppModel: ObservableObject {
     @Published var error: String?
     @Published var notice: String?
     @Published var prompt: DevicePrompt?
-    @Published var identity: PendingIdentity?
     @Published var signingIn = false
+    @Published var connectingAccount = false
+    @Published var editingHost = false
+    @Published var codeCopied = false
+    @Published var clipboardError: String?
+    @Published var signInHost = "github.com"
+    @Published var signInClientId = ""
+    @Published var offlineAccess = false
+    @Published var hostDescription = ""
     @Published var showingSignIn = false
     @Published var reconnect: AccountData?
     @Published var reconnectClientId: String?
@@ -24,11 +59,18 @@ final class AppModel: ObservableObject {
     private var timer: Timer?
     private var callbacks: [String: (BridgeEvent) -> Void] = [:]
     private var signInId: String?
+    private var cancellingSignIn = false
     private var closed = false
+    private let bridge: any ApplicationBridge
+    var copyToClipboard: (String) -> Bool = { value in
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(value, forType: .string)
+    }
 
-    init(directory: URL, demo: Bool) {
+    init(directory: URL, demo: Bool, bridge: any ApplicationBridge = NativeApplicationBridge()) {
         self.directory = directory
         self.demo = demo
+        self.bridge = bridge
     }
 
     func start(empty: Bool) {
@@ -49,13 +91,7 @@ final class AppModel: ObservableObject {
         request["id"] = id
         request["method"] = method
         do {
-            let data = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
-            guard let text = String(data: data, encoding: .utf8) else { throw AppError.message("Cannot encode the application request.") }
-            let receipt: Receipt = try text.withCString { pointer in
-                guard let response = ghcp_request(pointer) else { throw AppError.message("The shared engine returned no response.") }
-                defer { ghcp_free(response) }
-                return try JSONDecoder().decode(Receipt.self, from: Data(String(cString: response).utf8))
-            }
+            let receipt = try bridge.request(request)
             if let error = receipt.error { throw AppError.message(error) }
             if let completion { callbacks[id] = completion }
             return id
@@ -79,11 +115,9 @@ final class AppModel: ObservableObject {
         }) == nil { busy = false }
     }
 
-    private func poll() {
-        guard let response = ghcp_poll() else { error = "The shared engine stopped responding."; return }
-        defer { ghcp_free(response) }
+    func poll() {
         do {
-            let events = try JSONDecoder().decode([BridgeEvent].self, from: Data(String(cString: response).utf8))
+            let events = try bridge.poll()
             for event in events {
                 if let settings = event.settings { self.settings = settings }
                 switch event.kind {
@@ -95,9 +129,15 @@ final class AppModel: ObservableObject {
                 case "completed":
                     if let id = event.id { callbacks.removeValue(forKey: id)?(event) }
                 case "prompt":
-                    if event.id == signInId { prompt = event.prompt; identity = nil }
-                case "identity":
-                    if event.id == signInId { identity = event.identity; prompt = nil }
+                    if event.id == signInId && !cancellingSignIn && !connectingAccount {
+                        prompt = event.prompt
+                        copyCode()
+                    }
+                case "authorized":
+                    if event.id == signInId && !cancellingSignIn {
+                        connectingAccount = true
+                        clearDevicePrompt()
+                    }
                 case "error":
                     error = event.error
                 case "platform":
@@ -126,10 +166,15 @@ final class AppModel: ObservableObject {
     }
 
     func addAccount() {
+        guard !busy else { return }
         reconnect = nil
         reconnectClientId = nil
-        openSettings(.accounts)
+        signInHost = "github.com"
+        signInClientId = ""
+        editingHost = false
         showingSignIn = true
+        openSettings(.accounts)
+        startSignIn()
     }
 
     func reconnectAccount(_ account: AccountData) {
@@ -137,37 +182,88 @@ final class AppModel: ObservableObject {
             guard let self, let preferences = event.preferences else { return }
             self.reconnect = account
             self.reconnectClientId = preferences.clientId
+            self.signInHost = account.host
+            self.signInClientId = preferences.clientId ?? ""
+            self.editingHost = preferences.clientId == nil && account.host != "github.com"
             self.showingSignIn = true
+            if self.editingHost { self.describeHost() }
+            else { self.startSignIn() }
         }
     }
 
-    func startSignIn(host: String, clientId: String, offline: Bool) {
+    func startSignIn() {
         guard !busy else { return }
         error = nil
-        prompt = nil
-        identity = nil
+        notice = nil
+        clearDevicePrompt()
+        connectingAccount = false
+        cancellingSignIn = false
+        editingHost = false
         signingIn = true
         busy = true
-        var fields: [String: Any] = ["host": host, "offlineAccess": offline]
-        if !clientId.isEmpty { fields["clientId"] = clientId }
+        var fields: [String: Any] = ["host": signInHost, "offlineAccess": offlineAccess]
+        if !signInClientId.isEmpty { fields["clientId"] = signInClientId }
         if let reconnect { fields["key"] = reconnect.key }
         signInId = send("signin", fields: fields) { [weak self] event in
             guard let self else { return }
             self.busy = false
             self.signingIn = false
-            self.prompt = nil
-            self.identity = nil
+            self.connectingAccount = false
+            self.clearDevicePrompt()
             self.signInId = nil
-            if let error = event.error { self.error = error }
-            else { self.notice = "Account connected."; self.showingSignIn = false }
+            let wasCancelled = self.cancellingSignIn || event.cancelled
+            self.cancellingSignIn = false
+            if !wasCancelled {
+                if let error = event.error { self.error = error }
+                else {
+                    self.notice = self.reconnect == nil ? "Account connected." : "Account reconnected."
+                    self.showingSignIn = false
+                }
+            }
         }
         if signInId == nil { busy = false; signingIn = false }
     }
 
     func cancelSignIn() {
-        if signingIn { send("signin.cancel") }
+        if signingIn { cancellingSignIn = true; send("signin.cancel") }
+        clearDevicePrompt()
+    }
+
+    private func clearDevicePrompt() {
         prompt = nil
-        identity = nil
+        codeCopied = false
+        clipboardError = nil
+    }
+
+    func changeHost() {
+        guard reconnect == nil && !connectingAccount else { return }
+        cancelSignIn()
+        editingHost = true
+        error = nil
+        notice = nil
+        describeHost()
+    }
+
+    func setHost(_ host: String) {
+        guard reconnect == nil && signInHost != host else { return }
+        signInHost = host
+        signInClientId = ""
+        describeHost()
+    }
+
+    func describeHost() {
+        hostDescription = ""
+        let host = signInHost
+        guard !host.isEmpty else { return }
+        send("host.describe", fields: ["host": host]) { [weak self] event in
+            if self?.signInHost == host { self?.hostDescription = event.text ?? "" }
+        }
+    }
+
+    func copyCode() {
+        guard let prompt else { return }
+        codeCopied = copyToClipboard(prompt.code)
+        clipboardError = codeCopied ? nil : "Could not copy the code. Select it and copy manually, or try Copy Code again."
     }
 
     func openURL(_ value: String) {
@@ -197,6 +293,6 @@ final class AppModel: ObservableObject {
         closed = true
         timer?.invalidate()
         timer = nil
-        ghcp_shutdown()
+        bridge.shutdown()
     }
 }

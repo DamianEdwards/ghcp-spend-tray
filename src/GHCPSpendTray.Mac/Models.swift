@@ -1,5 +1,19 @@
 import Foundation
 
+enum SettingsPage: String, CaseIterable, Identifiable {
+    case usage = "Usage", accounts = "Accounts", general = "General", notifications = "Notifications", about = "About"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .usage: return "chart.bar"
+        case .accounts: return "person.crop.circle"
+        case .general: return "gear"
+        case .notifications: return "bell"
+        case .about: return "info.circle"
+        }
+    }
+}
+
 struct SettingsData: Codable {
     var pollMinutes: Int
     var thresholds: String
@@ -8,6 +22,9 @@ struct SettingsData: Codable {
     var spendIncrementUsd: Decimal?
     var canChangeStartup: Bool
     var startupDescription: String
+    var trayStyle: TrayIconStyle = .pie
+    var trayMode: TrayDisplayMode = .rollUp
+    var excludedTrayAccounts: [String]?
 }
 
 struct Dashboard: Decodable {
@@ -18,6 +35,7 @@ struct Dashboard: Decodable {
     let consumptionUsd: Decimal?
     let isComplete: Bool
     let isLastKnown: Bool
+    let tray: TrayPresentation?
 }
 
 struct AccountData: Decodable, Identifiable {
@@ -62,12 +80,6 @@ struct DevicePrompt: Decodable {
     let expires: String
 }
 
-struct PendingIdentity: Decodable {
-    let host: String
-    let userId: Int64
-    let login: String
-}
-
 struct Tokens: Codable {
     let version: Int
     let accessToken: String
@@ -85,8 +97,9 @@ struct BridgeEvent: Decodable {
     let dashboard: Dashboard?
     let settings: SettingsData?
     let preferences: AccountPreferences?
+    let tray: TrayPresentation?
     let prompt: DevicePrompt?
-    let identity: PendingIdentity?
+    let cancelled: Bool
     let operation: String?
     let target: String?
     let tokens: Tokens?
@@ -97,6 +110,40 @@ struct BridgeEvent: Decodable {
 }
 
 struct Receipt: Decodable { let error: String? }
+
+enum TrayIconStyle: Int, Codable, CaseIterable {
+    case pie, percentage
+}
+
+enum TrayDisplayMode: Int, Codable, CaseIterable {
+    case rollUp, perAccount
+}
+
+struct TrayIndicator: Decodable, Identifiable, Sendable {
+    var id: String { accountKey ?? "rollup" }
+    let accountKey: String?
+    let name: String
+    let percent: Double?
+    let includedAccounts: Int
+    let selectedAccounts: Int
+    let details: String
+    let tooltip: String
+    let isPartial: Bool
+    let isOverAllocation: Bool
+    let valueText: String
+    let numericText: String
+
+    static let unavailable = TrayIndicator(accountKey: nil, name: "GHCPSpendTray", percent: nil,
+        includedAccounts: 0, selectedAccounts: 0, details: "Consumption unavailable.",
+        tooltip: "GHCPSpendTray | Consumption unavailable", isPartial: false, isOverAllocation: false,
+        valueText: "Unavailable", numericText: "?")
+}
+
+struct TrayPresentation: Decodable {
+    let style: TrayIconStyle
+    let rollUp: TrayIndicator
+    let icons: [TrayIndicator]
+}
 
 enum AppError: LocalizedError {
     case message(String)

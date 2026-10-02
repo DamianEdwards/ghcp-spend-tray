@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][ValidateSet('makeappx.exe', 'signtool.exe')][string] $Name)
+param([Parameter(Mandatory)][ValidateSet('makeappx.exe', 'makepri.exe', 'signtool.exe')][string] $Name)
 $ErrorActionPreference = 'Stop'
 $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
 $tool = Get-ChildItem -LiteralPath $kits -Directory |

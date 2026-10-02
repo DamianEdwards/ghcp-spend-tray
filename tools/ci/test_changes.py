@@ -9,7 +9,7 @@ class ChangesTests(unittest.TestCase):
                      "tools/macos/build.sh", ".github/workflows/release-macos.yml"):
             self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
-                     "packaging/AppxManifest.xml", "tools/publish.ps1", ".github/workflows/store-package.yml",
+                     "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1", ".github/workflows/store-package.yml",
                      ".github/workflows/release.yml"):
             self.assertEqual(classify([path]), dict(windows=True, macos=False, markdown=False), path)
 
@@ -17,7 +17,9 @@ class ChangesTests(unittest.TestCase):
         for path in ("src/GHCPSpendTray.Core/Models.cs", "src/GHCPSpendTray.Application/UiModels.cs",
                      "global.json", "Directory.Build.props", ".github/workflows/verify.yml",
                      "tools/ci/changes.py", "tests/GHCPSpendTray.SharedTests/Program.cs", "new-file",
-                     "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png"):
+                     "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",
+                     "src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-32.png",
+                     "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo-small.svg", "tools/assert-verification.ps1"):
             self.assertEqual(classify([path]), dict(windows=True, macos=True, markdown=False), path)
 
     def test_documentation(self):
