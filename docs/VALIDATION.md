@@ -16,6 +16,7 @@ reimplementing them in Swift.
 | Keychain | Uniquely named synthetic device-local item create/read/update/delete, missing-item behavior and target isolation exercised using Security.framework; no real account credentials read |
 | Swift formatting | Exact cents, invalid/negative amount rejection, unavailable-not-zero display and C# timestamp parsing checked |
 | Automation | Platform-routing and separate-version tests pass; PowerShell Store/release tests pass with Mac releases excluded from Windows selection; workflows pass actionlint |
+| Unified release planning | Synthetic tests cover per-platform stable baselines and bump resets, first-release baseline `0.0.0` (default Minor gives `0.1.0`), no-release selections, numeric package bounds, preview/draft/tag collisions, pagination/API errors, original-plan replay and already-published provenance. No production signing or release is triggered by these tests |
 | Windows extraction | Windows platform adapter test project compiles on macOS; full WinUI build/execution requires Windows SDK executables and remains a Windows CI gate |
 | Production distribution | Signing/notarization automation implemented; not executed locally without the owner's Developer ID/API credentials |
 

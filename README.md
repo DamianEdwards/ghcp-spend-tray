@@ -89,6 +89,12 @@ local settings, history, and Keychain credentials. Windows (`v*`) and macOS
 (`macos-v*`) releases have independent versions; neither platform upgrades or
 migrates the other's local data. The Mac app does not use the App Store.
 
+Maintainers publish either or both platforms through **Actions > Release**.
+Each platform has `no release`, `Major`, `Minor`, or `Patch` choices (default
+`Minor`), calculated from its latest stable release. With none, the baseline
+is `0.0.0`, making the default first release `0.1.0`.
+See [release setup and retry rules](docs/RELEASING.md).
+
 ## Connect an account
 
 1. Open the tray flyout and choose the connect button, or open

@@ -19,13 +19,14 @@ def classify(paths):
             "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo-small.svg",
             *(f"src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-{size}.png" for size in (16, 32, 64, 256)),
             "tools/assert-verification.ps1",
+            ".github/workflows/release.yml",
         }:
             result.update(windows=True, macos=True)
-        elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/")) or path == ".github/workflows/release-macos.yml":
+        elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/")):
             result["macos"] = True
         elif path.startswith(("src/GHCPSpendTray.App/", "tests/GHCPSpendTray.AppTests/", "tests/GHCPSpendTray.PlatformTests/")) or (
             path.startswith("tools/") and path.endswith(".ps1")
-        ) or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/release.yml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
+        ) or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
             result["windows"] = True
         else:
             # Shared sources, tests, SDK, CI routing, or an unfamiliar path run both.

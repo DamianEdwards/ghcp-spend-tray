@@ -1,14 +1,30 @@
-name: Release Windows
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Increasing Windows version (e.g. 0.2.0), independent of macOS; package revision is zero
+      windows_bump:
+        description: Windows version bump from its latest non-preview release
         required: true
-        type: string
+        type: choice
+        default: Minor
+        options:
+          - no release
+          - Major
+          - Minor
+          - Patch
+      macos_bump:
+        description: macOS version bump from its latest non-preview release
+        required: true
+        type: choice
+        default: Minor
+        options:
+          - no release
+          - Major
+          - Minor
+          - Patch
       prerelease:
-        description: Mark this GitHub release as a preview
+        description: Mark all selected platform releases as previews
         type: boolean
         default: true
 
@@ -16,12 +32,52 @@ permissions:
   contents: read
 
 concurrency:
-  group: ghcpspendtray-release-windows
+  group: ghcpspendtray-release
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build, sign and publish
+  plan:
+    name: Select platform versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      windows_release: ${{ steps.plan.outputs.windows_release }}
+      windows_version: ${{ steps.plan.outputs.windows_version }}
+      macos_release: ${{ steps.plan.outputs.macos_release }}
+      macos_version: ${{ steps.plan.outputs.macos_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Restore original versions on a rerun
+        if: github.run_attempt > 1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-plan-${{ github.run_id }}
+          path: artifacts/release-plan
+      - name: Resolve independent platform bumps
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOWS_BUMP: ${{ inputs.windows_bump }}
+          MACOS_BUMP: ${{ inputs.macos_bump }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: python3 tools/release/plan.py
+      - name: Preserve release plan before building or signing
+        if: github.run_attempt == 1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-plan-${{ github.run_id }}
+          path: artifacts/release-plan/plan.json
+          if-no-files-found: error
+          retention-days: 90
+
+  windows:
+    name: Build, sign and publish Windows
+    needs: plan
+    if: needs.plan.outputs.windows_release == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     environment: production
@@ -30,7 +86,7 @@ jobs:
       id-token: write
       attestations: write
     env:
-      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.windows_version }}
       PRERELEASE: ${{ inputs.prerelease }}
       MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
       MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
@@ -76,9 +132,9 @@ jobs:
                   throw "Release version must exceed $tag."
               }
           }
-          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --paginate --slurp
           if ($LASTEXITCODE -ne 0) { throw 'Could not query releases.' }
-          $existingRelease = @($json | ConvertFrom-Json) | Where-Object tag_name -eq $release.Tag
+          $existingRelease = @($json | ConvertFrom-Json | ForEach-Object { $_ }) | Where-Object tag_name -eq $release.Tag
           if ($existingRelease -and -not $existingRelease.draft) { throw 'This release is already public; published assets are immutable.' }
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -135,6 +191,7 @@ jobs:
               version = $env:RELEASE_VERSION
               packageVersion = "$env:RELEASE_VERSION.0"
               sourceCommit = $env:GITHUB_SHA
+              releaseRunId = $env:GITHUB_RUN_ID
               identityName = $env:MSIX_IDENTITY_NAME
               publisher = $env:MSIX_PUBLISHER
               signed = $true
@@ -166,9 +223,9 @@ jobs:
               $remoteCommit = ($remote[0] -split '\s+')[0]
               if ($remoteCommit -ne $env:GITHUB_SHA) { throw 'Release tag changed during build.' }
           }
-          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --paginate --slurp
           if ($LASTEXITCODE -ne 0) { throw 'Could not query releases.' }
-          $existing = @($json | ConvertFrom-Json) | Where-Object tag_name -eq $tag
+          $existing = @($json | ConvertFrom-Json | ForEach-Object { $_ }) | Where-Object tag_name -eq $tag
           if ($existing -and -not $existing.draft) { throw 'Refusing to overwrite a public release.' }
           if (-not $existing) {
               $arguments = @('release', 'create', $tag, '--verify-tag', '--draft', '--generate-notes', '--title', "GHCPSpendTray for Windows $env:RELEASE_VERSION")
@@ -220,3 +277,56 @@ jobs:
           $releaseUrl = "$repositoryUrl/releases/tag/v$env:RELEASE_VERSION"
           $commitUrl = "$repositoryUrl/commit/$env:GITHUB_SHA"
           "Published signed [GHCPSpendTray $env:RELEASE_VERSION]($releaseUrl) from [``$($env:GITHUB_SHA.Substring(0, 7))``]($commitUrl)." >> $env:GITHUB_STEP_SUMMARY
+
+  macos:
+    name: Build, sign, notarize and publish macOS
+    needs: plan
+    if: needs.plan.outputs.macos_release == 'true'
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: production-macos
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ needs.plan.outputs.macos_version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout pinned main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate macOS version and verified main source
+        run: python3 tools/macos/release.py validate "$RELEASE_VERSION"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Verify shared engine and universal native app
+        run: bash tools/macos/verify.sh
+      - name: Build release version
+        run: |
+          channel=Stable
+          if [ "$PRERELEASE" = true ]; then channel=Preview; fi
+          bash tools/macos/build.sh "$RELEASE_VERSION" "$channel"
+      - name: Sign, notarize, staple and verify the application and disk image
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: bash tools/macos/sign-package.sh "$RELEASE_VERSION"
+      - name: Attest notarized disk image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ./artifacts/macos-release/*.dmg
+      - name: Stage draft and verify downloaded assets
+        run: python3 tools/macos/release.py stage "$RELEASE_VERSION"
+      - name: Publish verified macOS release
+        run: |
+          python3 tools/macos/release.py publish "$RELEASE_VERSION"
+          echo "Published notarized [macOS $RELEASE_VERSION]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/macos-v$RELEASE_VERSION) from [$GITHUB_SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)." >> "$GITHUB_STEP_SUMMARY"

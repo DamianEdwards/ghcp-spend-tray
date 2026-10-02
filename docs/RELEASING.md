@@ -3,9 +3,67 @@
 Windows and macOS are independently versioned and released. Windows keeps
 the existing `v<version>` tags and MSIX/Store identity; macOS uses
 `macos-v<version>` tags and a universal Developer ID signed/notarized app.
-Dispatch **Release Windows** or **Release macOS** for the desired platform.
-Neither release workflow builds the other frontend. Shared changes should
-normally receive a release on both platforms, but their numbers need not match.
+Dispatch **Release** and choose a version bump independently for each platform.
+Only selected platforms build, request environment approval, and publish.
+Shared changes should normally receive a release on both platforms, but their
+numbers need not match.
+
+## Choose platforms and version bumps
+
+The **Release** workflow has these inputs:
+
+| Input | Choices | Default |
+|---|---|---|
+| Windows version bump | `no release`, `Major`, `Minor`, `Patch` | `Minor` |
+| macOS version bump | `no release`, `Major`, `Minor`, `Patch` | `Minor` |
+| Mark selected releases as previews | Checkbox applying to both selected platforms | Checked |
+
+For each selected platform, the workflow paginates GitHub releases and uses
+the highest three-part version among that platform's published non-preview
+releases. It does not use the repository-wide "latest" designation, draft
+releases, or previews as the baseline. Major resets minor and patch to zero;
+Minor resets patch to zero; Patch increments patch only. With no stable
+release for a platform, the starting baseline is `0.0.0`: the default Minor
+produces `0.1.0`, Major produces `1.0.0`, and Patch produces `0.0.1`.
+The baseline itself is never published.
+
+For example, Windows `v0.3.1` plus **Minor** becomes `v0.4.0`; if Mac has no
+stable release, its **Minor** selection becomes `macos-v0.1.0`. Set a platform
+to **no release** to skip it, including its signing configuration/approval.
+Selecting **no release** for both produces a successful no-op summary, with
+no native build or publication.
+
+The preview checkbox changes GitHub release classification, not the numeric
+version or baseline. Existing tags, drafts and public previews still reserve
+their numbers: if stable `v0.3.1` plus Minor would reuse preview `v0.4.0`, or
+would be below an already tagged version, planning stops before either
+platform builds. It never silently advances to a different version or promotes
+an existing preview. Select a larger bump or **no release** instead.
+Package-specific limits are checked before builds.
+
+The read-only planning job displays both calculated versions in its summary
+and saves `release-plan-<run-id>` as an immutable Actions artifact before
+either platform starts. Release dispatches share a concurrency group so
+version selection/publication cannot race another run of this workflow.
+The Windows and Mac jobs then run independently with their existing protected
+environments; one can succeed even if the other fails.
+
+### Retrying a release
+
+Use **Re-run all jobs** on the original run. The plan is restored, not
+recalculated from a now-newer stable release. If a platform already published,
+the planner verifies the public release's tag, source, preview status and
+`releaseRunId` metadata before skipping it. Unpublished platforms resume the
+same planned version; only same-source tags and draft assets may be reused.
+Public releases are never overwritten.
+
+Re-running failed jobs alone retains the original successful planning outputs,
+so it also never bumps again, but an ambiguous failure after publication may
+need **Re-run all jobs** to recognize the completed platform. A missing or
+expired plan (retained for 90 days), different source/run provenance, or a
+newer tag stops the retry. If planning or artifact upload failed before any
+platform began, start a new dispatch rather than inventing a replacement plan.
+Do not run older copies of the pre-unification release workflows concurrently.
 
 ## Reserve the Microsoft Store product
 
@@ -66,7 +124,7 @@ Environment **variables**:
 deployment branches to `main` before using it. Set its environment **variables**
 to `STORE_ID`, `STORE_IDENTITY_NAME`, `STORE_PUBLISHER`, and
 `STORE_PUBLISHER_DISPLAY_NAME` from Partner Center (copy the previously
-configured Store variables from `production`). **Release Windows** does not consume them.
+configured Store variables from `production`). **Release** does not consume them.
 Both channels use the name `DamianEdwards.GHCPSpendTray`, but their configured
 publishers differ; they therefore have separate package families.
 
@@ -120,7 +178,7 @@ Audience: api://AzureADTokenExchange
 `azure/login` uses this credential without a subscription or client secret,
 and the workflow requests a token for `https://manage.devcenter.microsoft.com`
 via Azure CLI. The Store publishing identity is distinct from the signing
-identity used by **Release Windows**. Store submission API documentation illustrates
+identity used by **Release**. Store submission API documentation illustrates
 client-secret authentication, but Entra supports federated client credentials.
 Use the read-only access check below before the first Store submission.
 
@@ -182,8 +240,8 @@ changes run Mac checks on Apple silicon and Intel. Changes to shared C# code,
 SDK/build configuration, CI routing, or unrecognized paths run both. Markdown
 changes run the Markdown job without native builds. Manual Verify runs run all
 checks. The stable **Verification** gate requires all applicable jobs to
-succeed and fails if change detection fails. Release workflows check that gate
-on the pinned main commit and rerun their own platform's verification before
+succeed and fails if change detection fails. Selected Release jobs check that gate
+on the pinned main commit and rerun their platform's verification before
 publishing, even when its previous main checks were legitimately skipped.
 
 Verify runs managed/Native AOT tests and packaging/startup smoke on separate
@@ -207,10 +265,11 @@ and the release-source check continue to use the same **Verification** name.
    and timeouts fail verification; the registration is removed afterward.
    Developer Mode is enabled only on the disposable hosted runner, and the
    `packaged-smoke-diagnostics` artifact retains the transcript.
-2. Run **Actions > Release Windows > Run workflow** from `main`. Supply an increasing
-   three-part version, such as `0.2.0`, and select whether it is a prerelease.
-   Every release, including previews, needs a higher numeric package version;
-   preview labels do not participate in MSIX version ordering.
+2. Run **Actions > Release > Run workflow** from `main`. Choose the Windows
+   bump and set macOS to **no release** for a Windows-only release. Choose
+   whether the selected releases are previews. The planning job calculates
+   the versions using the rules above; no explicit version input is required.
+   Every release, including previews, needs a higher numeric package version.
 3. Approve the `production` environment. The workflow pins the selected commit,
    rechecks verification, rebuilds, signs, verifies, attests, tags that source,
    and uploads a draft release. It downloads the assets and verifies their bytes,
@@ -226,11 +285,11 @@ Published assets:
 - `GHCPSpendTray-<version>.msixbundle` -- signed x64 and ARM64 application bundle.
 - `GHCPSpendTray-<version>-symbols.zip` -- native debug symbols, outside the app.
 - `SHA256SUMS` -- hashes calculated after signing.
-- `release.json` -- version, identity and source commit.
+- `release.json` -- version, identity, source commit and originating workflow run ID.
 
 GitHub artifact attestations are associated with the bundle and symbols archive.
-A failed run leaves a draft, not an unsigned public release. Rerun the original
-workflow run to resume the same source/version; it may replace draft assets but
+A failed run leaves a draft, not an unsigned public release. Rerun all jobs of
+the original workflow to restore the same source/version; it may replace draft assets but
 never replaces a public release or moves a tag. If a later version has already
 been tagged, release a new higher version instead.
 
@@ -453,10 +512,12 @@ credentials/Keychain are removed by the script's exit trap.
 1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
    Mac-relevant changes run managed and native shared tests plus universal
    builds/smoke checks on both Apple silicon and Intel runners.
-2. Dispatch **Release macOS** from `main` with an increasing three-part Mac
-   version and optional preview designation. Approve **production-macos**.
+2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
+   to **no release** for a Mac-only release. Choose the preview designation,
+   review the calculated versions, and approve **production-macos**.
    macOS version components are limited to major `0..9999`, minor/patch
-   `0..99`; `0.0.0` is forbidden. Previews still use increasing numeric versions.
+   `0..99`; `0.0.0` is forbidden. A bump exceeding these limits fails rather
+   than wrapping to a different component.
 3. The workflow validates source/version, reruns Mac verification, rebuilds with
    that version, signs/notarizes, exercises the hardened app with synthetic
    data, attests the DMG, and creates a `macos-v<version>` draft release.
@@ -465,7 +526,8 @@ credentials/Keychain are removed by the script's exit trap.
 
 Mac release assets are `GHCPSpendTray-macOS-<version>.dmg`,
 `release-macos.json`, and `SHA256SUMS`. Metadata records platform, version,
-source commit, bundle identifier, architectures, and notarization. Mac releases
+source commit, originating workflow run ID, bundle identifier, architectures,
+and notarization. Mac releases
 use `--latest=false` so they do not displace the repository's Windows "latest"
 download. Store selection additionally filters to Windows tags and does not
 rely on that convention.
@@ -477,8 +539,8 @@ non-synchronizing, device-local login Keychain items under that service,
 partitioned by OAuth registration and canonical host/user identity.
 
 Missing signing configuration or a rejected notarization stops publication.
-A failed release can leave a draft/tag; rerun the original workflow for the
-same commit/version. A public release is never replaced and an existing tag
+A failed release can leave a draft/tag; rerun all jobs of the original workflow
+to restore its version plan. A public release is never replaced and an existing tag
 cannot move. Newer tags require a new higher version within the same platform.
 Before production acceptance, complete the Mac checklist in
 [VALIDATION.md](VALIDATION.md), including clean install/update, login startup,

@@ -29,6 +29,9 @@ app packaging, synthetic Keychain CRUD, and native UI smoke runs. Production
 Mac signing also requires Xcode's `notarytool` and configured Apple credentials.
 Mac versions live in `packaging/macos/version.txt` for development and
 `macos-v*` release tags; Windows keeps `v*` tags. Preserve independent versioning.
+The unified Release workflow selects independent bumps from stable releases
+and persists its version plan across retries. Test changes with
+`python3 -m unittest discover -s tools/release`.
 Keep `tools/ci/changes.py` and its tests current when adding platform paths.
 
 Preserve Native AOT compatibility and the component-only Windows App SDK

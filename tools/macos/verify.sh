@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 case "$(uname -m)" in arm64) rid=osx-arm64 ;; x86_64) rid=osx-x64 ;; *) echo "Unsupported Mac architecture" >&2; exit 1 ;; esac
 python3 -m unittest discover -s tools/ci -p 'test_*.py'
+python3 -m unittest discover -s tools/release -p 'test_*.py'
 python3 -m unittest discover -s tools/macos -p 'test_*.py'
 for name in GHCPSpendTray.Tests GHCPSpendTray.SharedTests; do
     dotnet run --project "tests/$name" -c Release | tail -n 1

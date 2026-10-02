@@ -29,6 +29,8 @@ jobs:
           fetch-depth: 0
       - name: Test platform routing
         run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
+      - name: Test release selection and retry safety
+        run: python3 -m unittest discover -s tools/release -p 'test_*.py'
       - name: Detect relevant changes
         id: changes
         env:

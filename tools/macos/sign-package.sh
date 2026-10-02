@@ -72,7 +72,8 @@ import hashlib, json, os
 from pathlib import Path
 root = Path("artifacts/macos-release")
 metadata = dict(platform="macos", version=os.environ["GHCP_MAC_VERSION"],
-                sourceCommit=os.environ["GITHUB_SHA"], signed=True, notarized=True,
+                sourceCommit=os.environ["GITHUB_SHA"], releaseRunId=os.environ["GITHUB_RUN_ID"],
+                signed=True, notarized=True,
                 architectures=["arm64", "x86_64"], minimumOS="14.0",
                 bundleIdentifier="com.damianedwards.GHCPSpendTray")
 root.joinpath("release-macos.json").write_text(json.dumps(metadata, indent=2) + "\n")
