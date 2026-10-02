@@ -1,5 +1,60 @@
 # GHCPSpendTray validation and release gates
 
+## macOS implementation evidence (October 1, 2026)
+
+The native Mac frontend shares the C# controller, host-scoped OAuth, decimal
+accounting, storage, scheduler and alerts with Windows, rather than
+reimplementing them in Swift.
+
+| Check | Evidence |
+|---|---|
+| Shared engine | 155 Core tests and 49 shared controller/bridge assertions pass under managed .NET and executed arm64 Native AOT; tray weighting/eligibility, persistence, exclusion-preserving reconnect, and draft-preview isolation use the same C# code on both platforms |
+| Native app | Universal arm64/x86_64 SwiftUI executable and C# Native AOT library build with warnings treated as errors; bundle versions, both slices, dependency paths and ad-hoc signatures checked |
+| UI smoke | Empty/populated launches, navigation/rendering of all five settings pages, onboarding sheet, exact synthetic $42.75 summary, 34.2% weighted allocation, draft-vs-saved indicators, per-account selection/navigation, unavailable fallback and normal shutdown exercised on Apple silicon. The pre-sync Intel slice also passed under Rosetta; native Intel is a CI gate |
+| Native model tests | Synthetic bridge/clipboard fixtures exercise immediate github.com sign-in, automatic code copy and retry, automatic completion, cancellation draining, late callback suppression, custom hosts and immutable reconnect. Pie/percentage/unavailable template graphics contain visible antialiased glyphs on a transparent background |
+| Notification permission UX | Synthetic service fixtures cover explicit first-use permission, denial without a repeated prompt, opening Settings, refresh after external changes, quiet delivery, actual API errors, in-flight deduplication and side-effect-free demo/background behavior. System Settings deep-link selection may vary by macOS release; the UI includes manual navigation fallback |
+| Keychain | Uniquely named synthetic device-local item create/read/update/delete, missing-item behavior and target isolation exercised using Security.framework; no real account credentials read |
+| Swift formatting | Exact cents, invalid/negative amount rejection, unavailable-not-zero display and C# timestamp parsing checked |
+| Automation | Platform-routing and separate-version tests pass; PowerShell Store/release tests pass with Mac releases excluded from Windows selection; workflows pass actionlint |
+| Unified release planning | Synthetic tests cover per-platform stable baselines and bump resets, first-release baseline `0.0.0` (default Minor gives `0.1.0`), no-release selections, numeric package bounds, preview/draft/tag collisions, pagination/API errors, original-plan replay and already-published provenance. No production signing or release is triggered by these tests |
+| Windows extraction | Windows platform adapter test project compiles on macOS; full WinUI build/execution requires Windows SDK executables and remains a Windows CI gate |
+| Production distribution | Signing/notarization automation implemented; not executed locally without the owner's Developer ID/API credentials |
+
+Reproduce with `bash tools/macos/verify.sh`. To exercise the Intel slice on
+Apple silicon with Rosetta already installed:
+
+```bash
+python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app --arch x86_64
+```
+
+Smoke mode requires a unique absolute `--data-dir`, uses only synthetic
+accounts, and disables authentication, notifications and login startup.
+The smoke launcher uses a temporary directory and a bounded subprocess
+lifetime, then deletes its synthetic data. Render snapshots demonstrate view
+creation, not pixel-perfect layout or VoiceOver correctness; AppKit snapshots
+can omit GPU-composited SwiftUI text. No screenshot or accessibility
+permission is requested or changed by these tests.
+
+### Required before macOS production acceptance
+
+- Run both native architecture CI jobs; Rosetta is not Intel hardware evidence.
+- Install the signed/notarized DMG on a clean standard-user Mac with Gatekeeper
+  enabled, and update between two signed versions without losing settings,
+  history, credentials or login preference.
+- Complete real device sign-in, automatic identity verification/save, reconnect, rotation and
+  explicit credential removal with approved test accounts, on supported hosts.
+- Confirm login startup remains opt-in/hidden, including approval-required and
+  externally disabled states, and catch-up after sleep/network recovery.
+- Exercise notification permission grant/denial, Focus suppression, threshold
+  deduplication, and notification-click account navigation.
+- Check light/dark appearance, small displays, menu-bar overflow, keyboard
+  navigation, VoiceOver, and native sheet/window behavior interactively.
+- Confirm uninstall cleanup guidance, residual Keychain items, and stable
+  signing-team access across upgrades.
+
+These outstanding OS/distribution checks are not established by synthetic
+tests. Mac releases do not imply App Store review or submission.
+
 ## Packaged startup resource regression (October 1, 2026)
 
 Store version 0.3.0 crashed before the app's UI exception handler was installed:

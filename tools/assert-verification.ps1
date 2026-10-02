@@ -3,16 +3,19 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $needs = $NeedsJson | ConvertFrom-Json
 if ($needs.changes.result -cne 'success') {
-    throw "Change detection/Markdown checks did not succeed: $($needs.changes.result)"
+    throw "Change detection did not succeed: $($needs.changes.result)"
 }
-$expected = switch -CaseSensitive ($needs.changes.outputs.run_validation) {
-    'true' { 'success' }
-    'false' { 'skipped' }
-    default { throw 'Missing or invalid source-change decision.' }
-}
-foreach ($job in @('tests', 'package')) {
-    if ($needs.$job.result -cne $expected) {
-        throw "Verification job '$job' must be '$expected', but was '$($needs.$job.result)'."
+foreach ($platform in @('windows', 'macos', 'markdown')) {
+    $expected = switch -CaseSensitive ($needs.changes.outputs.$platform) {
+        'true' { 'success' }
+        'false' { 'skipped' }
+        default { throw "Missing or invalid $platform change decision." }
+    }
+    $jobs = if ($platform -eq 'windows') { @('tests', 'package') } else { @($platform) }
+    foreach ($job in $jobs) {
+        if ($needs.$job.result -cne $expected) {
+            throw "Verification job '$job' must be '$expected', but was '$($needs.$job.result)'."
+        }
     }
 }
 Write-Output 'PASS: all applicable verification jobs succeeded.'

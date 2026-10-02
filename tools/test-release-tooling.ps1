@@ -30,31 +30,36 @@ Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' | ForEach-Object {
 if ($errors.Count) { throw ($errors | Out-String) }
 $gate = Join-Path $PSScriptRoot 'assert-verification.ps1'
 $results = @('success', 'failure', 'cancelled', 'skipped')
-foreach ($runValidation in @('true', 'false', '')) {
-    foreach ($changes in $results) {
-        foreach ($tests in $results) {
-            foreach ($package in $results) {
-                $needs = @{
-                    changes = @{ result = $changes; outputs = @{ run_validation = $runValidation } }
-                    tests = @{ result = $tests }
-                    package = @{ result = $package }
-                } | ConvertTo-Json -Depth 3
-                $expected = $changes -eq 'success' -and (
-                    ($runValidation -eq 'true' -and $tests -eq 'success' -and $package -eq 'success') -or
-                    ($runValidation -eq 'false' -and $tests -eq 'skipped' -and $package -eq 'skipped'))
-                $accepted = $true
-                try { & $gate -NeedsJson $needs | Out-Null }
-                catch { $accepted = $false }
-                if ($accepted -ne $expected) {
-                    throw "Incorrect verification gate: validation=$runValidation changes=$changes tests=$tests package=$package"
+foreach ($windows in @('true', 'false')) {
+    foreach ($macos in @('true', 'false')) {
+        foreach ($markdown in @('true', 'false')) {
+            $needs = @{
+                changes = @{ result = 'success'; outputs = @{ windows = $windows; macos = $macos; markdown = $markdown } }
+                tests = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
+                package = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
+                macos = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                markdown = @{ result = $(if ($markdown -eq 'true') { 'success' } else { 'skipped' }) }
+            }
+            foreach ($job in @('changes', 'tests', 'package', 'macos', 'markdown')) {
+                $original = $needs[$job].result
+                foreach ($result in $results) {
+                    $needs[$job].result = $result
+                    $accepted = $true
+                    try { & $gate -NeedsJson ($needs | ConvertTo-Json -Depth 3) | Out-Null }
+                    catch { $accepted = $false }
+                    if ($accepted -ne ($result -eq $original)) {
+                        throw "Incorrect verification gate: windows=$windows macos=$macos markdown=$markdown job=$job result=$result"
+                    }
                 }
+                $needs[$job].result = $original
             }
         }
     }
 }
 foreach ($needs in @('invalid', '{}',
-    '{"changes":{"result":"success","outputs":{"run_validation":"true"}}}',
-    '{"changes":{"result":"success","outputs":{"run_validation":"false"}}}',
+    '{"changes":{"result":"success","outputs":{"windows":"true","macos":"true","markdown":"true"}}}',
+    '{"changes":{"result":"success","outputs":{"windows":"false","macos":"false","markdown":"false"}}}',
+    '{"changes":{"result":"success","outputs":{"windows":"","macos":"false","markdown":"false"}},"tests":{"result":"skipped"},"package":{"result":"skipped"},"macos":{"result":"skipped"},"markdown":{"result":"skipped"}}',
     '{"changes":{"result":"success","outputs":{}},"tests":{"result":"success"},"package":{"result":"success"}}')) {
     $rejected = $false
     try { & $gate -NeedsJson $needs | Out-Null }

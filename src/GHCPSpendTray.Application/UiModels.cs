@@ -1,30 +1,39 @@
 using GHCPSpendTray.Core;
 
-namespace GHCPSpendTray.App;
+namespace GHCPSpendTray.Shared;
 
-internal sealed class AppOperationException(string message) : Exception(message);
-internal sealed record AccountDiagnostics(decimal? CreditsUsed, decimal? ObservedConsumptionUsd,
+public sealed class AppOperationException(string message) : Exception(message);
+public class PlatformOperationException(string message) : Exception(message);
+public sealed record AccountDiagnostics(decimal? CreditsUsed, decimal? ObservedConsumptionUsd,
     decimal? ObservedAllocationUsd, decimal? ObservedPercentConsumed, bool Unlimited, DateTimeOffset? SourceTimestampUtc,
     DateTimeOffset? ResetAtUtc, DateTimeOffset? NextRefreshUtc, string? PeriodId,
     bool IsCurrentPeriod, string? Message);
-internal sealed record AccountView(string Key, string Name, string Login, string Host, AccountDiagnostics Details,
+public sealed record AccountView(string Key, string Name, string Login, string Host, AccountDiagnostics Details,
     decimal? Percent,
     decimal? ConsumptionUsd = null, decimal? AllocationUsd = null, string Freshness = "", DateTimeOffset? UpdatedAt = null,
     string? AvatarUrl = null);
-internal sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
+public sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
     decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false,
     TrayPresentation? Tray = null, IReadOnlyList<AccountState>? TrayStates = null);
-internal sealed record SettingsView(int PollMinutes, string Thresholds, bool Notifications, bool Startup,
+public sealed record SettingsView(int PollMinutes, string Thresholds, bool Notifications, bool Startup,
     decimal? SpendIncrementUsd = null, bool CanChangeStartup = false,
     string StartupDescription = "Unavailable in isolated portable mode.",
     TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
     string[]? ExcludedTrayAccounts = null);
-internal sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)
+public sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)
 {
     public override string ToString() => "DevicePrompt [redacted]";
 }
 
-internal interface IApplicationController : IDisposable
+public interface IStartupRegistration
+{
+    bool Enabled { get; }
+    bool CanChange { get; }
+    string Description { get; }
+    Task SetEnabledAsync(bool enabled);
+}
+
+public interface IApplicationController : IDisposable
 {
     string DataDirectory { get; }
     bool Portable { get; }

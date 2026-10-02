@@ -1,5 +1,72 @@
 # GHCPSpendTray releases
 
+Windows and macOS are independently versioned and released. Windows keeps
+the existing `v<version>` tags and MSIX/Store identity; macOS uses
+`macos-v<version>` tags and a universal Developer ID signed/notarized app.
+Dispatch **Release** and choose a version bump independently for each platform.
+Only selected platforms build, request environment approval, and publish.
+Shared changes should normally receive a release on both platforms, but their
+numbers need not match.
+
+## Choose platforms and version bumps
+
+The **Release** workflow has these inputs:
+
+| Input | Choices | Default |
+|---|---|---|
+| Windows version bump | `no release`, `Major`, `Minor`, `Patch` | `Minor` |
+| macOS version bump | `no release`, `Major`, `Minor`, `Patch` | `Minor` |
+| Mark selected releases as previews | Checkbox applying to both selected platforms | Unchecked |
+
+For each selected platform, the workflow paginates GitHub releases and uses
+the highest three-part version among that platform's published non-preview
+releases. It does not use the repository-wide "latest" designation, draft
+releases, or previews as the baseline. Major resets minor and patch to zero;
+Minor resets patch to zero; Patch increments patch only. With no stable
+release for a platform, the starting baseline is `0.0.0`: the default Minor
+produces `0.1.0`, Major produces `1.0.0`, and Patch produces `0.0.1`.
+The baseline itself is never published.
+
+For example, Windows `v0.3.1` plus **Minor** becomes `v0.4.0`; if Mac has no
+stable release, its **Minor** selection becomes `macos-v0.1.0`. Set a platform
+to **no release** to skip it, including its signing configuration/approval.
+Selecting **no release** for both produces a successful no-op summary, with
+no native build or publication.
+
+The preview checkbox changes GitHub release classification, not the numeric
+version or baseline. Existing tags, drafts and public previews still reserve
+their numbers: if stable `v0.3.1` plus Minor would reuse preview `v0.4.0`, or
+would be below an already tagged version, planning stops before either
+platform builds. It never silently advances to a different version or promotes
+an existing preview. Select a larger bump or **no release** instead.
+Package-specific limits are checked before builds.
+
+The read-only planning job displays both calculated versions in its summary
+and saves `release-plan-<run-id>` as an immutable Actions artifact before
+either platform starts. Release dispatches share a concurrency group so
+version selection/publication cannot race another run of this workflow.
+The Windows and Mac jobs then run independently using the same protected
+**production** environment; one can succeed even if the other fails.
+They share environment protection rules, while each signing step references
+only its platform's credentials.
+
+### Retrying a release
+
+Use **Re-run all jobs** on the original run. The plan is restored, not
+recalculated from a now-newer stable release. If a platform already published,
+the planner verifies the public release's tag, source, preview status and
+`releaseRunId` metadata before skipping it. Unpublished platforms resume the
+same planned version; only same-source tags and draft assets may be reused.
+Public releases are never overwritten.
+
+Re-running failed jobs alone retains the original successful planning outputs,
+so it also never bumps again, but an ambiguous failure after publication may
+need **Re-run all jobs** to recognize the completed platform. A missing or
+expired plan (retained for 90 days), different source/run provenance, or a
+newer tag stops the retry. If planning or artifact upload failed before any
+platform began, start a new dispatch rather than inventing a replacement plan.
+Do not run older copies of the pre-unification release workflows concurrently.
+
 ## Reserve the Microsoft Store product
 
 1. Complete enrollment in the Microsoft Store Windows developer program in
@@ -45,6 +112,9 @@ attestation, and verify-before-publication approach from
 [dotnet-steward](https://github.com/DamianEdwards/dotnet-steward).
 Configure a GitHub environment named **production**, restrict it to `main`,
 and require a reviewer. Protect `main` and require **Verification**.
+Both Windows and macOS GitHub releases use this environment. Add the Apple
+settings listed below alongside the Windows settings; no separate Mac
+environment or Azure federation change is required.
 
 Environment **variables**:
 
@@ -167,25 +237,32 @@ run for development, signed GitHub and Store bundles. After changing resource
 generation, also run the isolated packaged smoke test documented in
 `docs/VALIDATION.md`: portable activation does not exercise this lookup path.
 
-## Release a version
+## Release a Windows version
 
-On Markdown-only pushes and pull requests, **Verify / Verification** lints
-Markdown without running the SDK setup, build, tests, or packaging. Other
-changes and manual Verify runs perform the full checks; the Release workflow
-also verifies its source before publishing.
+On PRs and main pushes, a Linux change-detection job routes verification before
+allocating native runners. Windows-only changes run Windows checks; Mac-only
+changes run Mac checks on Apple silicon and Intel. Changes to shared C# code,
+SDK/build configuration, CI routing, or unrecognized paths run both. Markdown
+changes run the Markdown job without native builds. Manual Verify runs run all
+checks. The stable **Verification** gate requires all applicable jobs to
+succeed and fails if change detection fails. Selected Release jobs check that gate
+on the pinned main commit and rerun their platform's verification before
+publishing, even when its previous main checks were legitimately skipped.
 
 Verify runs managed/Native AOT tests and packaging/startup smoke on separate
 Windows runners after change detection. Each job caches only NuGet packages,
 keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
 and build outputs are never cached. Builds and publishes remain sequential
-within each checkout. The final **Verification** job requires both Windows
-jobs to succeed for source changes or manual runs, and permits them to be
-skipped only for Markdown-only changes. Failed change detection or Markdown
+within each checkout. Mac runners also cache NuGet packages by architecture.
+The final **Verification** job requires both Windows jobs for Windows-relevant
+changes, both Mac runners for Mac-relevant changes, and Markdown lint when
+applicable. Every unneeded job must be skipped; missing or invalid routing
+decisions fail closed. Failed change detection or Markdown
 lint, cancelled jobs and unexpected skips fail the gate. Branch protection
 and the release-source check continue to use the same **Verification** name.
 
 1. Merge to `main` and wait for **Verify / Verification** to succeed for the
-   exact source commit. For non-Markdown changes, it runs JIT and x64 Native
+   exact source commit. For Windows-relevant changes, it runs JIT and x64 Native
    AOT tests, publishes both architectures, and builds and validates an unsigned
    development bundle. It then extracts the built x64 MSIX, registers the
    isolated development package, and runs both populated and empty synthetic
@@ -193,10 +270,11 @@ and the release-source check continue to use the same **Verification** name.
    and timeouts fail verification; the registration is removed afterward.
    Developer Mode is enabled only on the disposable hosted runner, and the
    `packaged-smoke-diagnostics` artifact retains the transcript.
-2. Run **Actions > Release > Run workflow** from `main`. Supply an increasing
-   three-part version, such as `0.2.0`, and select whether it is a prerelease.
-   Every release, including previews, needs a higher numeric package version;
-   preview labels do not participate in MSIX version ordering.
+2. Run **Actions > Release > Run workflow** from `main`. Choose the Windows
+   bump and set macOS to **no release** for a Windows-only release. Choose
+   whether the selected releases are previews. The planning job calculates
+   the versions using the rules above; no explicit version input is required.
+   Every release, including previews, needs a higher numeric package version.
 3. Approve the `production` environment. The workflow pins the selected commit,
    rechecks verification, rebuilds, signs, verifies, attests, tags that source,
    and uploads a draft release. It downloads the assets and verifies their bytes,
@@ -212,15 +290,17 @@ Published assets:
 - `GHCPSpendTray-<version>.msixbundle` -- signed x64 and ARM64 application bundle.
 - `GHCPSpendTray-<version>-symbols.zip` -- native debug symbols, outside the app.
 - `SHA256SUMS` -- hashes calculated after signing.
-- `release.json` -- version, identity and source commit.
+- `release.json` -- version, identity, source commit and originating workflow run ID.
 
 GitHub artifact attestations are associated with the bundle and symbols archive.
-A failed run leaves a draft, not an unsigned public release. Rerun the original
-workflow run to resume the same source/version; it may replace draft assets but
+A failed run leaves a draft, not an unsigned public release. Rerun all jobs of
+the original workflow to restore the same source/version; it may replace draft assets but
 never replaces a public release or moves a tag. If a later version has already
 been tagged, release a new higher version instead.
 
 ## Local build and verification
+
+This section covers Windows; macOS instructions follow below.
 
 ```powershell
 .\tools\verify.ps1 -NativeTests
@@ -264,7 +344,9 @@ Microsoft currently supports automated updates for free products.
 
 1. Merge the workflow to `main`, then choose **Actions > Store Package and
    Publish > Run workflow** from `main`. Leave **version** empty to use GitHub's
-   latest published non-prerelease release. To target another immutable release,
+   highest-version published non-prerelease **Windows** release. The selector
+   paginates releases and excludes Mac tags, drafts, and previews rather than
+   trusting GitHub's repository-wide "latest" release. To target another immutable release,
    including a prerelease, enter its version without the `v` prefix, such as
    `0.2.0`. The Store package version must still exceed the last published
    version; rerunning an already submitted release is not a safe retry. For the
@@ -362,6 +444,113 @@ The **Verify** workflow exercises both development and Store-shaped packaging,
 using a synthetic Store identity without production credentials or API calls.
 The offline release-selection tests reject drafts, mutable releases, missing or
 duplicate assets, mismatched source/version metadata, and GitHub API failures.
+
+## macOS development and releases
+
+### Local macOS builds
+
+Use macOS 14 or newer, the .NET SDK in `global.json`, Python 3, and a stable
+Swift 6 compiler/Apple SDK from Xcode 16 or newer or its Command Line Tools.
+`xcode-select --install` installs the tools if missing. No .NET platform
+workload or third-party UI package is required.
+
+```bash
+bash tools/macos/verify.sh
+open artifacts/macos/GHCPSpendTray.app
+```
+
+The build sequentially publishes the C# Native AOT shared library for
+`osx-arm64` and `osx-x64`, compiles each SwiftUI frontend slice, and creates a
+universal `.app` with `lipo`. Its ICNS uses the shared dollar artwork and the
+optically tuned small PNGs, not a separate Mac logo. Both binaries and their runtime are bundled;
+users need neither .NET nor Rosetta on their native architecture. macOS 14 is
+the minimum deployment target. Keychain, notifications, and login-item calls
+are implemented natively in Swift; the shared C# application controller handles
+auth, storage, scheduling, accounting, and alert decisions. There is no IPC
+server, web frontend, or helper process.
+
+`packaging/macos/version.txt` is only the local Mac development default.
+`bash tools/macos/build.sh 0.2.0 Preview` overrides version/channel locally.
+The Windows project's development version is independent.
+If preview Command Line Tools select an SDK that lacks the SwiftUI macro
+plugin, the script selects their installed stable `MacOSX26.sdk` instead.
+You can explicitly set a stable SDK without changing global developer tools:
+
+```bash
+SDKROOT="$(xcrun --sdk macosx26.5 --show-sdk-path)" bash tools/macos/verify.sh
+```
+
+Use an SDK actually installed on your machine. Local output is **ad-hoc signed
+development software**, not notarized public distribution. Do not change
+Gatekeeper settings or install a local trust certificate to distribute it.
+
+### Apple signing configuration
+
+Use the existing protected **production** GitHub environment shared with
+Windows releases, restricted to `main` and requiring a reviewer. Add the
+following Apple settings there. An Apple Developer Program membership and a
+**Developer ID Application** certificate/private key are required, but there
+is no Mac App Store app, entitlement, or submission workflow.
+
+| Environment setting | Purpose |
+|---|---|
+| Variable `MACOS_SIGNING_IDENTITY` | Exact `Developer ID Application: ... (TEAMID)` identity or certificate SHA-1 fingerprint |
+| Secret `MACOS_CERTIFICATE_P12` | Base64-encoded exported Developer ID certificate **and private key** |
+| Secret `MACOS_CERTIFICATE_PASSWORD` | Password protecting that P12 |
+| Secret `MACOS_NOTARY_KEY` | Contents of a team App Store Connect API `.p8` key authorized for notarization |
+| Secret `MACOS_NOTARY_KEY_ID` | API key ID |
+| Secret `MACOS_NOTARY_ISSUER` | API issuer ID |
+
+These credentials cannot be generated from source or inferred from Windows
+signing configuration. Store them in environment secrets, not workflow files,
+repository files, issue comments, or command transcripts. API-key use here is
+only for the notarization service, not App Store submission.
+
+The workflow imports the certificate into a temporary unlocked Keychain,
+signs the native library and app inside-out with hardened runtime and a secure
+timestamp, and notarizes/staples the app. No JIT or disabled library-validation
+entitlement is needed for Native AOT. It then creates, signs, notarizes and
+staples a DMG containing the app and an Applications link. Temporary signing
+credentials/Keychain are removed by the script's exit trap.
+
+### Publish a macOS version
+
+1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
+   Mac-relevant changes run managed and native shared tests plus universal
+   builds/smoke checks on both Apple silicon and Intel runners.
+2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
+   to **no release** for a Mac-only release. Choose the preview designation,
+   review the calculated versions, and approve the **production** deployment.
+   macOS version components are limited to major `0..9999`, minor/patch
+   `0..99`; `0.0.0` is forbidden. A bump exceeding these limits fails rather
+   than wrapping to a different component.
+3. The workflow validates source/version, reruns Mac verification, rebuilds with
+   that version, signs/notarizes, exercises the hardened app with synthetic
+   data, attests the DMG, and creates a `macos-v<version>` draft release.
+   It downloads the draft assets and verifies their exact bytes, notarization,
+   Gatekeeper acceptance and attestation before publishing.
+
+Mac release assets are `GHCPSpendTray-macOS-<version>.dmg`,
+`release-macos.json`, and `SHA256SUMS`. Metadata records platform, version,
+source commit, originating workflow run ID, bundle identifier, architectures,
+and notarization. Mac releases
+use `--latest=false` so they do not displace the repository's Windows "latest"
+download. Store selection additionally filters to Windows tags and does not
+rely on that convention.
+
+The bundle identifier is `com.damianedwards.GHCPSpendTray`; keep both it and
+the signing team stable across updates. The app's data directory is
+`~/Library/Application Support/GHCPSpendTray`; OAuth credentials are
+non-synchronizing, device-local login Keychain items under that service,
+partitioned by OAuth registration and canonical host/user identity.
+
+Missing signing configuration or a rejected notarization stops publication.
+A failed release can leave a draft/tag; rerun all jobs of the original workflow
+to restore its version plan. A public release is never replaced and an existing tag
+cannot move. Newer tags require a new higher version within the same platform.
+Before production acceptance, complete the Mac checklist in
+[VALIDATION.md](VALIDATION.md), including clean install/update, login startup,
+Keychain prompts, notification permissions, and VoiceOver.
 
 ## Updates
 

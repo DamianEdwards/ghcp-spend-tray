@@ -1,8 +1,8 @@
 using GHCPSpendTray.Core;
 
-namespace GHCPSpendTray.App;
+namespace GHCPSpendTray.Shared;
 
-internal sealed class DemoController(string directory, bool empty = false) : IApplicationController
+public sealed class DemoController(string directory, bool empty = false) : IApplicationController
 {
     public string DataDirectory => directory;
     public bool Portable => true;

@@ -6,9 +6,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-function Read-GitHubJson([string] $Endpoint, [switch] $Asset) {
+function Read-GitHubJson([string] $Endpoint, [switch] $Asset, [switch] $Paginate) {
     $arguments = @('api', $Endpoint)
     if ($Asset) { $arguments += @('-H', 'Accept: application/octet-stream') }
+    if ($Paginate) { $arguments += @('--paginate', '--slurp') }
     $json = & gh @arguments
     if ($LASTEXITCODE -ne 0) { throw "Could not read GitHub release data: $Endpoint" }
     $json | ConvertFrom-Json
@@ -16,11 +17,16 @@ function Read-GitHubJson([string] $Endpoint, [switch] $Asset) {
 
 $latest = $null
 if ([string]::IsNullOrEmpty($Version)) {
-    $latest = Read-GitHubJson "repos/$Repository/releases/latest"
-    if ($null -eq $latest -or $null -eq $latest.PSObject.Properties['tag_name'] -or
-        [string]$latest.tag_name -cnotmatch '\Av.+\z' -or
-        $null -eq $latest.PSObject.Properties['prerelease'] -or $latest.prerelease -ne $false) {
-        throw 'The latest GitHub release must be a non-prerelease with a v-prefixed version tag.'
+    $pages = Read-GitHubJson "repos/$Repository/releases?per_page=100" -Paginate
+    $releases = @($pages | ForEach-Object { $_ })
+    $latest = $releases | Where-Object {
+        $null -ne $_.PSObject.Properties['tag_name'] -and
+        [string]$_.tag_name -cmatch '\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z' -and
+        $null -ne $_.PSObject.Properties['prerelease'] -and $_.prerelease -eq $false -and
+        $null -ne $_.PSObject.Properties['draft'] -and $_.draft -eq $false
+    } | Sort-Object { [version]$_.tag_name.Substring(1) } -Descending | Select-Object -First 1
+    if ($null -eq $latest) {
+        throw 'No published, non-prerelease Windows release with a v-prefixed version tag was found.'
     }
     $Version = $latest.tag_name.Substring(1)
 }

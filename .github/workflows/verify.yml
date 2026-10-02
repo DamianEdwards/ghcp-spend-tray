@@ -15,51 +15,47 @@ concurrency:
 
 jobs:
   changes:
-    name: Change detection and Markdown
+    name: Changed platforms
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      run_validation: ${{ steps.changes.outputs.run_validation }}
+      windows: ${{ steps.changes.outputs.windows }}
+      macos: ${{ steps.changes.outputs.macos }}
+      markdown: ${{ steps.changes.outputs.markdown }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Check whether source changed
+      - name: Test platform routing
+        run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
+      - name: Test release selection and retry safety
+        run: python3 -m unittest discover -s tools/release -p 'test_*.py'
+      - name: Detect relevant changes
         id: changes
-        shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
-            'run_validation=true' >> $env:GITHUB_OUTPUT
-            'lint_markdown=false' >> $env:GITHUB_OUTPUT
-            exit 0
-          }
-          if ($env:BASE_SHA -eq ('0' * 40)) {
-            $paths = @(git ls-files)
-          } elseif ($env:EVENT_NAME -eq 'pull_request') {
-            $paths = @(git diff --no-renames --name-only "$env:BASE_SHA...$env:HEAD_SHA")
-          } else {
-            $paths = @(git diff --no-renames --name-only $env:BASE_SHA $env:HEAD_SHA)
-          }
-          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect changed files.' }
-          $runValidation = @($paths | Where-Object { $_ -notmatch '\.(md|markdown)$' }).Count -gt 0
-          $lintMarkdown = @($paths | Where-Object { $_ -match '\.(md|markdown)$' }).Count -gt 0
-          "run_validation=$($runValidation.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          "lint_markdown=$($lintMarkdown.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-      - name: Lint Markdown
-        if: steps.changes.outputs.lint_markdown == 'true'
-        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        run: python3 tools/ci/changes.py
+
+  markdown:
+    name: Markdown
+    needs: changes
+    if: needs.changes.outputs.markdown == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: "**/*.{md,markdown}"
 
   tests:
-    name: Managed and Native AOT tests
+    name: Windows managed and Native AOT tests
     needs: changes
-    if: needs.changes.outputs.run_validation == 'true'
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 40
     steps:
@@ -81,9 +77,9 @@ jobs:
         run: .\tools\verify.ps1 -NativeTests
 
   package:
-    name: Packaging and startup smoke
+    name: Windows packaging and startup smoke
     needs: changes
-    if: needs.changes.outputs.run_validation == 'true'
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 40
     steps:
@@ -152,9 +148,47 @@ jobs:
             -Version 0.1.0 -SourceCommit $env:GITHUB_SHA -StoreId 000000000000 `
             -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
 
+  macos:
+    name: macOS (${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Cache macOS NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-macos-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-macos-
+      - name: Verify shared engine, native bridge, universal app and synthetic UI
+        run: bash tools/macos/verify.sh
+      - name: Archive development app
+        if: matrix.runner == 'macos-15'
+        run: ditto -c -k --keepParent artifacts/macos/GHCPSpendTray.app artifacts/macos/GHCPSpendTray-development.zip
+      - name: Retain ad-hoc signed development app
+        if: matrix.runner == 'macos-15'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-development
+          path: artifacts/macos/GHCPSpendTray-development.zip
+          if-no-files-found: error
+          retention-days: 7
+
   verify:
     name: Verification
-    needs: [changes, tests, package]
+    needs: [changes, markdown, tests, package, macos]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -9,6 +9,8 @@
     <WindowsAppSdkUndockedRegFreeWinRTInitialize>false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="GHCPSpendTray.Shared" />
+    <Using Include="GHCPSpendTray.App.ApplicationController" Alias="ApplicationController" />
     <ProjectReference Include="..\..\src\GHCPSpendTray.App\GHCPSpendTray.App.csproj" />
   </ItemGroup>
 </Project>
