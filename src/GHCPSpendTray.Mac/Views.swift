@@ -451,7 +451,7 @@ struct SignInView: View {
             StatusMessage(model: model)
             if model.editingHost {
                 Form {
-                    TextField("GitHub host", text: Binding(get: { model.signInHost }, set: model.setHost))
+                    TextField("GitHub host", text: Binding(get: { model.signInHost }, set: { model.setHost($0) }))
                         .disabled(model.signingIn || model.reconnect != nil)
                     TextField("OAuth client ID", text: $model.signInClientId, prompt: Text("Built in for github.com and msft.ghe.com"))
                         .disabled(model.signingIn || model.reconnectClientId != nil)
