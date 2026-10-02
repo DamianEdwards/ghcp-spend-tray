@@ -35,11 +35,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("default: false", preview[1])
 
     def test_skipped_platform_never_needs_approval_or_credentials(self):
-        for platform, environment in (("windows", "production"), ("macos", "production-macos")):
+        for platform in ("windows", "macos"):
             job = self.job(platform)
             self.assertIn("needs: plan", job)
             self.assertIn(f"if: needs.plan.outputs.{platform}_release == 'true'", job)
-            self.assertIn(f"environment: {environment}\n", job)
+            self.assertIn("environment: production\n", job)
             self.assertIn("RELEASE_VERSION: ${{ needs.plan.outputs." + platform + "_version }}", job)
             self.assertIn("PRERELEASE: ${{ inputs.prerelease }}", job)
         self.assertNotIn("secrets.MACOS_", self.job("windows"))

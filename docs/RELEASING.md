@@ -45,8 +45,10 @@ The read-only planning job displays both calculated versions in its summary
 and saves `release-plan-<run-id>` as an immutable Actions artifact before
 either platform starts. Release dispatches share a concurrency group so
 version selection/publication cannot race another run of this workflow.
-The Windows and Mac jobs then run independently with their existing protected
-environments; one can succeed even if the other fails.
+The Windows and Mac jobs then run independently using the same protected
+**production** environment; one can succeed even if the other fails.
+They share environment protection rules, while each signing step references
+only its platform's credentials.
 
 ### Retrying a release
 
@@ -110,6 +112,9 @@ attestation, and verify-before-publication approach from
 [dotnet-steward](https://github.com/DamianEdwards/dotnet-steward).
 Configure a GitHub environment named **production**, restrict it to `main`,
 and require a reviewer. Protect `main` and require **Verification**.
+Both Windows and macOS GitHub releases use this environment. Add the Apple
+settings listed below alongside the Windows settings; no separate Mac
+environment or Azure federation change is required.
 
 Environment **variables**:
 
@@ -481,8 +486,9 @@ Gatekeeper settings or install a local trust certificate to distribute it.
 
 ### Apple signing configuration
 
-Create a protected **production-macos** GitHub environment, restrict it to
-`main`, and require a reviewer. An Apple Developer Program membership and a
+Use the existing protected **production** GitHub environment shared with
+Windows releases, restricted to `main` and requiring a reviewer. Add the
+following Apple settings there. An Apple Developer Program membership and a
 **Developer ID Application** certificate/private key are required, but there
 is no Mac App Store app, entitlement, or submission workflow.
 
@@ -514,7 +520,7 @@ credentials/Keychain are removed by the script's exit trap.
    builds/smoke checks on both Apple silicon and Intel runners.
 2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
    to **no release** for a Mac-only release. Choose the preview designation,
-   review the calculated versions, and approve **production-macos**.
+   review the calculated versions, and approve the **production** deployment.
    macOS version components are limited to major `0..9999`, minor/patch
    `0..99`; `0.0.0` is forbidden. A bump exceeding these limits fails rather
    than wrapping to a different component.

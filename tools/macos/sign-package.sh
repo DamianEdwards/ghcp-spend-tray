@@ -9,7 +9,7 @@ required = ("MACOS_CERTIFICATE_P12", "MACOS_CERTIFICATE_PASSWORD", "MACOS_SIGNIN
             "MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER")
 missing = [name for name in required if not os.environ.get(name, "").strip()]
 if missing:
-    raise SystemExit("Configure " + ", ".join(missing) + " in production-macos. Unsigned releases are prohibited.")
+    raise SystemExit("Configure " + ", ".join(missing) + " in production. Unsigned releases are prohibited.")
 PY
 app="$PWD/artifacts/macos/GHCPSpendTray.app"
 bash tools/macos/test-package.sh "$app" "$version"
