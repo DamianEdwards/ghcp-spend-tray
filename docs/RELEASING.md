@@ -16,7 +16,7 @@ The **Release** workflow has these inputs:
 |---|---|---|
 | Windows version bump | `no release`, `Major`, `Minor`, `Patch` | `Minor` |
 | macOS version bump | `no release`, `Major`, `Minor`, `Patch` | `Minor` |
-| Mark selected releases as previews | Checkbox applying to both selected platforms | Checked |
+| Mark selected releases as previews | Checkbox applying to both selected platforms | Unchecked |
 
 For each selected platform, the workflow paginates GitHub releases and uses
 the highest three-part version among that platform's published non-preview

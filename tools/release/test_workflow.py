@@ -29,6 +29,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertEqual(re.findall(r"^          - (.+)$", match[1], re.MULTILINE),
                              ["no release", "Major", "Minor", "Patch"])
         self.assertNotIn("inputs.version", self.workflow)
+        preview = re.search(r"^      prerelease:\n((?:^        .*\n)+)", self.workflow, re.MULTILINE)
+        self.assertIsNotNone(preview)
+        self.assertIn("type: boolean", preview[1])
+        self.assertIn("default: false", preview[1])
 
     def test_skipped_platform_never_needs_approval_or_credentials(self):
         for platform, environment in (("windows", "production"), ("macos", "production-macos")):

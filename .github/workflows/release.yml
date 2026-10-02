@@ -26,7 +26,7 @@ on:
       prerelease:
         description: Mark all selected platform releases as previews
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
