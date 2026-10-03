@@ -3,8 +3,13 @@
 ## CodeQL configuration
 
 `.github/workflows/codeql.yml` uses advanced setup and explicitly scans
-Actions, C#, JavaScript/TypeScript, Python, and Swift on PRs to `main`, main
-pushes, manual runs, and a weekly schedule. Swift analysis uses manual build
+Actions, C#, JavaScript/TypeScript, Python, and Swift every Wednesday at
+10:37 UTC and on manual dispatch. Scheduled runs scan the latest default-branch
+commit. CodeQL does not run automatically on pushes or pull requests; use
+**Actions > CodeQL > Run workflow** for an additional scan, such as before a
+release. This trades pre-merge CodeQL feedback for post-merge scheduled
+findings. The required **Verification** checks still run on PRs and main pushes.
+Swift analysis uses manual build
 mode on macOS, with `tools/macos/build.sh` running after CodeQL initialization
 so the extractor observes the real Swift compiler invocations. The pinned
 .NET SDK builds the in-process Native AOT bridge; analysis does not require
