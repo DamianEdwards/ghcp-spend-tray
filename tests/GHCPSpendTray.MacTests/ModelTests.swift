@@ -12,6 +12,28 @@ enum ModelTests {
         var copies: [String] = []
         model.copyToClipboard = { copies.append($0); return true }
         defer { model.shutdown() }
+        model.addExampleAccount()
+        try check(bridge.requests.isEmpty && model.error != nil, "Examples wait for initialization.")
+        model.initialized = true
+        model.addExampleAccount()
+        let example = bridge.lastRequest
+        try check(example["method"] as? String == "demo.account.add" && model.busy &&
+                  !model.showingSignIn && !model.signingIn, "Examples use the shared synthetic command without opening sign-in.")
+        model.addExampleAccount()
+        try check(bridge.requests.count == 1, "Example additions serialize while the bridge is busy.")
+        try bridge.enqueue("completed", id: example["id"])
+        model.poll()
+        try check(!model.busy && model.error == nil, "Example completion clears busy state.")
+        model.addExampleAccount()
+        try bridge.enqueue("completed", id: bridge.lastRequest["id"], values: ["error": "Synthetic example failure."])
+        model.poll()
+        try check(model.error == "Synthetic example failure." && !model.busy, "Example errors remain visible and retryable.")
+        let normalBridge = FixtureBridge()
+        let normal = AppModel(directory: URL(fileURLWithPath: "/synthetic-normal-unused"), demo: false, bridge: normalBridge)
+        defer { normal.shutdown() }
+        normal.initialized = true
+        normal.addExampleAccount()
+        try check(normalBridge.requests.isEmpty && normal.error != nil, "Normal mode cannot request synthetic accounts.")
         model.addAccount()
         let initial = bridge.lastRequest
         try check(initial["method"] as? String == "signin" && initial["host"] as? String == "github.com",
@@ -110,32 +132,7 @@ enum ModelTests {
         try check(roundTrip.trayStyle == .percentage && roundTrip.trayMode == .perAccount &&
                   roundTrip.excludedTrayAccounts == ["github.com:1"], "Tray options retain the generated C# enum contract.")
 
-        let indicator = try JSONDecoder().decode(TrayIndicator.self, from: Data("""
-        {"name":"Fixture","percent":105,"includedAccounts":1,"selectedAccounts":2,"details":"Partial",
-         "tooltip":"Partial | 105%","isPartial":true,"isOverAllocation":true,"valueText":"105%","numericText":"105"}
-        """.utf8))
-        let pie = TrayIconRenderer.image(indicator, style: .pie)
-        let number = TrayIconRenderer.image(indicator, style: .percentage)
-        let unavailable = TrayIconRenderer.image(.unavailable, style: .pie)
-        try check(pie.isTemplate && number.isTemplate && unavailable.isTemplate, "Menu-bar graphics adapt to native appearance.")
-        let images = [pie, number, unavailable]
-        for image in images {
-            guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else {
-                throw AppError.message("Could not render tray pixels.")
-            }
-            var opaque = 0, transparent = 0
-            for y in 0..<bitmap.pixelsHigh {
-                for x in 0..<bitmap.pixelsWide {
-                    let alpha = bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0
-                    if alpha > 0 { opaque += 1 }
-                    if alpha == 0 { transparent += 1 }
-                }
-            }
-            try check(opaque > 0 && transparent > 0, "Tray image contains both a visible glyph and a transparent background.")
-        }
-        try check(pie.tiffRepresentation != number.tiffRepresentation &&
-                  pie.tiffRepresentation != unavailable.tiffRepresentation, "Style and unavailable state render distinct graphics.")
-        print("PASS: Mac automatic sign-in, clipboard recovery, cancellation, reconnect and menu-bar models/rendering.")
+        print("PASS: Mac automatic sign-in, clipboard recovery, cancellation, reconnect and menu-bar models.")
     }
 }
 

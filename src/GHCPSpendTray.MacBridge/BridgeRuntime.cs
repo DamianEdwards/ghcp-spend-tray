@@ -124,6 +124,11 @@ public sealed class BridgeRuntime : IDisposable
                 case "account.remove":
                     await Controller.RemoveAsync(Required(command.Key));
                     break;
+                case "demo.account.add":
+                    if (Controller is not DemoController demo)
+                        throw new AppOperationException("Example accounts are only available in demonstration mode.");
+                    await demo.AddExampleAccountAsync();
+                    break;
                 case "signin":
                     CancellationTokenSource signIn;
                     lock (_stateGate) signIn = _signIn!;

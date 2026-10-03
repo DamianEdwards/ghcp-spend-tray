@@ -88,7 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private func setupMenuBar(_ model: AppModel) {
         updateMenuBar(nil)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: FlyoutView(model: model))
+        let controller = NSHostingController(rootView: FlyoutView(model: model))
+        controller.sizingOptions.insert(.preferredContentSize)
+        popover.contentViewController = controller
         let mainMenu = NSMenu()
         let applicationItem = NSMenuItem()
         mainMenu.addItem(applicationItem)
@@ -159,6 +161,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         } else if popover.isShown {
             popover.performClose(nil)
         } else {
+            guard let view = popover.contentViewController?.view else {
+                model?.error = "The menu-bar popup could not be created. Reopen the app to access Settings."
+                return
+            }
+            view.layoutSubtreeIfNeeded()
+            popover.contentSize = view.fittingSize
             NSApplication.shared.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
@@ -229,6 +237,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         func progress(_ phase: String) {
             FileHandle.standardError.write(Data("SMOKE: \(phase)\n".utf8))
         }
+        func checkPopupAnchor(_ button: NSStatusBarButton) throws {
+            guard let anchorWindow = button.window,
+                  let popupWindow = popover.contentViewController?.view.window else {
+                throw AppError.message("Popup anchor windows are missing.")
+            }
+            let anchor = anchorWindow.convertToScreen(button.convert(button.bounds, to: nil))
+            let gap = anchor.minY - popupWindow.frame.maxY
+            guard abs(gap) <= 8 else {
+                throw AppError.message("Menu-bar popup lost its anchor after resizing: \(gap)-point gap.")
+            }
+        }
+        func savePopupSnapshot(_ name: String) throws {
+            guard let view = popover.contentViewController?.view,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                throw AppError.message("Menu-bar popup did not render.")
+            }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw AppError.message("Menu-bar popup render was empty.")
+            }
+            try png.write(to: model.directory.appendingPathComponent("\(name).png"))
+        }
         do {
             progress("waiting for shared initialization")
             try await waitUntil { model.initialized && !model.busy }
@@ -244,6 +274,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             guard statusItems.count == 1, statusItems["rollup"]?.button?.image?.isTemplate == true else {
                 throw AppError.message("Adaptive menu bar indicator was not created.")
             }
+            progress("checking menu-bar popup")
+            guard let button = statusItems["rollup"]?.button else {
+                throw AppError.message("Roll-up menu-bar item missing.")
+            }
+            togglePopover(button)
+            try await Task.sleep(for: .milliseconds(250))
+            guard popover.isShown, let flyout = popover.contentViewController?.view else {
+                throw AppError.message("Menu-bar popup did not render.")
+            }
+            guard flyout.bounds.width == 400, !empty || flyout.bounds.height < 300 else {
+                throw AppError.message("Empty menu-bar popup must be a compact account-setup prompt.")
+            }
+            try checkPopupAnchor(button)
+            try savePopupSnapshot("Flyout")
+            if empty {
+                progress("checking popup growth and shrinkage")
+                let height = flyout.bounds.height
+                model.notice = "Synthetic popup height change.\nA second line exercises content growth."
+                try await Task.sleep(for: .milliseconds(250))
+                guard flyout.bounds.height > height else {
+                    throw AppError.message("Popup did not grow to fit its content.")
+                }
+                try checkPopupAnchor(button)
+                model.notice = nil
+                try await Task.sleep(for: .milliseconds(250))
+                guard abs(flyout.bounds.height - height) <= 1 else {
+                    throw AppError.message("Popup did not shrink back to its account-setup prompt.")
+                }
+                try checkPopupAnchor(button)
+            }
+            popover.performClose(nil)
             openSettings()
             progress("opening settings")
             try await waitUntil { !model.busy }
@@ -305,11 +366,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 guard statusItems.count == 1, model.dashboard?.tray?.rollUp.percent == nil else {
                     throw AppError.message("Unavailable access indicator did not replace excluded accounts.")
                 }
+                settings.trayStyle = .pie
+                settings.trayMode = .rollUp
+                settings.excludedTrayAccounts = []
+                model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
+                try await waitUntil { !model.busy }
             }
+            progress("adding an example account to the open popup")
+            model.notice = nil
+            guard let sampleButton = statusItems["rollup"]?.button else {
+                throw AppError.message("Sample popup menu-bar item missing.")
+            }
+            togglePopover(sampleButton)
+            try await Task.sleep(for: .milliseconds(250))
+            let previousHeight = flyout.bounds.height
+            let previousCount = model.dashboard?.accounts.count ?? 0
+            let previousConsumption = model.dashboard?.consumptionUsd ?? 0
+            model.addExampleAccount()
+            try await waitUntil { !model.busy }
+            try await Task.sleep(for: .milliseconds(250))
+            guard model.error == nil, popover.isShown, !model.showingSignIn,
+                  model.dashboard?.accounts.count == previousCount + 1,
+                  model.dashboard?.consumptionUsd == previousConsumption + 12.5,
+                  model.dashboard?.accounts.last?.percent == 25,
+                  !empty || flyout.bounds.height > previousHeight else {
+                throw AppError.message("Example account did not update and resize the open popup without sign-in.")
+            }
+            try checkPopupAnchor(sampleButton)
+            try savePopupSnapshot("FlyoutWithExample")
+            popover.performClose(nil)
             model.addAccount()
             progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))
-            guard model.showingSignIn else { throw AppError.message("Account onboarding did not open.") }
+            guard model.showingSignIn, model.page == .accounts else {
+                throw AppError.message("Account onboarding did not open.")
+            }
             model.showingSignIn = false
             try await waitUntil { self.settingsWindow?.attachedSheet == nil }
             try "PASS: native menu bar, five settings pages, synthetic dashboard and settings bridge.\n"
