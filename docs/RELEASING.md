@@ -512,6 +512,10 @@ timestamp, and notarizes/staples the app. No JIT or disabled library-validation
 entitlement is needed for Native AOT. It then creates, signs, notarizes and
 staples a DMG containing the app and an Applications link. Temporary signing
 credentials/Keychain are removed by the script's exit trap.
+The temporary signing Keychain is added to the user's search list for
+`codesign` identity/key and certificate-chain lookup, then removed on exit.
+Existing search entries, including entries added during signing, are preserved.
+Passing `codesign --keychain` alone is insufficient for all lookup paths.
 
 The signing step reports each preparation/signing/notarization stage and checks
 the imported identity before configuring private-key access. A P12 without a
