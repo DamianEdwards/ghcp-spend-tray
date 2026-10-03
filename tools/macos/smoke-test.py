@@ -4,6 +4,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 
@@ -16,7 +17,28 @@ def smoke(app, architecture=None):
                 command.append("--demo-empty")
             if architecture:
                 command = ["arch", f"-{architecture}", *command]
-            subprocess.run(command, check=True, timeout=90)
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+                try:
+                    stdout, stderr = process.communicate(timeout=90)
+                except subprocess.TimeoutExpired:
+                    try:
+                        sample = subprocess.run(["/usr/bin/sample", str(process.pid), "1", "1"],
+                                                capture_output=True, text=True, timeout=15)
+                        print("\n".join(sample.stdout.splitlines()[:160]), file=sys.stderr)
+                        print(sample.stderr, file=sys.stderr)
+                    except (OSError, subprocess.TimeoutExpired) as error:
+                        print(f"Could not sample the timed-out smoke process: {error}", file=sys.stderr)
+                    finally:
+                        process.kill()
+                        stdout, stderr = process.communicate()
+                        print(stdout, end="")
+                        print(stderr, end="", file=sys.stderr)
+                    raise
+            print(stdout, end="")
+            print(stderr, end="", file=sys.stderr)
+            subprocess.CompletedProcess(command, process.returncode, stdout, stderr).check_returncode()
+            if "PASS: native notification settings callback." not in stdout:
+                raise RuntimeError("The app did not exercise its native notification settings callback.")
             result = Path(directory, "smoke-result.txt").read_text()
             if not result.startswith("PASS:"):
                 raise RuntimeError("The application did not complete its smoke assertions.")

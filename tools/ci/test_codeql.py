@@ -20,7 +20,7 @@ class CodeQLTests(unittest.TestCase):
     def test_swift_traces_real_build_after_initialization(self):
         swift = re.search(r"- language: swift\n\s+runner: (\S+)\n\s+build-mode: (\S+)", self.workflow)
         self.assertIsNotNone(swift)
-        self.assertEqual(swift.groups(), ("macos-15", "manual"))
+        self.assertEqual(swift.groups(), ("macos-26", "manual"))
         init = self.workflow.index("uses: github/codeql-action/init@")
         build = self.workflow.index("run: bash tools/macos/build.sh")
         analyze = self.workflow.index("uses: github/codeql-action/analyze@")
@@ -44,7 +44,10 @@ class CodeQLTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", self.workflow)
         self.assertIn("security-events: write", self.workflow)
         for action in re.findall(r"uses: (\S+)", self.workflow):
-            self.assertRegex(action, r"@[0-9a-f]{40}$")
+            if action.startswith("./"):
+                self.assertEqual(action, "./.github/actions/setup-macos")
+            else:
+                self.assertRegex(action, r"@[0-9a-f]{40}$")
 
 
 if __name__ == "__main__":

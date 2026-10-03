@@ -20,7 +20,7 @@ if [[ -z "${SDKROOT:-}" ]]; then
         echo "Using stable macOS SDK: $SDKROOT"
     fi
 fi
-export MACOSX_DEPLOYMENT_TARGET=14.0
+export MACOSX_DEPLOYMENT_TARGET=15.0
 app="$PWD/artifacts/macos/GHCPSpendTray.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"
 
@@ -32,7 +32,7 @@ for arch in arm64 x64; do
         -p:IlcTreatWarningsAsErrors=true -o "$output" --nologo -v:q
     install_name_tool -id @rpath/GHCPSpendTray.MacBridge.dylib "$output/GHCPSpendTray.MacBridge.dylib"
     xcrun swiftc -swift-version 6 -warnings-as-errors -O -g \
-        -target "$native_arch-apple-macos14.0" \
+        -target "$native_arch-apple-macos15.0" \
         -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
         src/GHCPSpendTray.Mac/*.swift \
         "$output/GHCPSpendTray.MacBridge.dylib" \

@@ -1,5 +1,34 @@
 # GHCPSpendTray validation and release gates
 
+## macOS 0.1.0 notification callback launch regression
+
+The installed, signed/notarized 0.1.0 app passed signature and Gatekeeper
+verification but crashed on macOS 26 while fetching notification settings.
+The faulting stack was `_dispatch_assert_queue_fail` in the callback inside
+`NativeNotifications.status()`. The older release SDK omits `Sendable` on that
+completion-handler declaration, so Swift inferred main-actor isolation even
+though UserNotifications invokes it on a background queue.
+
+All three notification completion handlers now explicitly use `@Sendable`,
+transferring only values/errors through checked continuations. Smoke mode also
+queries real notification settings without requesting permission or sending a
+notification, so the callback is no longer hidden behind the demo service.
+The first fix passed the same macOS 15-built artifact on macOS 26 without
+rebuilding it (Verify run 37132765292). Build and release jobs now explicitly
+select Xcode 26.6 / macOS 26.5 SDK on macOS 26, instead of the macOS 15 runner's
+Xcode 16.4 default.
+
+The support policy is the latest patch releases of two major versions:
+**macOS 26 and macOS 15**. The minimum app deployment target is macOS 15;
+macOS 14 Sonoma is dropped. Routine verification runs exactly two Mac jobs:
+macOS 26 / Apple silicon runs shared tests, builds the universal app once and
+smoke-tests it; macOS 15 / Intel downloads that exact artifact, verifies both
+architecture slices and runs native smoke tests without rebuilding. Both
+exercise the real read-only notification callback. Hosted image patches are
+logged. This deliberately covers both OS generations and CPU architectures,
+not every OS/architecture pair. Advance the window with each adopted stable
+major release.
+
 ## CodeQL configuration
 
 `.github/workflows/codeql.yml` uses advanced setup and explicitly scans
@@ -56,7 +85,9 @@ python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app --arch x86_6
 ```
 
 Smoke mode requires a unique absolute `--data-dir`, uses only synthetic
-accounts, and disables authentication, notifications and login startup.
+accounts, and disables authentication, notification delivery/permission prompts,
+and login startup. It reads the app's current native notification settings to
+exercise completion-handler threading; it does not change permissions.
 The smoke launcher uses a temporary directory and a bounded subprocess
 lifetime, then deletes its synthetic data. Render snapshots demonstrate view
 creation, not pixel-perfect layout or VoiceOver correctness; AppKit snapshots
