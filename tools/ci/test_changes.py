@@ -15,7 +15,7 @@ class ChangesTests(unittest.TestCase):
 
     def test_shared_and_unknown(self):
         for path in ("src/GHCPSpendTray.Core/Models.cs", "src/GHCPSpendTray.Application/UiModels.cs",
-                     "global.json", "Directory.Build.props", ".github/workflows/verify.yml",
+                     "global.json", "Directory.Build.props", ".github/workflows/verify.yml", ".github/workflows/codeql.yml",
                      "tools/ci/changes.py", "tests/GHCPSpendTray.SharedTests/Program.cs", "new-file",
                      "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",
                      "src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-32.png",

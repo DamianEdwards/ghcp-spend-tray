@@ -1,5 +1,28 @@
 # GHCPSpendTray validation and release gates
 
+## CodeQL configuration
+
+`.github/workflows/codeql.yml` uses advanced setup and explicitly scans
+Actions, C#, JavaScript/TypeScript, Python, and Swift on PRs to `main`, main
+pushes, manual runs, and a weekly schedule. Swift analysis uses manual build
+mode on macOS, with `tools/macos/build.sh` running after CodeQL initialization
+so the extractor observes the real Swift compiler invocations. The pinned
+.NET SDK builds the in-process Native AOT bridge; analysis does not require
+production signing credentials or run the application.
+
+GitHub's default setup cannot discover our command-line Swift build: there is
+no Xcode project/workspace or Swift package. It also detects `Bridge.h` as C/C++
+but fails extraction because the header only declares the C ABI implemented
+in C# and contains no C/C++ translation units. The explicit workflow omits
+that empty C/C++ analysis, not the bridge implementation or Swift callers.
+C# retains no-build analysis, matching the previous default setup.
+
+Disable CodeQL **default setup** in repository settings when enabling this
+workflow; default and advanced result uploads cannot coexist. Do not add a
+dummy C source, suppress extraction errors, or disable Swift scanning to make
+the check green. Add an appropriate C/C++ analysis job if native C/C++ sources
+are introduced later.
+
 ## macOS implementation evidence (October 1, 2026)
 
 The native Mac frontend shares the C# controller, host-scoped OAuth, decimal
