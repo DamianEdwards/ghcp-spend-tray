@@ -19,19 +19,10 @@ Native AOT. Windows uses WinUI 3 and
 macOS uses native SwiftUI and AppKit.
 It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
-## Screenshots
-
-### Windows
-
-<img src="docs/images/windows-flyout.png" alt="GHCPSpendTray Windows tray flyout showing sample Copilot consumption" width="310">
-
-The tray flyout, shown with synthetic demo accounts and usage.
-
-### macOS
-
-<img src="docs/images/macos-popup.png" alt="GHCPSpendTray macOS menu-bar popup showing sample Copilot consumption" width="412">
-
-The menu-bar popup, shown with synthetic demo accounts and usage.
+<p>
+  <img src="docs/images/windows-flyout.png" alt="GHCPSpendTray Windows tray flyout showing synthetic demo accounts and usage" width="310" align="top">
+  <img src="docs/images/macos-popup.png" alt="GHCPSpendTray macOS menu-bar popup showing synthetic demo accounts and usage" width="412" align="top">
+</p>
 
 ## Features
 
