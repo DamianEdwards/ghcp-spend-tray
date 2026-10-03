@@ -1,5 +1,51 @@
 # GHCPSpendTray validation and release gates
 
+## Store-only shared Windows App Runtime (October 3, 2026)
+
+Store packaging opts into `StorePackage=true` / `WindowsAppSDKSelfContained=false`
+with the component-only `Microsoft.WindowsAppSDK.Runtime` reference. GitHub
+and ordinary development builds remain self-contained. Both retain Native AOT
+and require no separate .NET runtime. Store manifests derive the framework
+identity, Microsoft publisher and minimum version from the resolved Microsoft
+MSIX, currently `Microsoft.WindowsAppRuntime.2` / `2.5.1.0`.
+
+Local `verify.ps1 -NativeTests` passed all four managed and executed x64 Native
+AOT harnesses. Real x64 publishes of both modes passed populated and empty
+synthetic UI smoke, without real accounts or startup writes. Store payloads,
+including license notices and excluding symbols, were 18.84 MiB for x64 and
+19.63 MiB for ARM64. Runtime metadata checks also passed under Windows
+PowerShell 5.1, matching the hosted smoke step.
+
+Synthetic bundle mutations reject missing, duplicate or incorrect framework
+dependencies, mismatched dependency architecture, bundled runtime DLLs/themes,
+and missing application resources. Store staging rejects self-contained input.
+Store PRI fixtures require Reactor startup XAML without app-local WinUI themes;
+the existing self-contained resource requirements remain enforced. Initial
+bundle/staging contract fixtures used explicitly synthetic ARM64 PE metadata
+and were deleted after use. After installing the ARM64 C++ tools, real x64 and
+ARM64 Native AOT publishing, packaging and deployment mutation regressions
+passed in both modes; framework-dependent staging also passed with a synthetic
+Store identity. The Store metadata
+snapshot and `-Store -SkipPublish` also remained valid after a default
+self-contained build restored the project.
+
+The compressed two-architecture bundles measured 60.40 MiB self-contained and
+14.37 MiB framework-dependent, a 76% app-bundle reduction excluding the shared
+runtime download. ARM64 was cross-published, not executed.
+
+After the owner enabled Developer Mode, real x64 MSIXs from both modes were
+extracted and registered under the isolated development identity. Populated and
+empty packaged smoke scenarios passed for both, including actual UI creation,
+package-local data and disabled Windows StartupTask. Each development
+registration was removed afterward; no production registration, account data
+or startup preference was changed.
+
+Verify mirrors this by building real Native AOT payloads for both architectures
+and modes, installing the resolved x64 framework on its disposable runner when
+needed, and smoke-testing both extracted packages. Hosted runs, clean Store
+installation/upgrading, ARM64 execution and Store certification remain release
+acceptance checks. No production Store submission was made.
+
 ## macOS 0.1.0 notification callback launch regression
 
 The installed, signed/notarized 0.1.0 app passed signature and Gatekeeper

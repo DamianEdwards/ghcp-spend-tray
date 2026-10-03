@@ -9,7 +9,9 @@ class ChangesTests(unittest.TestCase):
                      "tools/macos/build.sh", ".github/workflows/notarization-status.yml"):
             self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
-                     "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1", ".github/workflows/store-package.yml",
+                     "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1",
+                     "tools/get-windows-app-runtime.ps1", "tools/test-windows-app-runtime.ps1",
+                     "tools/test-package-deployment.ps1", ".github/workflows/store-package.yml",
                      "GHCPSpendTray.slnx"):
             self.assertEqual(classify([path]), dict(windows=True, macos=False, markdown=False), path)
 

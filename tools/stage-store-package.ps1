@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory)][string] $Publisher,
     [Parameter(Mandatory)][string] $PublisherDisplayName,
     [Parameter(Mandatory)][ValidatePattern('\A[A-Z0-9]{12}\z')][string] $StoreId,
+    [string] $RuntimeAssetsPath = "$PSScriptRoot\..\artifacts\publish-store\project.assets.json",
     [ValidatePattern('\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z')]
     [string] $Repository = 'DamianEdwards/ghcp-spend-tray'
 )
@@ -18,7 +19,7 @@ if ($IdentityName -eq 'GHCPSpendTray.Development' -or
     throw 'Use the assigned Partner Center identity and publisher, not the development or Azure signing identity.'
 }
 & "$PSScriptRoot\test-package.ps1" -Bundle $Bundle -Version $Version -IdentityName $IdentityName `
-    -Publisher $Publisher -PublisherDisplayName $PublisherDisplayName
+    -Publisher $Publisher -PublisherDisplayName $PublisherDisplayName -Store -RuntimeAssetsPath $RuntimeAssetsPath
 $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $Bundle).Path)
 try {
     if ($null -ne $archive.GetEntry('AppxSignature.p7x')) {
@@ -40,6 +41,7 @@ Copy-Item -LiteralPath $Bundle -Destination (Join-Path $output $bundleName)
     identityName = $IdentityName
     publisher = $Publisher
     publisherDisplayName = $PublisherDisplayName
+    windowsAppSdkSelfContained = $false
     signed = $false
     submittedToStore = $false
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'store-package.json') -Encoding utf8NoBOM

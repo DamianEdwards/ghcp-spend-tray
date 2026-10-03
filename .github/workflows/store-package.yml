@@ -84,7 +84,10 @@ jobs:
         shell: pwsh
         working-directory: release-source
         run: |
-          .\tools\package.ps1 -Version $env:RELEASE_VERSION `
+          if (-not (Get-Command .\tools\package.ps1).Parameters.ContainsKey('Store')) {
+              throw 'Select a Windows release containing framework-dependent Store packaging support; older immutable source is not patched.'
+          }
+          .\tools\package.ps1 -Store -Version $env:RELEASE_VERSION `
             -IdentityName $env:STORE_IDENTITY_NAME -Publisher $env:STORE_PUBLISHER `
             -PublisherDisplayName $env:STORE_PUBLISHER_DISPLAY_NAME
 
@@ -94,7 +97,8 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
         run: |
           .\tools\stage-store-package.ps1 `
-            -Bundle ".\release-source\artifacts\release\GHCPSpendTray-$env:RELEASE_VERSION.msixbundle" `
+            -Bundle ".\release-source\artifacts\release-store\GHCPSpendTray-$env:RELEASE_VERSION.msixbundle" `
+            -RuntimeAssetsPath .\release-source\artifacts\publish-store\project.assets.json `
             -Version $env:RELEASE_VERSION -SourceCommit $env:RELEASE_SOURCE_COMMIT `
             -Repository $env:GITHUB_REPOSITORY -StoreId $env:STORE_ID `
             -IdentityName $env:STORE_IDENTITY_NAME -Publisher $env:STORE_PUBLISHER `
@@ -154,5 +158,6 @@ jobs:
           - Read-only API check requested: ``${{ inputs.verify_access }}``.
           - If publish was not requested, extract the artifact ZIP and upload only ``GHCPSpendTray-$env:RELEASE_VERSION-store.msixbundle`` manually.
           - This package uses the Store publisher and is intentionally unsigned. Microsoft signs it during Store publication.
+          - Windows App Runtime is a shared framework dependency installed by the Store, not bundled with the app.
           - An accepted commit starts Store processing; it does not guarantee certification or publication. On failure or timeout, inspect the existing submission before another run.
           "@ >> $env:GITHUB_STEP_SUMMARY
