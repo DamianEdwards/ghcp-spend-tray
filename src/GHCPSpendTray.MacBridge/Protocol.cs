@@ -18,6 +18,7 @@ public sealed record Command
     public string? DisplayName { get; init; }
     public string? Thresholds { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
+    public bool? ShowPeriodEstimate { get; init; }
     public SettingsView? Settings { get; init; }
     public string? TargetId { get; init; }
     public PlatformReply? Reply { get; init; }
@@ -34,7 +35,7 @@ public sealed record PlatformReply
 }
 
 public sealed record AccountPreferences(string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
-    string? ClientId);
+    string? ClientId, bool ShowPeriodEstimate = false);
 
 public sealed record BridgeEvent
 {

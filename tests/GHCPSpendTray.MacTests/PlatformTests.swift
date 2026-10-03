@@ -5,6 +5,7 @@ import Security
 enum PlatformTests {
     @MainActor static func main() async throws {
         try ModelTests.run()
+        try PeriodEstimateTests.run()
         try TrayIconRendererTests.run()
         try await NotificationTests.run()
         func check(_ condition: Bool, _ message: String) throws {

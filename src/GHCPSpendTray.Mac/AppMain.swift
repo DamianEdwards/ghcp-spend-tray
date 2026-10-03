@@ -259,6 +259,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             }
             try png.write(to: model.directory.appendingPathComponent("\(name).png"))
         }
+        func saveSettingsSnapshot(_ name: String) throws {
+            guard let view = settingsWindow?.contentView,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                throw AppError.message("Settings view did not render.")
+            }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            guard bitmap.pixelsWide >= 730, let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw AppError.message("Settings render was empty.")
+            }
+            try png.write(to: model.directory.appendingPathComponent("\(name).png"))
+        }
         do {
             progress("waiting for shared initialization")
             try await waitUntil { model.initialized && !model.busy }
@@ -312,14 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 progress("rendering \(page.rawValue)")
                 model.page = page
                 try await Task.sleep(for: .milliseconds(250))
-                guard let view = settingsWindow?.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-                    throw AppError.message("Settings view did not render.")
-                }
-                view.cacheDisplay(in: view.bounds, to: bitmap)
-                guard bitmap.pixelsWide >= 730, let png = bitmap.representation(using: .png, properties: [:]) else {
-                    throw AppError.message("Settings render was empty.")
-                }
-                try png.write(to: model.directory.appendingPathComponent("\(page.rawValue).png"))
+                try saveSettingsSnapshot(page.rawValue)
             }
             if var settings = model.settings {
                 progress("saving and previewing menu-bar settings")
@@ -394,7 +398,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             }
             try checkPopupAnchor(sampleButton)
             try savePopupSnapshot("FlyoutWithExample")
+            progress("checking per-account estimate opt-in")
+            guard let example = model.dashboard?.accounts.last, example.periodEstimate == nil else {
+                throw AppError.message("New sample account must default its estimate off.")
+            }
+            let actual = model.dashboard?.consumptionUsd
+            let percentage = model.dashboard?.tray?.rollUp.percent
+            model.perform("account.save", fields: ["key": example.key, "displayName": example.name,
+                                                   "showPeriodEstimate": true])
+            try await waitUntil { !model.busy }
+            try await Task.sleep(for: .milliseconds(250))
+            guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate != nil,
+                  model.dashboard?.accounts.dropLast().allSatisfy({ $0.periodEstimate == nil }) == true,
+                  model.dashboard?.consumptionUsd == actual, model.dashboard?.tray?.rollUp.percent == percentage else {
+                throw AppError.message("Account estimate changed actual totals, other accounts or allocation indicators.")
+            }
+            try checkPopupAnchor(sampleButton)
+            try savePopupSnapshot("FlyoutWithEstimate")
+            var preferences: AccountPreferences?
+            model.send("account.preferences", fields: ["key": example.key]) { preferences = $0.preferences }
+            try await waitUntil { preferences != nil }
+            guard preferences?.showPeriodEstimate == true else {
+                throw AppError.message("Account estimate preference did not round-trip.")
+            }
             popover.performClose(nil)
+            model.selectedAccount = example.key
+            model.openSettings(.accounts)
+            try await Task.sleep(for: .milliseconds(500))
+            guard model.error == nil else { throw AppError.message("Account estimate settings did not load.") }
+            try saveSettingsSnapshot("AccountWithEstimate")
+            model.perform("account.save", fields: ["key": example.key, "displayName": example.name,
+                                                   "showPeriodEstimate": false])
+            try await waitUntil { !model.busy }
+            guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate == nil else {
+                throw AppError.message("Disabling an account estimate must remove the forecast.")
+            }
             model.addAccount()
             progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))

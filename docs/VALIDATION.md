@@ -1,5 +1,44 @@
 # GHCPSpendTray validation and release gates
 
+## macOS per-account period estimates (October 3, 2026)
+
+Account preferences now include an off-by-default Show estimated period
+consumption toggle. Saving it adds an Estimated at reset row to that account's
+popup, Usage page, and account details, with whole-dollar approximate amounts,
+an early-period qualification, UTC reset date, and projected over-allocation
+when applicable. Advanced Details exposes the method, average per day, UTC
+boundaries, and observation time. There is no combined forecast or change to
+actual totals, allocation meters, menu-bar icons, or alert thresholds.
+
+The shared C# calculation explicitly assumes UTC calendar months and rejects
+provider resets that disagree with the next month boundary. Source observation
+time is used when supplied, otherwise fetch time; frozen data never changes its
+pace estimate merely because the clock advances. Freshness and rollover still
+invalidate it. Estimates are unavailable before 24 elapsed hours and marked
+early before 72 hours. Unknown/unlimited allocation does not prevent a dollar
+projection. These are transparent estimation assumptions, not a verified
+provider billing contract or a promise about invoices.
+
+Local managed and executed arm64 Native AOT runs pass 170 Core tests and
+81 shared application/bridge assertions, including calendar/leap-year lengths,
+UTC offsets, precise elapsed-time thresholds, source/fetch timestamps, stable
+cached projections, stale/error/rollover handling, zero usage, allocation
+variants, extreme/invalid decimals, legacy defaults, persistence, omitted-save
+preservation, explicit disable, reconnect, and unchanged actual alerts.
+The universal development app builds with warnings treated as errors and
+passes its existing bundle/signature checks. Swift fixtures additionally
+cover exact decimal decoding, whole-dollar/sub-dollar text, early/warning/UTC
+labels, and enabled/disabled/unavailable account-row sizing and rendering.
+Use exact decimal fixtures rather than binary floating-point JSON values.
+
+Populated and empty native smoke runs exercise forecast preference save/read,
+the real Native AOT bridge, unchanged totals/tray percentages, popup anchoring,
+account settings rendering, and explicit disable. SwiftUI view tests now use
+the same stable-SDK selection as app builds. Snapshot captures can omit
+GPU-composited text and do not establish pixel-perfect appearance or VoiceOver
+behavior. macOS 15/Intel execution and real-provider period/timestamp semantics
+remain validation gates; Windows forecast UI is a separate implementation.
+
 ## macOS empty popup and menu-bar anchoring (October 3, 2026)
 
 With no connected accounts, the Mac popup now shows an Add Account prompt

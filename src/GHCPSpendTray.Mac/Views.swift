@@ -44,11 +44,37 @@ struct AccountRow: View {
                 Text(account.details.unlimited ? "Unlimited allocation" : "Allocation unavailable")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let estimate = account.periodEstimate {
+                PeriodEstimateRow(estimate: estimate)
+            }
             Text(account.freshness).font(.caption)
                 .foregroundStyle(account.freshness == "Fresh" ? Color.secondary : Color.orange)
             if let message = account.details.message { Text(message).font(.caption).foregroundStyle(.orange) }
         }
         .padding(.vertical, 5)
+    }
+}
+
+struct PeriodEstimateRow: View {
+    let estimate: PeriodEstimateData
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Estimated at reset")
+                Spacer()
+                Text(estimatedMoney(estimate.estimatedConsumptionUsd)).monospacedDigit()
+                    .accessibilityLabel("Estimated consumption: \(estimatedMoney(estimate.estimatedConsumptionUsd))")
+            }
+            if let reason = estimate.unavailableReason {
+                Text(reason).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(estimate.summary).fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle((estimate.overAllocationUsd ?? 0) > 0 ? Color.orange : Color.secondary)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .help("Based on your average consumption so far this UTC calendar month. Assumes the same pace continues; not an invoice.")
+        .accessibilityIdentifier("PeriodEstimate")
     }
 }
 
@@ -250,6 +276,15 @@ struct AccountDiagnosticsView: View {
                 row("Resets", dateText(account.details.resetAtUtc))
                 row("Next refresh", dateText(account.details.nextRefreshUtc))
                 row("Period", account.details.periodId ?? "Unavailable")
+                if let estimate = account.periodEstimate {
+                    row("Estimate method", "Average pace so far this UTC calendar month. Assumes the same pace continues; not an invoice.")
+                    row("Estimated at reset", estimatedMoney(estimate.estimatedConsumptionUsd))
+                    row("Average per day (estimated)", estimatedMoney(estimate.averageDailyConsumptionUsd))
+                    row("Estimate period starts", utcTimestampText(estimate.periodStartUtc))
+                    row("Estimate resets", utcTimestampText(estimate.resetAtUtc))
+                    row("Estimate observed at", utcTimestampText(estimate.observedAtUtc))
+                    if let reason = estimate.unavailableReason { row("Estimate unavailable", reason) }
+                }
             }
             .font(.caption).textSelection(.enabled).padding(.top, 8)
         }
@@ -292,6 +327,7 @@ struct AccountEditor: View {
     @State private var thresholds = ""
     @State private var increment = ""
     @State private var inherit = true
+    @State private var showPeriodEstimate = false
     @State private var loaded = false
     @State private var removing = false
     var body: some View {
@@ -315,10 +351,16 @@ struct AccountEditor: View {
                     TextField("USD increment (0 disables)", text: $increment)
                         .textFieldStyle(.roundedBorder)
                 }
+                Toggle("Show estimated period consumption", isOn: $showPeriodEstimate)
+                    .disabled(!loaded || model.busy)
+                    .accessibilityIdentifier("ShowPeriodEstimate")
+                Text("Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Save") {
                         do {
-                            var fields: [String: Any] = ["key": account.key, "displayName": name, "thresholds": thresholds]
+                            var fields: [String: Any] = ["key": account.key, "displayName": name, "thresholds": thresholds,
+                                                       "showPeriodEstimate": showPeriodEstimate]
                             if !inherit { fields["spendIncrementUsd"] = NSDecimalNumber(decimal: try parseAmount(increment) ?? 0) }
                             model.perform("account.save", fields: fields)
                         } catch { model.error = error.localizedDescription }
@@ -335,6 +377,7 @@ struct AccountEditor: View {
                 thresholds = value.thresholds
                 increment = decimalText(value.spendIncrementUsd)
                 inherit = value.spendIncrementUsd == nil
+                showPeriodEstimate = value.showPeriodEstimate
                 loaded = true
             }
         }

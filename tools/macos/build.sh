@@ -6,20 +6,7 @@ version="${1:-$(cat packaging/macos/version.txt)}"
 channel="${2:-Development}"
 python3 tools/macos/release.py version "$version" >/dev/null
 case "$channel" in Development|Preview|Stable) ;; *) echo "Invalid release channel." >&2; exit 1 ;; esac
-if [[ -z "${SDKROOT:-}" ]]; then
-    sdk_version="$(xcrun --show-sdk-version)"
-    # Some preview Command Line Tools omit the SwiftUI macro plugin. Prefer the
-    # installed stable SDK in that case, without changing the machine's selection.
-    if [[ "${sdk_version%%.*}" -ge 27 && "$(xcode-select -p)" == */CommandLineTools ]]; then
-        export SDKROOT
-        SDKROOT="$(xcode-select -p)/SDKs/MacOSX26.sdk"
-        if [[ ! -d "$SDKROOT" ]]; then
-            echo "Select a stable Xcode toolchain or set SDKROOT to a stable macOS SDK." >&2
-            exit 1
-        fi
-        echo "Using stable macOS SDK: $SDKROOT"
-    fi
-fi
+source tools/macos/sdk.sh
 export MACOSX_DEPLOYMENT_TARGET=15.0
 app="$PWD/artifacts/macos/GHCPSpendTray.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"

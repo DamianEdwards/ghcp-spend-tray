@@ -186,14 +186,15 @@ public class ApplicationController : IApplicationController, INotificationSink
         finally { _mutations.Release(); }
         await PublishAsync().ConfigureAwait(false);
     }
-    public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key)
+    public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key)
     {
         var account = _settings.Accounts.SingleOrDefault(a => a.Key == key)
             ?? throw new AppOperationException("That account is no longer configured.");
         return (account.DisplayName ?? "", account.ThresholdOverrides is null ? "" : FormatThresholds(account.ThresholdOverrides),
-            account.SpendIncrementUsd);
+            account.SpendIncrementUsd, account.ShowPeriodEstimate);
     }
-    public async Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null)
+    public async Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
+        bool? showPeriodEstimate = null)
     {
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
@@ -209,7 +210,8 @@ public class ApplicationController : IApplicationController, INotificationSink
             {
                 Accounts = _settings.Accounts.Select(a => a.Key == key ? a with
                     { DisplayName = displayName.Length == 0 ? null : displayName, ThresholdOverrides = overrides,
-                      SpendIncrementUsd = spendIncrementUsd } : a).ToArray()
+                      SpendIncrementUsd = spendIncrementUsd,
+                      ShowPeriodEstimate = showPeriodEstimate ?? a.ShowPeriodEstimate } : a).ToArray()
             };
             await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
             _settings = next;
@@ -329,6 +331,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                     account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides,
                         SpendIncrementUsd = previous.SpendIncrementUsd,
                         ExcludeFromTray = previous.ExcludeFromTray,
+                        ShowPeriodEstimate = previous.ShowPeriodEstimate,
                         OAuthClientId = previous.OAuthClientId ?? account.OAuthClientId };
                     await _monitor!.PauseAccountAsync(account.Key, token).ConfigureAwait(false);
                 }
@@ -473,7 +476,8 @@ public class ApplicationController : IApplicationController, INotificationSink
                         current ? snapshot?.PercentConsumed : null,
                         current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
                         visibleStatus, snapshot?.FetchedAtUtc,
-                        avatar ?? AccountAvatar.Resolve(state.Account)));
+                        avatar ?? AccountAvatar.Resolve(state.Account),
+                        PeriodEstimates.Create(state, now, TimeSpan.FromMinutes(_settings.PollIntervalMinutes))));
                 }
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);

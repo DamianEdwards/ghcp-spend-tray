@@ -6,6 +6,8 @@ namespace GHCPSpendTray.Shared;
 public sealed class DemoController(string directory, bool empty = false) : IApplicationController
 {
     private readonly List<AccountView> _examples = [];
+    private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
+        bool ShowPeriodEstimate)> _preferences = [];
     public string DataDirectory => directory;
     public bool Portable => true;
     public event Action<DashboardView>? Changed;
@@ -34,6 +36,9 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
             UpdatedAt = now,
             Details = account.Details with { SourceTimestampUtc = now, NextRefreshUtc = now.AddHours(1) }
         }));
+        views = views.Select(account => _preferences.TryGetValue(account.Key, out var preferences)
+            ? account with { Name = string.IsNullOrWhiteSpace(preferences.DisplayName) ? account.Name : preferences.DisplayName }
+            : account).ToList();
         decimal total = views.Sum(account => account.ConsumptionUsd!.Value);
         string amount = total.ToString("0.00", CultureInfo.InvariantCulture);
         var dashboard = new DashboardView($"DEMO - MTD consumption: ${amount} | {views.Count}/{views.Count} accounts",
@@ -43,23 +48,32 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
         {
             Host = a.Host, UserId = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
             Login = a.Login, DisplayName = a.Name,
+            ShowPeriodEstimate = _preferences.GetValueOrDefault(a.Key).ShowPeriodEstimate,
             ExcludeFromTray = Settings.ExcludedTrayAccounts?.Contains(a.Key, StringComparer.Ordinal) == true
         }).ToArray();
         var states = accounts.Select((a, i) => new AccountState
         {
             Account = a, Status = AccountStatus.Fresh, Snapshot = new()
             {
-                AccountKey = a.Key, FetchedAtUtc = now, PeriodId = BillingPeriods.Resolve(now, null),
+                AccountKey = a.Key, FetchedAtUtc = now, SourceTimestampUtc = now, PeriodId = BillingPeriods.Resolve(now, null),
                 CreditsUsed = dashboard.Accounts[i].Details.CreditsUsed!.Value,
                 Entitlement = dashboard.Accounts[i].AllocationUsd * 100,
                 ConsumptionUsd = dashboard.Accounts[i].ConsumptionUsd!.Value,
                 AllocationUsd = dashboard.Accounts[i].AllocationUsd, PercentConsumed = dashboard.Accounts[i].Percent
             }
         }).ToArray();
-        Changed?.Invoke(dashboard with { Tray = TrayUsage.Create(new()
+        Changed?.Invoke(dashboard with
         {
-            Accounts = accounts, TrayStyle = Settings.TrayStyle, TrayMode = Settings.TrayMode
-        }, states, now), TrayStates = states });
+            Accounts = dashboard.Accounts.Select((account, i) => account with
+            {
+                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes))
+            }).ToArray(),
+            Tray = TrayUsage.Create(new()
+            {
+                Accounts = accounts, TrayStyle = Settings.TrayStyle, TrayMode = Settings.TrayMode
+            }, states, now),
+            TrayStates = states
+        });
         return Task.CompletedTask;
     }
     public Task AddExampleAccountAsync()
@@ -77,14 +91,36 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
         Settings = settings with { Startup = false };
         return RefreshAsync();
     }
-    public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null) => Task.CompletedTask;
-    public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key) => ("Demonstration", "", null);
+    public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
+        bool? showPeriodEstimate = null)
+    {
+        var previous = AccountSettings(key);
+        displayName = displayName.Trim();
+        if (displayName.Length > 128 || displayName.Any(char.IsControl))
+            throw new AppOperationException("Display names must be at most 128 characters and contain no control characters.");
+        AppSettings.ValidateSpendIncrement(spendIncrementUsd);
+        _preferences[key] = (displayName, thresholds, spendIncrementUsd, showPeriodEstimate ?? previous.ShowPeriodEstimate);
+        return RefreshAsync();
+    }
+    public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key)
+    {
+        if (_preferences.TryGetValue(key, out var preferences)) return preferences;
+        if (key is "github.com:1" && !empty) return ("Personal (demo)", "", null, false);
+        if (key is "example.ghe.com:2" && !empty) return ("Work (demo)", "", null, false);
+        var example = _examples.SingleOrDefault(account => account.Key == key)
+            ?? throw new AppOperationException("That account is no longer configured.");
+        return (example.Name, "", null, false);
+    }
     public Task RemoveAsync(string key) => throw new AppOperationException("Synthetic accounts cannot be removed in demonstration mode.");
     public Task AddAsync(string host, bool offlineAccess, string? reconnectKey,
         Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null) =>
         throw new AppOperationException("Authentication is disabled in demonstration mode. Start normal portable mode to sign in.");
-    public string? AccountClientId(string key) => throw new AppOperationException("Authentication is disabled in demonstration mode.");
+    public string? AccountClientId(string key)
+    {
+        _ = AccountSettings(key);
+        return null;
+    }
     public string ResolveHostDescription(string host)
     {
         try

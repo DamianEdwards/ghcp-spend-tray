@@ -51,6 +51,28 @@ struct AccountData: Decodable, Identifiable {
     let freshness: String
     let updatedAt: String?
     let avatarUrl: String?
+    let periodEstimate: PeriodEstimateData?
+}
+
+struct PeriodEstimateData: Decodable {
+    let estimatedConsumptionUsd: Decimal?
+    let averageDailyConsumptionUsd: Decimal?
+    let overAllocationUsd: Decimal?
+    let periodStartUtc: String?
+    let resetAtUtc: String?
+    let observedAtUtc: String?
+    let isEarly: Bool
+    let unavailableReason: String?
+
+    var summary: String {
+        var parts: [String] = []
+        if isEarly { parts.append("Early estimate") }
+        if let over = overAllocationUsd, over > 0 {
+            parts.append(over < 1 ? "Less than $1 over allocation" : "About \(wholeMoney(over)) over allocation")
+        }
+        if let reset = resetAtUtc { parts.append("Resets \(utcDateText(reset))") }
+        return parts.joined(separator: " · ")
+    }
 }
 
 struct AccountDetails: Decodable {
@@ -72,6 +94,7 @@ struct AccountPreferences: Decodable {
     let thresholds: String
     let spendIncrementUsd: Decimal?
     let clientId: String?
+    let showPeriodEstimate: Bool
 }
 
 struct DevicePrompt: Decodable {
@@ -164,6 +187,24 @@ func money(_ value: Decimal?) -> String {
     return format.string(from: value as NSDecimalNumber) ?? "\(value) USD"
 }
 
+func wholeMoney(_ value: Decimal) -> String {
+    var input = value
+    var rounded = Decimal()
+    NSDecimalRound(&rounded, &input, 0, .plain)
+    let format = NumberFormatter()
+    format.locale = Locale(identifier: "en_US")
+    format.numberStyle = .currency
+    format.minimumFractionDigits = 0
+    format.maximumFractionDigits = 0
+    return format.string(from: rounded as NSDecimalNumber) ?? "\(rounded) USD"
+}
+
+func estimatedMoney(_ value: Decimal?) -> String {
+    guard let value else { return "Unavailable" }
+    if value > 0 && value < 1 { return "<$1" }
+    return "~\(wholeMoney(value))"
+}
+
 func decimalText(_ value: Decimal?) -> String {
     value.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
 }
@@ -190,4 +231,24 @@ func dateValue(_ text: String?) -> Date? {
 
 func dateText(_ text: String?) -> String {
     dateValue(text)?.formatted(date: .abbreviated, time: .shortened) ?? "Unavailable"
+}
+
+func utcDateText(_ text: String?) -> String {
+    guard let date = dateValue(text) else { return "Unavailable" }
+    let format = DateFormatter()
+    format.locale = Locale.current
+    format.timeZone = TimeZone(secondsFromGMT: 0)
+    format.dateStyle = .medium
+    format.timeStyle = .none
+    return "\(format.string(from: date)) UTC"
+}
+
+func utcTimestampText(_ text: String?) -> String {
+    guard let date = dateValue(text) else { return "Unavailable" }
+    let format = DateFormatter()
+    format.locale = Locale.current
+    format.timeZone = TimeZone(secondsFromGMT: 0)
+    format.dateStyle = .medium
+    format.timeStyle = .short
+    return "\(format.string(from: date)) UTC"
 }

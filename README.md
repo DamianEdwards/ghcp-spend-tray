@@ -222,6 +222,24 @@ periods are not counted as current spend. GitHub's quota snapshot does not
 provide a verified per-day consumption breakdown, so the app does not chart
 daily usage from its locally sampled refreshes.
 
+On macOS, **Settings > Accounts > select an account > Show estimated period
+consumption** enables an optional **Estimated at reset** row in that account's
+popup, Usage summary, and details. It is off by default; choose **Save** to
+apply it. There is no combined forecast, forecast-based alert, or change to
+the observed allocation meter or menu-bar icons.
+
+The estimate extrapolates the account's average consumption so far across a
+UTC calendar month, not its recent usage trend. It assumes the same pace
+continues and is not an invoice. A supplied reset must match the next first
+of the month at midnight UTC; a missing reset uses the calendar-month
+fallback. Estimates remain unavailable for the first 24 hours, are labeled
+early before 72 hours, and show a reason when data is stale, failed, expired,
+or inconsistent with that period. Estimates are rounded to whole USD
+(`<$1` for small nonzero values); actual consumption retains cents.
+Unknown or unlimited allocation still allows a dollar forecast without an
+over-allocation comparison. Advanced Details explains the method and shows
+the average per day, period boundaries, and observation time.
+
 ## Privacy and removal
 
 GHCPSpendTray talks directly to your GitHub host over HTTPS. It does not send

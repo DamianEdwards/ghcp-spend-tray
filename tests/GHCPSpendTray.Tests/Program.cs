@@ -7,7 +7,7 @@ using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.Tests;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly DateTimeOffset Now = new(2026, 9, 17, 12, 0, 0, TimeSpan.Zero);
     private static readonly Account Account = new() { UserId = "42", Login = "fixture-user" };
@@ -21,6 +21,7 @@ internal static class Program
         try
         {
             await DomainTests();
+            await PeriodEstimateTests();
             await TrayTests();
             await HttpTests();
             await PersistenceTests();
