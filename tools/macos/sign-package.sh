@@ -23,6 +23,10 @@ temporary="$(mktemp -d -t ghcp-signing)"
 keychain="$temporary/signing.keychain-db"
 cleanup() {
     local status=0
+    if ! python3 tools/macos/keychain_search.py remove "$keychain"; then
+        echo "Could not remove the temporary signing Keychain from the search list." >&2
+        status=1
+    fi
     if [[ -f "$keychain" ]] && ! security delete-keychain "$keychain"; then
         echo "Could not remove the temporary signing Keychain." >&2
         status=1
@@ -48,6 +52,8 @@ PY
 password="$(openssl rand -hex 32)"
 stage "create temporary signing Keychain"
 security create-keychain -p "$password" "$keychain"
+stage "add temporary signing Keychain to codesign search list"
+python3 tools/macos/keychain_search.py add "$keychain"
 stage "configure temporary signing Keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 stage "unlock temporary signing Keychain"
