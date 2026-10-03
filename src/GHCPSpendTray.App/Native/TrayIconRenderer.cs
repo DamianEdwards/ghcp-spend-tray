@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using GHCPSpendTray.Core;
 using GHCPSpendTray.App.Platform;
@@ -17,6 +18,7 @@ internal sealed class TrayImage : SafeHandleZeroOrMinusOneIsInvalid
 internal static class TrayIconRenderer
 {
     internal static int SizeForDpi(uint dpi) => Math.Clamp(Win32.GetSystemMetricsForDpi(49, dpi), 16, 256);
+    internal static int NotificationSizeForDpi(uint dpi) => Math.Clamp(Win32.GetSystemMetricsForDpi(11, dpi), 16, 256);
 
     internal static unsafe TrayPalette SystemPalette()
     {
@@ -30,9 +32,24 @@ internal static class TrayIconRenderer
     private static uint Argb(uint colorRef) =>
         0xFF000000 | ((colorRef & 0xFF) << 16) | (colorRef & 0xFF00) | ((colorRef >> 16) & 0xFF);
 
-    internal static unsafe TrayImage Create(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette)
+    internal static TrayImage Create(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette) =>
+        Create(Pixels(indicator, style, size, palette), size);
+
+    internal static TrayImage CreateNotification(NotificationView notification, int size, TrayPalette palette) =>
+        Create(NotificationPixels(notification, size, palette), size);
+
+    internal static uint[] NotificationPixels(NotificationView notification, int size, TrayPalette palette)
     {
-        uint[] pixels = Pixels(indicator, style, size, palette);
+        double? percent = notification.PercentConsumed is { } value ? (double)value : null;
+        var indicator = new TrayIndicator(notification.AccountKey, notification.Title, percent,
+            percent is null ? 0 : 1, 1, "", "");
+        string? text = percent is null && notification.SpendMilestoneUsd is { } milestone
+            ? "$" + milestone.ToString("0.##", CultureInfo.InvariantCulture) : null;
+        return Pixels(indicator, TrayIconStyle.Pie, size, palette, text);
+    }
+
+    private static unsafe TrayImage Create(uint[] pixels, int size)
+    {
         var info = new Win32.BITMAPINFOHEADER
         {
             biSize = (uint)sizeof(Win32.BITMAPINFOHEADER), biWidth = size, biHeight = -size,
@@ -60,7 +77,10 @@ internal static class TrayIconRenderer
         }
     }
 
-    internal static unsafe uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette)
+    internal static uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette) =>
+        Pixels(indicator, style, size, palette, null);
+
+    private static unsafe uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette, string? text)
     {
         if (size is < 16 or > 256) throw new ArgumentOutOfRangeException(nameof(size));
         const int samples = 4;
@@ -85,7 +105,8 @@ internal static class TrayIconRenderer
             if (Win32.SetBkMode(dc, 1) == 0 || Win32.SetTextColor(dc, 0xFFFFFF) == uint.MaxValue)
                 throw new Win32Exception("Cannot configure tray text rendering.");
 
-            if (indicator.Percent is null) Text("?", 16, 18);
+            if (text is not null) Text(text, 16, 18);
+            else if (indicator.Percent is null) Text("?", 16, 18);
             else
             {
                 if (style == TrayIconStyle.Percentage)

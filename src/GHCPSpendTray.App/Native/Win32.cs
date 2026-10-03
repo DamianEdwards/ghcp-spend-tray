@@ -13,7 +13,7 @@ internal static unsafe partial class Win32
     internal const uint NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIM_SETVERSION = 4;
     internal const uint NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4, NIF_INFO = 0x10,
         NIF_GUID = 0x20, NIF_SHOWTIP = 0x80;
-    internal const uint NIIF_INFO = 1, NIIF_RESPECT_QUIET_TIME = 0x80;
+    internal const uint NIIF_USER = 4, NIIF_LARGE_ICON = 0x20, NIIF_RESPECT_QUIET_TIME = 0x80;
     internal const uint MB_OK = 0, MB_ICONERROR = 0x10, MB_ICONWARNING = 0x30, MB_YESNO = 4;
 
     [StructLayout(LayoutKind.Sequential)]

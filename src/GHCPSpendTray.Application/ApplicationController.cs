@@ -24,7 +24,7 @@ public class ApplicationController : IApplicationController, INotificationSink
     private AppSettings _settings = new();
     private MonitorService? _monitor;
     private Task? _initialization, _clock;
-    private Func<string, string, string, Task<bool>>? _notify;
+    private Func<NotificationView, Task<bool>>? _notify;
     private string? _storageDiagnostic;
     private string? _avatarDiagnostic;
     private bool _disposed;
@@ -407,7 +407,7 @@ public class ApplicationController : IApplicationController, INotificationSink
         }
     }
 
-    public void SetNotificationHandler(Func<string, string, string, Task<bool>> handler) => _notify = handler;
+    public void SetNotificationHandler(Func<NotificationView, Task<bool>> handler) => _notify = handler;
     public async Task<bool> SubmitAsync(UsageAlert alert, CancellationToken cancellationToken = default)
     {
         var notify = _notify ?? throw new AppOperationException("The notification surface is not initialized.");
@@ -416,7 +416,8 @@ public class ApplicationController : IApplicationController, INotificationSink
             message += $" {alert.HighestThreshold:0.##}% of {Money(alert.Snapshot.AllocationUsd!.Value)} allocation reached.";
         if (alert.SpendMilestoneUsd is { } milestone)
             message += $" Passed the {Money(milestone)} spending milestone.";
-        return await notify(alert.Account.Key, "GHCPSpendTray consumption alert", message)
+        return await notify(new(alert.Account.Key, "GHCPSpendTray consumption alert", message,
+            alert.Snapshot.PercentConsumed, alert.SpendMilestoneUsd))
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
     private void StateChanged(AccountState state) => _ = PublishAsync();

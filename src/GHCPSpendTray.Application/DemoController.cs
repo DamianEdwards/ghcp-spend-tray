@@ -75,6 +75,6 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
         catch (ArgumentException) { throw new AppOperationException("Enter a valid HTTPS host."); }
     }
     public Task ResumeAsync() => RefreshAsync();
-    public void SetNotificationHandler(Func<string, string, string, Task<bool>> handler) { }
+    public void SetNotificationHandler(Func<NotificationView, Task<bool>> handler) { }
     public void Dispose() { }
 }

@@ -17,7 +17,7 @@ internal static class AccountSignInTests
         using var http = new HttpClient(handler);
         var credentials = new GatedCredentials();
         using var app = new ApplicationController(root, true, http, credentials);
-        app.SetNotificationHandler((_, _, _) => Task.FromResult(true));
+        app.SetNotificationHandler(_ => Task.FromResult(true));
         Diagnostics.Initialize(root);
         var dispatch = new ConcurrentQueue<Action>();
         using var session = new AppSession(app, dispatch.Enqueue);
