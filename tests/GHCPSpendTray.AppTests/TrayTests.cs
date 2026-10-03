@@ -56,12 +56,43 @@ internal static class TrayTests
             ((pixel & 255) + (background & 255) * inverse / 255);
     }
 
-    internal static void Run(Action<bool, string> check, string root)
+    internal static unsafe void Run(Action<bool, string> check, string root)
     {
         var palette = new TrayPalette(0xFF000000, 0xFFFFFFFF);
         TrayIndicator Indicator(double? value, string? key = null, bool partial = false) =>
             new(key, key ?? "Synthetic", value, value is null ? 0 : 1, partial ? 2 : 1, "Synthetic details", "Synthetic tip");
         TrayPresentation Presentation(params TrayIndicator[] icons) => new(TrayIconStyle.Pie, icons[0], icons, []);
+        foreach (uint dpi in new uint[] { 96, 120, 144, 192 })
+            check(TrayIconRenderer.NotificationSizeForDpi(dpi) == Win32.GetSystemMetricsForDpi(11, dpi),
+                "large notification icons use the monitor's large-icon metric rather than its small tray metric");
+        foreach (int size in new[] { 32, 40, 48, 64 })
+        {
+            foreach (decimal value in new decimal[] { 0, .1m, 50, 87.5m, 100, 105 })
+            {
+                var notification = new NotificationView("github.com:1", "Synthetic", "Synthetic alert", value, 100m);
+                var pixels = TrayIconRenderer.NotificationPixels(notification, size, palette);
+                check(pixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator((double)value, "github.com:1"),
+                    TrayIconStyle.Pie, size, palette)),
+                    "allocation notifications use the actual account percentage and over-allocation badge even with a dollar milestone");
+                using var image = TrayIconRenderer.CreateNotification(notification, size, palette);
+                check(!image.IsInvalid, "large allocation notification HICON created");
+            }
+            var unavailable = new NotificationView("github.com:1", "Synthetic", "Synthetic alert");
+            var unknownPixels = TrayIconRenderer.NotificationPixels(unavailable, size, palette);
+            check(unknownPixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(null), TrayIconStyle.Pie, size, palette)),
+                "missing allocation renders unavailable, never a zero-percent pie");
+            foreach (decimal milestone in new decimal[] { .01m, 50, 100, 1234.56m, 1e28m })
+            {
+                var notification = unavailable with { SpendMilestoneUsd = milestone };
+                var pixels = TrayIconRenderer.NotificationPixels(notification, size, palette);
+                check(pixels.Length == size * size && pixels.Any(p => p >> 24 > 128) &&
+                    pixels.Any(p => p >> 24 is > 0 and < 255) && pixels[0] == 0 &&
+                    !pixels.SequenceEqual(unknownPixels),
+                    "dollar-only alerts have distinct, antialiased milestone artwork at every notification DPI");
+                using var image = TrayIconRenderer.CreateNotification(notification, size, palette);
+                check(!image.IsInvalid, "dollar-only notification HICON created without requiring an allocation");
+            }
+        }
         foreach (int size in new[] { 16, 20, 24, 32, 48, 64 })
             foreach (var style in Enum.GetValues<TrayIconStyle>())
                 foreach (double? value in new double?[] { null, 0, .1, 1, 50, 99.9, 100, 105, 999, 1000, 1e28 })
@@ -173,18 +204,55 @@ internal static class TrayTests
             icon.Update(Indicator(70), TrayIconStyle.Percentage, 24, palette);
         }
         check(fake.Registered.Count == 0, "failed updates do not orphan a Shell icon on disposal");
+        fake = new FakeShell();
+        using (var icon = new TrayIcon(0, 1, root, Indicator(25), TrayIconStyle.Percentage, 16, palette, fake.Call))
+        {
+            nint trayImage = icon.ImageHandle;
+            var notification = new NotificationView("github.com:2", "Synthetic allocation alert", "Synthetic message", 87.5m);
+            check(icon.Notify(notification, 48, palette), "custom notification accepted through an existing roll-up icon");
+            var data = fake.LastNotification!.Value;
+            nint balloonImage = data.hBalloonIcon;
+            check(data.uFlags == (Win32.NIF_INFO | Win32.NIF_GUID) &&
+                data.dwInfoFlags == (Win32.NIIF_USER | Win32.NIIF_LARGE_ICON | Win32.NIIF_RESPECT_QUIET_TIME) &&
+                balloonImage != 0 && balloonImage != trayImage && data.hIcon == trayImage,
+                "Shell receives a separate large custom balloon HICON and still respects quiet time");
+            check(new string(data.szInfoTitle) == notification.Title && new string(data.szInfo) == notification.Message &&
+                icon.NotificationAccount == notification.AccountKey, "custom artwork preserves notification text and click-account routing");
+            icon.Update(Indicator(30), TrayIconStyle.Pie, 24, palette);
+            icon.Restore();
+            check(fake.NotificationCalls == 1 && icon.NotificationAccount == notification.AccountKey,
+                "dashboard updates and Shell restart recovery do not resubmit notifications or change click routing");
+            fake.FailModify = true;
+            check(!icon.Notify(notification with { AccountKey = "github.com:3" }, 32, palette) &&
+                icon.NotificationAccount == "github.com:2",
+                "rejected notification does not replace the accepted notification's account");
+            fake.FailModify = false;
+            fake.ThrowNotification = true;
+            try
+            {
+                icon.Notify(notification with { AccountKey = "github.com:3" }, 32, palette);
+                throw new InvalidOperationException("Expected notification submission exception.");
+            }
+            catch (Win32Exception)
+            {
+                check(icon.NotificationAccount == "github.com:2", "submission exception preserves prior notification routing");
+            }
+        }
+        check(fake.Registered.Count == 0, "disposing a notified tray icon removes its Shell registration");
         uint gdi = Win32.GetGuiResources(Win32.GetCurrentProcess(), 0);
         uint user = Win32.GetGuiResources(Win32.GetCurrentProcess(), 1);
         for (int iteration = 0; iteration < 250; iteration++)
         {
             using var icons = new TrayIconSet(0, root, new FakeShell().Call);
             icons.Update(selected, _ => 16, palette);
+            icons.Primary.Notify(new("github.com:1", "Synthetic", "Synthetic allocation", 50m), 48, palette);
+            icons.Primary.Notify(new("github.com:1", "Synthetic", "Synthetic milestone", SpendMilestoneUsd: 100m), 32, palette);
             icons.Update(rollUp, _ => 32, palette);
             icons.Restore();
         }
         check(Win32.GetGuiResources(Win32.GetCurrentProcess(), 0) <= gdi + 2 &&
             Win32.GetGuiResources(Win32.GetCurrentProcess(), 1) <= user + 2,
-            "750 icon lifetimes and replacements do not accumulate GDI or USER handles");
+            "tray and notification icon lifetimes and replacements do not accumulate GDI or USER handles");
     }
 
     private sealed class FakeShell
@@ -192,6 +260,9 @@ internal static class TrayTests
         internal Dictionary<uint, Guid> Registered { get; } = [];
         internal Dictionary<uint, uint> Versions { get; } = [];
         internal bool FailVersion, FailModify, FailAdd;
+        internal bool ThrowNotification;
+        internal Win32.NOTIFYICONDATA? LastNotification { get; private set; }
+        internal int NotificationCalls { get; private set; }
         internal int MinimumRegisteredAfterFirstAdd { get; private set; } = int.MaxValue;
         internal int Call(uint message, ref Win32.NOTIFYICONDATA data)
         {
@@ -209,6 +280,14 @@ internal static class TrayTests
                     Versions[data.uID] = data.uTimeoutOrVersion;
                     break;
                 case Win32.NIM_MODIFY:
+                    if ((data.uFlags & Win32.NIF_INFO) != 0)
+                    {
+                        NotificationCalls++;
+                        LastNotification = data;
+                        if (ThrowNotification) throw new Win32Exception("Synthetic notification failure.");
+                    }
+                    else if (data.hBalloonIcon != 0)
+                        throw new InvalidOperationException("Notification artwork leaked into a tray update.");
                     if (FailModify) return 0;
                     if (!Registered.ContainsKey(data.uID)) return 0;
                     break;

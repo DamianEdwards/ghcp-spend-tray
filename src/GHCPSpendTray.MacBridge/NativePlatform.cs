@@ -51,9 +51,13 @@ internal sealed class NativePlatform(Action<BridgeEvent> publish) : ICredentialS
     public async Task DeleteAsync(Account account, CancellationToken cancellationToken = default) =>
         await RequestAsync(new() { Kind = "platform", Operation = "credential.delete", Target = Target(account) }, cancellationToken);
 
-    internal async Task<bool> NotifyAsync(string key, string title, string message)
+    internal async Task<bool> NotifyAsync(NotificationView notification)
     {
-        var reply = await RequestAsync(new() { Kind = "platform", Operation = "notification", Key = key, Title = title, Message = message });
+        var reply = await RequestAsync(new()
+        {
+            Kind = "platform", Operation = "notification", Key = notification.AccountKey,
+            Title = notification.Title, Message = notification.Message
+        });
         return reply.Accepted;
     }
 

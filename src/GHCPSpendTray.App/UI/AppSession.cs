@@ -44,6 +44,7 @@ internal sealed class AppSession : IDisposable
         (ShowAddForm || SelectedAccount is { } key && Dashboard.Accounts.Any(account => account.Key == key));
     internal bool ConfirmRemove { get; set; }
     internal bool ShowAdvancedDetails { get; set; }
+    internal HashSet<string> ExpandedUsageAccounts { get; } = new(StringComparer.Ordinal);
     internal DevicePrompt? Prompt { get; private set; }
     internal string Host { get; set; } = "github.com";
     internal bool CustomHost { get; private set; }
@@ -77,6 +78,7 @@ internal sealed class AppSession : IDisposable
     private void OnDashboard(DashboardView view) => Post(() =>
     {
         Dashboard = view;
+        ExpandedUsageAccounts.RemoveWhere(key => !view.Accounts.Any(account => account.Key == key));
         DashboardChanged?.Invoke();
         Notify();
     });

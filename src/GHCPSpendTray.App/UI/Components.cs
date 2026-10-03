@@ -251,8 +251,19 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.AccountWarning(account) is { Length: > 0 } warning
             ? InfoBar("Account needs attention", warning).Warning().IsClosable(false) : null,
         UsageSummary(account, account.Key + "_"),
-        AdvancedDetails(account, account.Key + "_")
+        UsageAdvancedDetails(account)
     )).WithKey(account.Key);
+    private Element UsageAdvancedDetails(AccountView account)
+    {
+        bool expanded = Session.ExpandedUsageAccounts.Contains(account.Key);
+        return Expander("Advanced information", expanded ? AdvancedDetails(account, account.Key + "_") : VStack(),
+            expanded, value =>
+            {
+                if (value) Session.ExpandedUsageAccounts.Add(account.Key);
+                else Session.ExpandedUsageAccounts.Remove(account.Key);
+                Session.Notify();
+            }).HAlign(HorizontalAlignment.Stretch).AutomationId(account.Key + "_AdvancedAccountDetails");
+    }
     private Element General(nint owner) => VStack(18,
         UI.Section("Start with Windows", Session.Controller.Settings.StartupDescription,
             ToggleSwitch(Session.Startup, value => { Session.Startup = value; Session.Notify(); })
