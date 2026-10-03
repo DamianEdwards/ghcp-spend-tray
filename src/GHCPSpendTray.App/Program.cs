@@ -153,17 +153,17 @@ internal static class Program
                 }
                 else
                 {
-                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" } ||
-                        Find(shell.SettingsWindow!, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" })
-                        throw new InvalidOperationException("Usage summary and account diagnostics did not render.");
+                    if (Find(shell.SettingsWindow!, "UsageTotal") is not TextBlock { Text: "$42.75" })
+                        throw new InvalidOperationException("Usage summary did not render.");
                     if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
                         throw new InvalidOperationException("Usage refresh control did not render.");
                     InvokeButton(refresh);
                 }
                 if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
                     throw new InvalidOperationException("Usage page still displayed sampled spending history.");
-                SendTraySelection(shell, 0x401);
             });
+            await SmokeUsageDisclosureAsync(shell);
+            await OnUI(shell, () => SendTraySelection(shell, 0x401));
             await Task.Delay(250);
             await OnUI(shell, () =>
             {
@@ -295,7 +295,8 @@ internal static class Program
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
                     "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
-                    "Reactor cost flyout, usage-first settings without sampled chart, account avatars and diagnostics, add-account deep link, " +
+                    "Reactor cost flyout, usage-first settings without sampled chart, independent collapsed account diagnostics, " +
+                    "account avatars and diagnostics, add-account deep link, " +
                     "account Back controls and scoped keyboard accelerator registration, native controls, " +
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
                     "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
@@ -311,6 +312,54 @@ internal static class Program
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
+    }
+    private static async Task SmokeUsageDisclosureAsync(ReactorShell shell)
+    {
+        if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            foreach (var account in shell.Session.Dashboard.Accounts)
+            {
+                if (Find(window, account.Key + "_AdvancedAccountDetails") is not Expander { IsExpanded: false } ||
+                    Find(window, account.Key + "_AccountDiagnosticsTable") is not null ||
+                    Find(window, account.Key + "_AccountSummary") is null)
+                    throw new InvalidOperationException("Usage account diagnostics must start collapsed with consumption still visible.");
+            }
+            if (Find(window, "github.com:1_AdvancedAccountDetails") is not Expander advanced ||
+                new ExpanderAutomationPeer(advanced).GetPattern(PatternInterface.ExpandCollapse) is not IExpandCollapseProvider expand)
+                throw new InvalidOperationException("Usage account disclosure is not accessible.");
+            expand.Expand();
+        });
+        await Task.Delay(300);
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" } ||
+                Find(window, "example.ghe.com:2_AdvancedAccountDetails") is not Expander { IsExpanded: false } ||
+                Find(window, "example.ghe.com:2_AccountDiagnosticsTable") is not null)
+                throw new InvalidOperationException("Usage disclosure did not expose just the selected account's diagnostics.");
+            shell.Session.Refresh();
+        });
+        await Task.Delay(300);
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "github.com:1_AdvancedAccountDetails") is not Expander { IsExpanded: true } advanced ||
+                Find(window, "github.com:1_DetailCredits") is not TextBlock { Text: "2,625" } ||
+                new ExpanderAutomationPeer(advanced).GetPattern(PatternInterface.ExpandCollapse) is not IExpandCollapseProvider expand)
+                throw new InvalidOperationException("Refreshing usage lost the account disclosure state.");
+            expand.Collapse();
+        });
+        await Task.Delay(300);
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "github.com:1_AdvancedAccountDetails") is not Expander { IsExpanded: false } ||
+                Find(window, "github.com:1_AccountDiagnosticsTable") is not null ||
+                Find(window, "github.com:1_AccountConsumption") is not TextBlock { Text: "$26.25" })
+                throw new InvalidOperationException("Collapsing diagnostics hid consumption or retained advanced fields.");
+        });
     }
     private static void AssertBackAccelerators(ReactorWindow window)
     {

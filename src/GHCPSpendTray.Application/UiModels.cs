@@ -20,6 +20,8 @@ public sealed record SettingsView(int PollMinutes, string Thresholds, bool Notif
     string StartupDescription = "Unavailable in isolated portable mode.",
     TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
     string[]? ExcludedTrayAccounts = null);
+public sealed record NotificationView(string? AccountKey, string Title, string Message,
+    decimal? PercentConsumed = null, decimal? SpendMilestoneUsd = null);
 public sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)
 {
     public override string ToString() => "DevicePrompt [redacted]";
@@ -52,5 +54,5 @@ public interface IApplicationController : IDisposable
     string? AccountClientId(string key);
     string ResolveHostDescription(string host);
     Task ResumeAsync();
-    void SetNotificationHandler(Func<string, string, string, Task<bool>> handler);
+    void SetNotificationHandler(Func<NotificationView, Task<bool>> handler);
 }

@@ -26,7 +26,7 @@ try
         TrayTests.WriteSamples(scaledPath, int.Parse(sampleSize, System.Globalization.CultureInfo.InvariantCulture));
     DashboardView? view = null;
     app.Changed += next => Volatile.Write(ref view, next);
-    app.SetNotificationHandler((_, _, _) => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
+    app.SetNotificationHandler(_ => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
     await app.InitializeAsync();
     Check(app.Settings.PollMinutes == 60, "exact one-hour default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
@@ -213,6 +213,11 @@ try
         await Until(() => draft.Initialized && !draft.Busy);
         await app.RefreshAsync();
         await Until(() => draft.Dashboard.Tray?.RollUp.IncludedAccounts == 3);
+        Check(draft.ExpandedUsageAccounts.Count == 0, "usage account disclosures start collapsed");
+        draft.ExpandedUsageAccounts.Add("github.com:1");
+        await app.RefreshAsync();
+        Check(draft.ExpandedUsageAccounts.SetEquals(["github.com:1"]),
+            "refresh preserves the open account disclosure without expanding other accounts");
         int shellCalls = 0;
         var palette = new TrayPalette(0xFF000000, 0xFFFFFFFF);
         using var installed = new TrayIconSet(0, root, (uint _, ref Win32.NOTIFYICONDATA _) => { shellCalls++; return 1; });
@@ -385,7 +390,15 @@ try
     await app.RefreshAsync("github.com:2");
     Check(notifications == 3, "new override below consumption alerts once");
     Check((await Load()).Accounts.Single(a => a.Key == "github.com:2").DisplayName == "Work", "display name persisted");
-    await app.RemoveAsync("github.com:2");
+    using (var disclosure = new AppSession(app, action => action()))
+    {
+        disclosure.Initialize();
+        await Until(() => disclosure.Initialized && !disclosure.Busy);
+        disclosure.ExpandedUsageAccounts.UnionWith(["github.com:1", "github.com:2"]);
+        await app.RemoveAsync("github.com:2");
+        Check(disclosure.ExpandedUsageAccounts.SetEquals(["github.com:1"]),
+            "removing an account retires only its usage disclosure state");
+    }
     Check(!credentials.Values.ContainsKey("github.com:2") && (await Load()).Accounts.Length == 2, "local removal deletes credential and configuration");
     await app.SaveSettingsAsync(app.Settings with { SpendIncrementUsd = 50 });
     await app.SaveAccountAsync("github.com:1", "Personal", "", 25m);

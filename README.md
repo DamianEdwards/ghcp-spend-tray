@@ -211,6 +211,18 @@ override it, or disable it. Unknown or unlimited allocations can still use
 dollar alerts, but not percentage alerts. Windows may suppress a notification
 even when the app submits it.
 
+Windows consumption notifications show a large pie of the triggering account's
+current allocation usage, independent of your tray style or account selection.
+Over-allocation retains the `+` badge. Dollar alerts without an available
+allocation percentage show the reached USD milestone instead (for example,
+`$100`, not an additional $100 of consumption). The test notification uses a
+synthetic 50% pie.
+
+On Windows, each account's **Settings > Usage > Advanced information** section
+starts collapsed and can be opened independently to inspect observed credits,
+recorded allocation, timestamps, and refresh scheduling. Consumption, allocation
+progress, and account warnings remain visible without opening it.
+
 Displayed USD consumption is `credits_used / 100` from GitHub's token-billing
 quota data. It is **not** an invoice, a finance budget, or total spend across all
 GitHub products. Stale or partial observations are identified; previous billing

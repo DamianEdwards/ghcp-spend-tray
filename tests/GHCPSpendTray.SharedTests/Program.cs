@@ -20,7 +20,13 @@ try
         DashboardView? dashboard = null;
         controller.Changed += value => Volatile.Write(ref dashboard, value);
         int notifications = 0;
-        controller.SetNotificationHandler((_, _, _) => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
+        NotificationView? notification = null;
+        controller.SetNotificationHandler(value =>
+        {
+            notification = value;
+            Interlocked.Increment(ref notifications);
+            return Task.FromResult(true);
+        });
         await controller.InitializeAsync();
         Check(dashboard?.ConsumptionUsd is null, "Empty consumption is unavailable, not zero.");
         Check(controller.Settings.PollMinutes == 60 && controller.Settings.CanChangeStartup, "Shared defaults and startup adapter.");
@@ -40,8 +46,26 @@ try
         await controller.RefreshAsync();
         Check(dashboard?.ConsumptionUsd == 26.25m && dashboard.Accounts[0].Percent == 105m, "Account consumption and allocation.");
         Check(notifications == 1, "Percentage and dollar milestones coalesce.");
+        Check(notification is { AccountKey: "github.com:1", PercentConsumed: 105m, SpendMilestoneUsd: 20m } &&
+            notification.Message.Contains("$26.25") && notification.Title == "GHCPSpendTray consumption alert",
+            "Notification carries the alert account's actual snapshot percentage and milestone, not the crossed threshold or roll-up.");
         await controller.RefreshAsync();
         Check(notifications == 1, "Alert ledger prevents duplicate notifications.");
+        var sample = dashboard!.TrayStates![0].Snapshot!;
+        var account = dashboard.TrayStates[0].Account;
+        await controller.SubmitAsync(new(account, sample with
+        {
+            Unlimited = true, PercentConsumed = null
+        }, 0, [], 20m));
+        Check(notification is { PercentConsumed: null, SpendMilestoneUsd: 20m } &&
+            notification.Message.Contains("$20.00") && !notification.Message.Contains("%"),
+            "Dollar-only notification preserves the milestone without inventing an allocation percentage.");
+        await controller.SubmitAsync(new(account, sample with
+        {
+            CreditsUsed = 2187.5m, ConsumptionUsd = 21.875m, PercentConsumed = 87.5m
+        }, 80m, [80m]));
+        Check(notification is { PercentConsumed: 87.5m, SpendMilestoneUsd: null },
+            "Artwork data uses current consumption rather than rounding down to the crossed allocation threshold.");
         Check(credentials.Values.Count == 1, "Credentials are persisted through injected platform store.");
         Check(dashboard?.Tray?.RollUp.Percent == 105 && dashboard.Tray.RollUp.IsOverAllocation, "Shared dashboard includes truthful tray allocation.");
         await controller.SaveSettingsAsync(controller.Settings with
@@ -71,6 +95,19 @@ try
         credentials.FailDelete = false;
         await controller.RemoveAsync("github.com:1");
         Check(credentials.Values.IsEmpty && (await new JsonStore(root).LoadSettingsAsync()).Value.Accounts.Length == 0, "Removal deletes credentials and configuration.");
+    }
+    BridgeEvent? notificationRequest = null;
+    using (var platform = new NativePlatform(request =>
+    {
+        notificationRequest = request;
+        Check(request is { Kind: "platform", Operation: "notification", Key: "github.com:1",
+            Title: "Synthetic alert", Message: "Synthetic message" },
+            "macOS adapter preserves the existing native notification request shape and text");
+    }))
+    {
+        var pending = platform.NotifyAsync(new("github.com:1", "Synthetic alert", "Synthetic message", 87.5m, 100m));
+        platform.Complete(notificationRequest!.Id!, new() { Accepted = true });
+        Check(await pending, "macOS notification acceptance still reaches the shared alert ledger.");
     }
     using (var bridge = new BridgeRuntime())
     {

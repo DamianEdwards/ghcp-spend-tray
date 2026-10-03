@@ -58,6 +58,7 @@ internal sealed unsafe class TrayIcon : IDisposable
     private bool _added;
     private bool _disposed;
     private TrayImage _icon;
+    private TrayImage? _notificationIcon;
     private readonly ShellCall _shell;
     private (TrayIndicator Indicator, TrayIconStyle Style, int Size, TrayPalette Palette) _rendered;
     internal uint Id => _data.uID;
@@ -154,15 +155,29 @@ internal sealed unsafe class TrayIcon : IDisposable
         _icon = image;
         _rendered = (indicator, style, size, palette);
     }
-    internal bool Notify(string title, string message)
+    internal bool Notify(NotificationView notification, int size, TrayPalette palette)
     {
-        _data.uFlags = Win32.NIF_INFO | Win32.NIF_GUID;
-        _data.dwInfoFlags = Win32.NIIF_INFO | Win32.NIIF_RESPECT_QUIET_TIME;
-        fixed (char* value = _data.szInfoTitle) Set(value, 64, title);
-        fixed (char* value = _data.szInfo) Set(value, 256, message);
-        var submitted = _shell(Win32.NIM_MODIFY, ref _data) != 0;
-        if (!submitted) Diagnostics.Record("Shell notification submission rejected.");
-        return submitted;
+        var image = TrayIconRenderer.CreateNotification(notification, size, palette);
+        try
+        {
+            var data = _data;
+            data.uFlags = Win32.NIF_INFO | Win32.NIF_GUID;
+            data.dwInfoFlags = Win32.NIIF_USER | Win32.NIIF_LARGE_ICON | Win32.NIIF_RESPECT_QUIET_TIME;
+            data.hBalloonIcon = image.DangerousGetHandle();
+            Set(data.szInfoTitle, 64, notification.Title);
+            Set(data.szInfo, 256, notification.Message);
+            if (_shell(Win32.NIM_MODIFY, ref data) == 0)
+            {
+                Diagnostics.Record("Shell notification submission rejected.");
+                image.Dispose();
+                return false;
+            }
+        }
+        catch { image.Dispose(); throw; }
+        _notificationIcon?.Dispose();
+        _notificationIcon = image;
+        NotificationAccount = notification.AccountKey;
+        return true;
     }
     private static void Set(char* buffer, int capacity, string value)
     {
@@ -185,6 +200,7 @@ internal sealed unsafe class TrayIcon : IDisposable
         if (_disposed) return;
         _disposed = true;
         Remove();
+        _notificationIcon?.Dispose();
         _icon.Dispose();
     }
 }

@@ -202,7 +202,7 @@ internal static class BackNavigationTests
         public string? AccountClientId(string key) => _demo.AccountClientId(key);
         public string ResolveHostDescription(string host) => _demo.ResolveHostDescription(host);
         public Task ResumeAsync() => _demo.ResumeAsync();
-        public void SetNotificationHandler(Func<string, string, string, Task<bool>> handler) => _demo.SetNotificationHandler(handler);
+        public void SetNotificationHandler(Func<NotificationView, Task<bool>> handler) => _demo.SetNotificationHandler(handler);
         public void Dispose() => _demo.Dispose();
     }
 }

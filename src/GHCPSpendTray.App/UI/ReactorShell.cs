@@ -41,7 +41,8 @@ internal sealed class ReactorShell : IDisposable
             ShellServices.CopyText(WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow), text);
         };
         _session.HideFlyout = () => _flyout?.Hide();
-        _session.TestNotification = () => _tray.Notify(null, "GHCPSpendTray test", "Windows accepted this test notification request.");
+        _session.TestNotification = () => _tray.Notify(new(null, "GHCPSpendTray test",
+            "Synthetic example: 50% of allocation consumed.", PercentConsumed: 50m));
         _tray.OpenRequested += key => _session.Post(() =>
         {
             if (key is not null) _session.EditAccount(key);
@@ -66,12 +67,13 @@ internal sealed class ReactorShell : IDisposable
                 _session.ReportTrayError();
             }
         };
-        controller.SetNotificationHandler((key, title, text) =>
+        controller.SetNotificationHandler(notification =>
         {
             var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _session.Post(() =>
             {
-                completion.TrySetResult(_tray.Notify(key, title, text));
+                try { completion.TrySetResult(_tray.Notify(notification)); }
+                catch (Exception ex) { completion.TrySetException(ex); }
             });
             return completion.Task;
         });

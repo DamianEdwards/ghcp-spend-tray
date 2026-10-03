@@ -36,11 +36,11 @@ internal sealed class TrayHost : ShellWindow
         if (_pendingSelection && _icons.Find(_selectionId) is null) CancelSelection();
     }
     internal bool ContainsCursor() => Icons.Any(icon => icon.ContainsCursor());
-    internal bool Notify(string? accountKey, string title, string message)
+    internal bool Notify(NotificationView notification)
     {
-        var icon = _icons.ForAccount(accountKey) ?? _icons.Primary;
-        icon.NotificationAccount = accountKey;
-        return icon.Notify(title, message);
+        var icon = _icons.ForAccount(notification.AccountKey) ?? _icons.Primary;
+        return icon.Notify(notification, TrayIconRenderer.NotificationSizeForDpi(Monitor(icon).Dpi),
+            TrayIconRenderer.SystemPalette());
     }
     private int IconSize(TrayIcon? icon) =>
         TrayIconRenderer.SizeForDpi(Monitor(icon).Dpi);
