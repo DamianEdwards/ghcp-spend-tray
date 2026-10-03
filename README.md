@@ -1,12 +1,15 @@
 # GHCPSpendTray
 
 [![Install from the Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Install-0078D4?logo=microsoftstore&logoColor=white)](https://www.microsoft.com/store/productId/9PMX96TSF295)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-000000?logo=apple&logoColor=white)](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos)
 
-GHCPSpendTray is an independent Windows 11 tray and macOS menu-bar app for keeping an eye on
-GitHub Copilot AI-credit consumption. It shows per-account usage and allocation
-and offers optional spending alerts without a browser tab or a hosted service.
+GHCPSpendTray is an independent Windows 11 tray and macOS menu-bar app for
+keeping an eye on GitHub Copilot AI-credit consumption. It shows per-account
+usage and allocation and offers optional spending alerts without a browser tab
+or a hosted service.
 
 [Install from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295)
+&middot; [Download the latest macOS release](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos)
 &middot; [All releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases)
 &middot; [Report an issue](https://github.com/DamianEdwards/ghcp-spend-tray/issues)
 
@@ -58,7 +61,7 @@ universal app for Apple silicon and Intel. We maintain a two-major-version
 support window and advance it when adopting a new stable macOS major release.
 macOS 14 Sonoma is no longer supported. Download
 `GHCPSpendTray-macOS-<version>.dmg` from a **macOS** release on
-[GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases).
+[GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos).
 Open the disk image, drag **GHCPSpendTray** to **Applications**, then launch it.
 The app lives in the menu bar, without a persistent Dock icon.
 Public macOS releases must be Developer ID signed and Apple notarized; do not
