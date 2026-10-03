@@ -70,9 +70,38 @@ struct StatusMessage: View {
     }
 }
 
+struct ExampleAccountButton: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        if model.demo {
+            Button("Add Example Account") { model.addExampleAccount() }
+                .disabled(!model.initialized || model.busy)
+                .help("Add synthetic usage for this session only, without signing in or saving account data.")
+        }
+    }
+}
+
+struct AccountSetupPrompt: View {
+    @ObservedObject var model: AppModel
+    var alignment: HorizontalAlignment = .center
+    var body: some View {
+        VStack(alignment: alignment, spacing: 12) {
+            Text("Add an account to see your usage").font(.title2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Connect your GitHub account to start tracking Copilot consumption.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("Add Account...") { model.addAccount() }.buttonStyle(.borderedProminent)
+                .disabled(!model.initialized || model.busy)
+            ExampleAccountButton(model: model)
+        }
+        .multilineTextAlignment(alignment == .leading ? .leading : .center)
+    }
+}
+
 struct FlyoutView: View {
     @ObservedObject var model: AppModel
     var body: some View {
+        let noAccounts = model.dashboard?.accounts.isEmpty == true
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 24, height: 24)
@@ -81,43 +110,46 @@ struct FlyoutView: View {
                 Button { model.openSettings() } label: { Image(systemName: "gearshape") }
                     .help("Open Settings").accessibilityLabel("Open Settings")
             }
-            HStack(alignment: .firstTextBaseline) {
-                Text(money(model.dashboard?.consumptionUsd)).font(.largeTitle).monospacedDigit()
-                Text("month to date").foregroundStyle(.secondary)
-            }
-            if let dashboard = model.dashboard, !dashboard.isComplete {
-                Text(dashboard.isLastKnown ? "Last-known / partial consumption" : "Partial / unavailable consumption")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            if let tray = model.dashboard?.tray {
-                Text(tray.rollUp.details).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            }
-            if !model.demo && model.settings?.notifications == true,
-               let permission = model.notificationPermission, !permission.canSend {
-                Button("Set Up Notifications...") { model.openSettings(.notifications) }
-                    .font(.caption)
-            }
-            StatusMessage(model: model)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(model.dashboard?.accounts ?? []) { account in
-                        Button {
-                            model.selectedAccount = account.key
-                            model.openSettings(.accounts)
-                        } label: { AccountRow(account: account) }
-                            .buttonStyle(.plain)
-                        Divider()
+            if noAccounts {
+                StatusMessage(model: model)
+                AccountSetupPrompt(model: model, alignment: .leading).padding(.vertical, 8)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(money(model.dashboard?.consumptionUsd)).font(.largeTitle).monospacedDigit()
+                    Text("month to date").foregroundStyle(.secondary)
+                }
+                if let dashboard = model.dashboard, !dashboard.isComplete {
+                    Text(dashboard.isLastKnown ? "Last-known / partial consumption" : "Partial / unavailable consumption")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if let tray = model.dashboard?.tray {
+                    Text(tray.rollUp.details).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                if !model.demo && model.settings?.notifications == true,
+                   let permission = model.notificationPermission, !permission.canSend {
+                    Button("Set Up Notifications...") { model.openSettings(.notifications) }
+                        .font(.caption)
+                }
+                StatusMessage(model: model)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(model.dashboard?.accounts ?? []) { account in
+                            Button {
+                                model.selectedAccount = account.key
+                                model.openSettings(.accounts)
+                            } label: { AccountRow(account: account) }
+                                .buttonStyle(.plain)
+                            Divider()
+                        }
                     }
                 }
-            }
-            .frame(maxHeight: 330)
-            if model.dashboard?.accounts.isEmpty == true {
-                Text("Connect a GitHub account to monitor AI-credit consumption.").foregroundStyle(.secondary)
-                Button("Connect Account...") { model.addAccount() }.buttonStyle(.borderedProminent)
-                    .disabled(!model.initialized || model.busy)
+                .frame(maxHeight: 330)
+                ExampleAccountButton(model: model)
             }
             HStack {
-                Button("Refresh Now") { model.perform("refresh") }.disabled(!model.initialized || model.busy)
+                if !noAccounts {
+                    Button("Refresh Now") { model.perform("refresh") }.disabled(!model.initialized || model.busy)
+                }
                 if model.busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
@@ -167,9 +199,7 @@ struct UsageView: View {
         if model.dashboard?.accounts.isEmpty == true {
             VStack(spacing: 16) {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 72, height: 72)
-                Text("Add an account to see your usage").font(.title2)
-                Text("Connect your GitHub account to start tracking Copilot consumption.").foregroundStyle(.secondary)
-                Button("Add Account...") { model.addAccount() }.buttonStyle(.borderedProminent).disabled(model.busy)
+                AccountSetupPrompt(model: model)
             }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             usage
@@ -277,9 +307,14 @@ struct AccountEditor: View {
             }
             Section("Account Preferences") {
                 TextField("Display name", text: $name)
+                    .textFieldStyle(.roundedBorder)
                 TextField("Percentage alerts", text: $thresholds, prompt: Text("Inherit global thresholds"))
+                    .textFieldStyle(.roundedBorder)
                 Toggle("Inherit global USD increment", isOn: $inherit)
-                if !inherit { TextField("USD increment (0 disables)", text: $increment) }
+                if !inherit {
+                    TextField("USD increment (0 disables)", text: $increment)
+                        .textFieldStyle(.roundedBorder)
+                }
                 HStack {
                     Button("Save") {
                         do {
@@ -352,8 +387,10 @@ struct PreferencesView: View {
                 Section("Notifications") {
                     Toggle("Enable consumption alerts", isOn: $enabled)
                     TextField("Percentage thresholds", text: $thresholds)
+                        .textFieldStyle(.roundedBorder)
                     Text("Separate positive percentages with commas. Defaults: 50, 80, 100.").font(.caption).foregroundStyle(.secondary)
                     TextField("USD increment", text: $increment, prompt: Text("Disabled"))
+                        .textFieldStyle(.roundedBorder)
                     Text("For example, 50 alerts at $50, $100, and so on. Per-account preferences can override or disable these alerts.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Send Test Notification") { Task { await model.testNotification() } }
@@ -364,6 +401,7 @@ struct PreferencesView: View {
             } else {
                 Section("General") {
                     TextField("Refresh interval (minutes)", text: $minutes)
+                        .textFieldStyle(.roundedBorder)
                     Text("From 5 to 1440 minutes; default 60.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Launch at login", isOn: $startup).disabled(model.settings?.canChangeStartup != true || model.demo)
                     Text(model.settings?.startupDescription ?? "").font(.caption).foregroundStyle(.secondary)
@@ -401,7 +439,7 @@ struct PreferencesView: View {
                             }
                         }
                     }
-                    Text("Preview changes apply to the menu bar only after Save. ! means partial, ? means unavailable, and + means over allocation. Numbers are rounded; hover over an icon for details.")
+                    Text("Preview changes apply to the menu bar only after Save. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over allocation. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover over an icon for details.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("A neutral icon remains when nothing is selected. macOS may hide icons on a crowded menu bar; reopen GHCPSpendTray to access Settings.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -480,8 +518,10 @@ struct SignInView: View {
             if model.editingHost {
                 Form {
                     TextField("GitHub host", text: Binding(get: { model.signInHost }, set: { model.setHost($0) }))
+                        .textFieldStyle(.roundedBorder)
                         .disabled(model.signingIn || model.reconnect != nil)
                     TextField("OAuth client ID", text: $model.signInClientId, prompt: Text("Built in for github.com and msft.ghe.com"))
+                        .textFieldStyle(.roundedBorder)
                         .disabled(model.signingIn || model.reconnectClientId != nil)
                     Toggle("Request offline access (refresh tokens)", isOn: $model.offlineAccess).disabled(model.signingIn)
                 }

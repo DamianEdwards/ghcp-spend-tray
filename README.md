@@ -76,6 +76,8 @@ artifacts are not public releases.
 Click the menu-bar icon to see consumption; secondary-click for **Open**,
 **Refresh Now**, **Settings**, and **Quit**. Settings has the same **Usage**,
 **Accounts**, **General**, **Notifications**, and **About** sections as Windows.
+With no accounts connected, the popup shows an **Add Account** prompt instead
+of unavailable totals, diagnostics, or refresh controls.
 Use **General > Launch at login** to opt in; macOS may require approval in
 **System Settings > General > Login Items**. Notifications also require macOS
 permission and can be suppressed by Focus.
@@ -188,7 +190,9 @@ eligible allocation**, not an average of account percentages. Only valid, fresh,
 current-period observations with known, finite positive allocation qualify.
 Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
 excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
-available, not zero. Hover for the percentage and included/selected counts;
+available, not zero. On macOS, an unavailable pie stays an empty outline with
+an `!` badge; percentage mode still shows `?`. The badged empty pie does not
+mean 0% usage. Hover for the percentage and included/selected counts;
 **Settings > Usage** lists every selected account and its inclusion or exclusion
 reason. These preferences do not filter or change the existing dollar totals.
 
@@ -284,6 +288,22 @@ named synthetic item; it never reads account credentials or enables login
 startup. The resulting app is ad-hoc signed for local development only.
 `bash tools/macos/build.sh` builds without running tests. If using a preview
 toolchain, select a stable SDK with `SDKROOT`; see [release documentation](docs/RELEASING.md).
+
+To run an empty, isolated preview alongside an installed release:
+
+```bash
+preview_dir="$(mktemp -d -t ghcp-preview)"
+open -n artifacts/macos/GHCPSpendTray.app --args --demo-empty --data-dir "$preview_dir"
+```
+
+**Add Example Account** adds synthetic usage to the open popup so you can
+check its live resizing and position without signing in. The button appears
+only in sample mode, both before and after adding examples. Each click adds
+one account; examples last only for that process and are not saved. Use
+`--demo` instead of `--demo-empty` to start with the existing sample accounts.
+Both modes require a separate data directory and disable authentication,
+notifications, and launch-at-login changes; they do not access saved accounts
+or credentials.
 
 The Windows solution is [`GHCPSpendTray.slnx`](GHCPSpendTray.slnx).
 `Core` contains domain, HTTP, and storage code; `Application` contains the

@@ -191,6 +191,18 @@ final class AppModel: ObservableObject {
         startSignIn()
     }
 
+    func addExampleAccount() {
+        guard demo else {
+            error = "Example accounts are only available in demonstration mode."
+            return
+        }
+        guard initialized else {
+            error = "Wait for the app to finish loading before adding an example account."
+            return
+        }
+        perform("demo.account.add")
+    }
+
     func reconnectAccount(_ account: AccountData) {
         send("account.preferences", fields: ["key": account.key]) { [weak self] event in
             guard let self, let preferences = event.preferences else { return }
