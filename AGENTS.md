@@ -39,6 +39,9 @@ The unified Release workflow selects independent bumps from stable releases
 and persists its version plan across retries. Test changes with
 `python3 -m unittest discover -s tools/release`.
 Keep `tools/ci/changes.py` and its tests current when adding platform paths.
+Markdown and images under `docs/images` do not trigger app builds; unknown
+paths still verify both platforms. Keep the aggregate Verification check
+running for documentation-only changes.
 
 Preserve Native AOT compatibility and the component-only Windows App SDK
 dependency graph; avoid adding the umbrella `Microsoft.WindowsAppSDK` package.

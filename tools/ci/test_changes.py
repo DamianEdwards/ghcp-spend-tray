@@ -26,8 +26,28 @@ class ChangesTests(unittest.TestCase):
 
     def test_documentation(self):
         self.assertEqual(classify(["README.md", "docs/RELEASING.md"]), dict(windows=False, macos=False, markdown=True))
+        self.assertEqual(classify([".markdownlint.jsonc"]), dict(windows=False, macos=False, markdown=True))
         self.assertEqual(classify([]), dict(windows=False, macos=False, markdown=False))
         self.assertEqual(classify(["README.md", "tools/macos/build.sh"]), dict(windows=False, macos=True, markdown=True))
+
+    def test_documentation_images_do_not_build_apps(self):
+        for extension in ("png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "PNG"):
+            with self.subTest(extension=extension):
+                self.assertEqual(classify([f"docs/images/screenshot.{extension}"]),
+                                 dict(windows=False, macos=False, markdown=False))
+        self.assertEqual(classify(["README.md", "docs/images/windows-flyout.png", "docs/images/macos-popup.png"]),
+                         dict(windows=False, macos=False, markdown=True))
+
+    def test_documentation_images_do_not_hide_code_or_unknown_changes(self):
+        for path in ("docs/images/generate.py", "docs/images/new-file", "docs/images-extra/screenshot.png",
+                     "docs/screenshot.png", "screenshot.png", "tools/ci/changes.py"):
+            with self.subTest(path=path):
+                self.assertEqual(classify(["docs/images/screenshot.png", path]),
+                                 dict(windows=True, macos=True, markdown=False))
+        self.assertEqual(classify(["docs/images/screenshot.png", "src/GHCPSpendTray.App/Program.cs"]),
+                         dict(windows=True, macos=False, markdown=False))
+        self.assertEqual(classify(["docs/images/screenshot.png", "tools/macos/build.sh"]),
+                         dict(windows=False, macos=True, markdown=False))
 
 
 if __name__ == "__main__":

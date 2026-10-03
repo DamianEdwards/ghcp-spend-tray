@@ -13,6 +13,10 @@ def classify(paths):
             result["markdown"] = True
         elif path == ".markdownlint.jsonc":
             result["markdown"] = True
+        elif path.startswith("docs/images/") and Path(path).suffix.lower() in {
+            ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
+        }:
+            continue
         elif path in {
             "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",
             "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.svg",
