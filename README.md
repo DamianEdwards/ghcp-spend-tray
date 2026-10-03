@@ -21,6 +21,12 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
 ## Screenshots
 
+### Windows
+
+<img src="docs/images/windows-flyout.png" alt="GHCPSpendTray Windows tray flyout showing sample Copilot consumption" width="310">
+
+The tray flyout, shown with synthetic demo accounts and usage.
+
 ### macOS
 
 <img src="docs/images/macos-popup.png" alt="GHCPSpendTray macOS menu-bar popup showing sample Copilot consumption" width="412">
