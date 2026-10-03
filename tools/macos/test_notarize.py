@@ -87,3 +87,15 @@ class NotarizationTests(unittest.TestCase):
         script = (ROOT / "tools/macos/sign-package.sh").read_text()
         self.assertIn('notarize.sh "$temporary/app.zip" app', script)
         self.assertIn('notarize.sh "$dmg" dmg', script)
+
+    def test_status_workflow_never_uploads_or_signs(self):
+        workflow = (ROOT / ".github/workflows/notarization-status.yml").read_text()
+        self.assertIn("environment: production", workflow)
+        self.assertIn("notarytool info", workflow)
+        self.assertIn("notarytool wait", workflow)
+        self.assertIn("notarytool log", workflow)
+        self.assertNotIn("notarytool submit", workflow)
+        self.assertNotIn("codesign", workflow)
+        self.assertNotIn("MACOS_CERTIFICATE", workflow)
+        self.assertIn('uuid.UUID(os.environ["SUBMISSION_ID"])', workflow)
+        self.assertIn('if [[ "$status" != Accepted ]]', workflow)

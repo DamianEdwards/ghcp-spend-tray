@@ -1,0 +1,86 @@
+name: Notarization Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      submission_id:
+        description: Existing Apple notarization submission UUID from the release log or artifact
+        required: true
+        type: string
+      wait:
+        description: Continue waiting for up to 60 minutes (does not upload anything)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    name: Inspect existing Apple notarization
+    runs-on: macos-15
+    timeout-minutes: 75
+    environment: production
+    steps:
+      - name: Check submission status without uploading
+        env:
+          SUBMISSION_ID: ${{ inputs.submission_id }}
+          WAIT_FOR_RESULT: ${{ inputs.wait }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then echo "Run notarization status from main." >&2; exit 1; fi
+          temporary="$(mktemp -d -t ghcp-notarization-status)"
+          export GHCP_STATUS_TEMP="$temporary"
+          trap 'rm -f "$temporary/notary.p8"; rmdir "$temporary"' EXIT
+          mkdir -p artifacts/notarization-status
+          python3 - <<'PY'
+          import os, uuid
+          from pathlib import Path
+          uuid.UUID(os.environ["SUBMISSION_ID"])
+          for name in ("MACOS_NOTARY_KEY", "MACOS_NOTARY_KEY_ID", "MACOS_NOTARY_ISSUER"):
+              if not os.environ.get(name, "").strip():
+                  raise SystemExit(f"Configure {name} in production.")
+          os.umask(0o077)
+          Path(os.environ["GHCP_STATUS_TEMP"], "notary.p8").write_text(os.environ["MACOS_NOTARY_KEY"])
+          PY
+          auth=(--key "$temporary/notary.p8" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER")
+          xcrun notarytool info "$SUBMISSION_ID" "${auth[@]}" --output-format json > artifacts/notarization-status/info.json
+          if [[ "$WAIT_FOR_RESULT" == true ]]; then
+            if ! xcrun notarytool wait "$SUBMISSION_ID" "${auth[@]}" --timeout 60m --output-format json > artifacts/notarization-status/wait.json; then
+              echo "Wait did not return acceptance; querying the existing submission again. No upload was made." >&2
+            fi
+            xcrun notarytool info "$SUBMISSION_ID" "${auth[@]}" --output-format json > artifacts/notarization-status/info.json
+          fi
+          status="$(python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          info = json.loads(Path("artifacts/notarization-status/info.json").read_text())
+          status = info["status"]
+          if status not in ("Accepted", "In Progress", "Invalid", "Rejected"):
+              raise SystemExit("Unexpected Apple notarization status.")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"Notarization `{os.environ['SUBMISSION_ID']}`: **{status}**. No files were uploaded.\n")
+          print(status)
+          PY
+          )"
+          echo "Existing submission status: $status"
+          if [[ "$status" == Invalid || "$status" == Rejected ]]; then
+            xcrun notarytool log "$SUBMISSION_ID" "${auth[@]}" artifacts/notarization-status/log.json
+            echo "Apple rejected this submission; inspect the retained notarization log." >&2
+            exit 1
+          fi
+          if [[ "$status" != Accepted ]]; then
+            echo "Apple is still processing; notarization is not yet accepted." >&2
+            exit 1
+          fi
+      - name: Retain submission status
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notarization-status-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/notarization-status/
+          if-no-files-found: warn
+          retention-days: 90
