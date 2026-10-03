@@ -3,8 +3,8 @@ Set-StrictMode -Version Latest
 $root = Split-Path $PSScriptRoot -Parent
 $layout = Join-Path ([IO.Path]::GetTempPath()) ("GHCPSpendTray-icons-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $layout | Out-Null
-function Assert-Rejected([string] $ExpectedError) {
-    try { & "$PSScriptRoot\test-package-icons.ps1" -Layout $layout | Out-Null }
+function Assert-Rejected([string] $ExpectedError, [switch] $Store) {
+    try { & "$PSScriptRoot\test-package-icons.ps1" -Layout $layout -Store:$Store | Out-Null }
     catch {
         if ($_.Exception.Message -notlike "*$ExpectedError*") { throw }
         return
@@ -105,6 +105,30 @@ try {
     $manifest.Package.Applications.Application.VisualElements.Square44x44Logo = 'Assets\StoreLogo.png'
     $manifest.Save($manifestPath)
     Assert-Rejected 'The manifest must select the transparent'
+    $manifest.Package.Applications.Application.VisualElements.Square44x44Logo = 'Assets\Square44x44Logo.png'
+    $manifest.Save($manifestPath)
+    @('Reactor\Hosting\ReactorApplication.xbf') | Set-Content -LiteralPath $fixtureList -Encoding UTF8
+    & $makepri new /pr $layout /cf $fixtureConfig /in GHCPSpendTray `
+        /of (Join-Path $layout 'GHCPSpendTray.pri') /o | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Store application PRI fixture generation failed.' }
+    foreach ($relativePath in $startupPaths | Where-Object { $_ -like 'Microsoft.UI.Xaml\*' }) {
+        Remove-Item -LiteralPath (Join-Path $layout $relativePath)
+    }
+    & "$PSScriptRoot\new-package-resources.ps1" -Layout $layout
+    & "$PSScriptRoot\test-package-icons.ps1" -Layout $layout -Store
+    Assert-Rejected 'Missing startup PRI resource: Microsoft.UI.Xaml'
+    $path = Join-Path $layout 'Reactor\Hosting\ReactorApplication.xbf'
+    $bytes = [IO.File]::ReadAllBytes($path)
+    Remove-Item -LiteralPath $path
+    Assert-Rejected 'Missing startup XAML payload:' -Store
+    [IO.File]::WriteAllBytes($path, $bytes)
+    Get-ChildItem -LiteralPath (Join-Path $layout 'Assets') -File |
+        Sort-Object Name | ForEach-Object { "Assets\$($_.Name)" } |
+        Set-Content -LiteralPath $fixtureList -Encoding UTF8
+    & $makepri new /pr $layout /cf $fixtureConfig /mn $manifestPath `
+        /of (Join-Path $layout 'resources.pri') /o | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Store shell-only PRI fixture generation failed.' }
+    Assert-Rejected 'Missing startup PRI resource: Reactor' -Store
 }
 finally { Remove-Item -LiteralPath $layout -Recurse -Force }
-Write-Output 'PASS: missing application PRI, shell-only PRI, missing/unindexed startup XAML, invalid icons and disconnected manifest/PRI rejected.'
+Write-Output 'PASS: self-contained/Store startup resources, missing application PRI, shell-only PRI, missing/unindexed XAML, invalid icons and disconnected manifest/PRI rejected.'

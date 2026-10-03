@@ -98,7 +98,15 @@ jobs:
             nuget-${{ runner.os }}-${{ runner.arch }}-package-
       - name: Build and validate both MSIX architectures
         shell: pwsh
-        run: .\tools\package.ps1
+        run: |
+          .\tools\package.ps1
+          .\tools\test-package-deployment.ps1 -Bundle .\artifacts\release\GHCPSpendTray-0.1.0.msixbundle `
+            -Version 0.1.0 -IdentityName GHCPSpendTray.Development -Publisher 'CN=GHCPSpendTray Development'
+          .\tools\package.ps1 -Store
+          dotnet build src\GHCPSpendTray.App\GHCPSpendTray.App.csproj -c Release -r win-x64 --nologo -v:q
+          if ($LASTEXITCODE -ne 0) { throw 'Default self-contained build failed after Store publishing.' }
+          .\tools\test-package-deployment.ps1 -Store -Bundle .\artifacts\release-store\GHCPSpendTray-0.1.0.msixbundle `
+            -Version 0.1.0 -IdentityName GHCPSpendTray.Development -Publisher 'CN=GHCPSpendTray Development'
       - name: Launch packaged x64 smoke scenarios
         id: package_smoke
         timeout-minutes: 5
@@ -114,12 +122,20 @@ jobs:
               New-Item -Path $unlock -Force | Out-Null
               New-ItemProperty -Path $unlock -Name AllowDevelopmentWithoutDevLicense `
                 -PropertyType DWord -Value 1 -Force | Out-Null
+              $runtime = .\tools\get-windows-app-runtime.ps1 -Architecture x64
+              $installed = Get-AppxPackage -Name $runtime.Name | Where-Object {
+                  $_.Architecture -eq 'X64' -and [version]$_.Version -ge [version]$runtime.MinVersion
+              }
+              if (-not $installed) { Add-AppxPackage -Path $runtime.PackagePath }
               $makeappx = .\tools\get-windows-sdk-tool.ps1 -Name makeappx.exe
-              $layout = '.\artifacts\package-smoke-layout'
-              & $makeappx unpack /p .\artifacts\msix\packages\GHCPSpendTray-0.1.0-x64.msix `
-                /d $layout /o | Out-Null
-              if ($LASTEXITCODE -ne 0) { throw 'Cannot extract packaged smoke-test payload.' }
-              .\tools\smoke-test-package.ps1 -Layout $layout
+              foreach ($directory in @('msix', 'msix-store')) {
+                  Write-Output "Packaged smoke: $directory"
+                  $layout = ".\artifacts\package-smoke-$directory"
+                  & $makeappx unpack /p ".\artifacts\$directory\packages\GHCPSpendTray-0.1.0-x64.msix" `
+                    /d $layout /o | Out-Null
+                  if ($LASTEXITCODE -ne 0) { throw "Cannot extract packaged smoke-test payload: $directory" }
+                  .\tools\smoke-test-package.ps1 -Layout $layout
+              }
           }
           finally { Stop-Transcript }
       - name: Retain packaged smoke diagnostics
@@ -142,9 +158,9 @@ jobs:
         shell: pwsh
         run: |
           $publisher = 'CN=11111111-1111-1111-1111-111111111111'
-          .\tools\package.ps1 -SkipPublish -Version 0.1.0 `
+          .\tools\package.ps1 -Store -SkipPublish -Version 0.1.0 `
             -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
-          .\tools\stage-store-package.ps1 -Bundle .\artifacts\release\GHCPSpendTray-0.1.0.msixbundle `
+          .\tools\stage-store-package.ps1 -Bundle .\artifacts\release-store\GHCPSpendTray-0.1.0.msixbundle `
             -Version 0.1.0 -SourceCommit $env:GITHUB_SHA -StoreId 000000000000 `
             -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
 

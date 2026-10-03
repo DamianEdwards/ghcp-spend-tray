@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory)][string] $IdentityName,
     [Parameter(Mandatory)][string] $Publisher,
     [string] $PublisherDisplayName,
-    [switch] $RequireSigned
+    [switch] $RequireSigned,
+    [switch] $Store,
+    [string] $RuntimeAssetsPath = "$PSScriptRoot\..\artifacts\publish-store\project.assets.json"
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -52,6 +54,22 @@ try {
             $ns.AddNamespace('f', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')
             $ns.AddNamespace('d', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10')
             $ns.AddNamespace('u10', 'http://schemas.microsoft.com/appx/manifest/uap/windows10/10')
+            $dependencies = @($manifest.SelectNodes('//f:Dependencies/f:PackageDependency', $ns))
+            if ($Store) {
+                $runtime = & "$PSScriptRoot\get-windows-app-runtime.ps1" -Architecture $package.Architecture -AssetsPath $RuntimeAssetsPath
+                if ($dependencies.Count -ne 1 -or $dependencies[0].Name -cne $runtime.Name -or
+                    $dependencies[0].Publisher -cne $runtime.Publisher -or
+                    $dependencies[0].MinVersion -cne $runtime.MinVersion -or
+                    $dependencies[0].GetAttribute('ProcessorArchitecture') -cnotin @('', $runtime.Architecture)) {
+                    throw 'Store packages must declare the exact resolved Windows App Runtime framework dependency.'
+                }
+                foreach ($name in @('Microsoft.UI.Xaml.dll', 'DWriteCore.dll', 'Microsoft.WindowsAppRuntime.dll',
+                    'Microsoft.UI.Xaml/Themes/generic.xbf', 'Microsoft.UI.Xaml/Themes/themeresources.xbf')) {
+                    if ($name -in $app.Entries.FullName) { throw "Store packages must not bundle Windows App Runtime payload: $name" }
+                }
+            } elseif ($dependencies.Count -ne 0) {
+                throw 'Self-contained packages must not declare framework dependencies.'
+            }
             $startup = $manifest.SelectSingleNode('//d:StartupTask', $ns)
             if ($null -eq $startup -or $startup.TaskId -ne 'GHCPSpendTrayStartup' -or $startup.Enabled -ne 'false' -or
                 $startup.ParentNode.GetAttribute('Parameters', $ns.LookupNamespace('u10')) -ne '--startup') {
@@ -60,9 +78,12 @@ try {
             $application = $manifest.SelectSingleNode('//f:Application', $ns)
             if ($application.Executable -ne 'GHCPSpendTray.exe' -or
                 $application.GetAttribute('TrustLevel', $ns.LookupNamespace('u10')) -ne 'mediumIL') { throw 'Expected a full-trust desktop application.' }
-            foreach ($name in @('GHCPSpendTray.exe', 'GHCPSpendTray.pri', 'Reactor.pri', 'resources.pri', 'Microsoft.UI.Xaml.dll',
-                'DWriteCore.dll', 'Assets/GHCPSpendTray.ico', 'Assets/Square44x44Logo.png',
-                'Assets/Square150x150Logo.png', 'Assets/StoreLogo.png', 'LICENSE.txt')) {
+            $requiredFiles = @('GHCPSpendTray.exe', 'GHCPSpendTray.pri', 'Reactor.pri', 'resources.pri',
+                'Assets/GHCPSpendTray.ico', 'Assets/Square44x44Logo.png',
+                'Assets/Square150x150Logo.png', 'Assets/StoreLogo.png', 'LICENSE.txt')
+            if ($Store) { $requiredFiles += 'Microsoft.WindowsAppRuntime.Bootstrap.dll' }
+            else { $requiredFiles += @('Microsoft.UI.Xaml.dll', 'DWriteCore.dll') }
+            foreach ($name in $requiredFiles) {
                 if ($name -notin $app.Entries.FullName) { throw "Missing application payload: $name" }
             }
             $iconLayout = Join-Path ([IO.Path]::GetTempPath()) ("GHCPSpendTray-package-icons-" + [guid]::NewGuid().ToString('N'))
@@ -76,7 +97,7 @@ try {
                     [IO.Compression.ZipFileExtensions]::ExtractToFile($iconEntry,
                         $destination)
                 }
-                & "$PSScriptRoot\test-package-icons.ps1" -Layout $iconLayout
+                & "$PSScriptRoot\test-package-icons.ps1" -Layout $iconLayout -Store:$Store
             }
             finally { Remove-Item -LiteralPath $iconLayout -Recurse -Force }
             if (@($app.Entries | Where-Object { $_.FullName -match '\.pdb$' }).Count -ne 0) { throw 'Debug symbols belong outside the app package.' }

@@ -78,7 +78,7 @@ Do not run older copies of the pre-unification release workflows concurrently.
    **Package/Identity/Name**, **Package/Identity/Publisher**, and
    **Package/Properties/PublisherDisplayName**, plus the Store ID.
    These identity values are not necessarily the display name.
-4. For eventual Store packages, pass these exact values to `tools\package.ps1`.
+4. For eventual Store packages, pass these exact values to `tools\package.ps1 -Store`.
    The visible application name stays GHCPSpendTray.
 
 Reference: [Store product identity](https://learn.microsoft.com/windows/apps/publish/view-app-identity-details).
@@ -227,7 +227,9 @@ The app project copies these assets into each published payload.
 maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates **and merges
 the generated `GHCPSpendTray.pri`**, including WinUI/Reactor XAML and localized
 resources, into the package's resource map. The original `GHCPSpendTray.pri`
-and `Reactor.pri` must also remain in the package. An icon-only `resources.pri`
+and `Reactor.pri` must also remain in the package. Store builds retain Reactor
+startup XAML here, but resolve WinUI's theme resources from the shared framework
+instead of copying them into the app. An icon-only `resources.pri`
 shadows runtime resource resolution and crashes packaged WinUI at startup,
 even when all the separate PRI/XBF files are present.
 
@@ -314,13 +316,35 @@ This section covers Windows; macOS instructions follow below.
 The placeholder values above must be replaced; they are not signing credentials.
 Local output is unsigned. Do not distribute it as a signed release.
 `-SkipPublish` packages existing matching-version payloads; use it only after
-publishing both architectures from the same source.
+publishing both architectures from the same source and in the same deployment
+mode. GitHub and local development builds remain self-contained by default.
 
 Packaging uses an explicit source manifest and Windows SDK `MakeAppx`, not a
 capture of an existing installation. This preserves the component-only Windows
 App SDK graph and Native AOT PRI/XBF resource handling without introducing the
 umbrella SDK solely for Visual Studio single-project packaging.
-The app remains full-trust, self-contained, and Store-shaped.
+The app remains full-trust and Native AOT in both deployment modes.
+
+Use `.\tools\package.ps1 -Store` for a framework-dependent Store build, with
+the assigned Partner Center identity arguments for submission. The conditional
+`Microsoft.WindowsAppSDK.Runtime` reference does not add the umbrella SDK.
+Packaging reads the resolved architecture-specific Microsoft framework's
+manifest to set its exact name, publisher and minimum version as a
+`PackageDependency`. The Store installs that dependency; no separate .NET
+runtime is required. The bootstrapper is a no-op under package identity, while
+unpackaged synthetic smoke runs require the runtime to be installed.
+
+Store payloads, symbols, layouts and bundles use `artifacts\publish-store`,
+`symbols-store`, `msix-store` and `release-store`, separately from the default
+GitHub/development outputs. Store validation requires the declared framework
+and rejects app-local WinUI/DWrite runtime DLLs. Staging also requires that
+mode; a self-contained bundle cannot accidentally be submitted as a Store build.
+The Store publish keeps its resolved NuGet metadata outside the payload at
+`artifacts\publish-store\project.assets.json`, so later self-contained restores
+do not change the dependency used by `-Store -SkipPublish` or staging.
+The first installation may still need to download the shared framework, which
+includes more components than our slim self-contained payload. The smaller app
+package primarily benefits runtime reuse and subsequent app updates.
 
 With Developer Mode already enabled and permission to register/remove an isolated
 test package, build with the default development identity and run:
@@ -362,8 +386,10 @@ Microsoft currently supports automated updates for free products.
    release's **What's Changed** PR titles, dropping contributor credits and
    the full-changelog link. Unexpected formatting, empty notes or more than
    1500 characters stop the workflow before any Store draft is created.
-3. Both architectures are rebuilt with the Partner Center identity, not the
-   Azure certificate's publisher. The workflow validates the unsigned bundle,
+3. Both architectures are rebuilt with `-Store` and the Partner Center identity,
+   not the Azure certificate's publisher. The selected Windows release must
+   include this Store deployment support; older immutable source is not patched
+   by the workflow. The workflow validates the unsigned framework-dependent bundle,
    including publisher display name, and uploads the
    `GHCPSpendTray-<version>-store` Actions artifact before submission.
 4. With **publish** enabled, the workflow signs in via GitHub OIDC and verifies
@@ -441,8 +467,12 @@ listing: review existing listing text before automating an update. Only the
 the five GitHub **What's Changed** titles become the Store release notes;
 review the release body before submission.
 
-The **Verify** workflow exercises both development and Store-shaped packaging,
-using a synthetic Store identity without production credentials or API calls.
+The **Verify** workflow exercises self-contained development and
+framework-dependent Store packaging for x64/ARM64, including dependency and
+resource mutation regressions. On the disposable hosted runner it installs the
+resolved x64 Microsoft framework when needed and runs packaged smoke scenarios
+for both modes, then stages a synthetic Store identity without production
+credentials or API calls.
 The offline release-selection tests reject drafts, mutable releases, missing or
 duplicate assets, mismatched source/version metadata, and GitHub API failures.
 
