@@ -29,11 +29,11 @@ class CodeQLTests(unittest.TestCase):
         self.assertIn("global-json-file: global.json", self.workflow)
         self.assertIn("build-mode: ${{ matrix.build-mode }}", self.workflow)
 
-    def test_scans_main_prs_and_scheduled_changes(self):
-        self.assertRegex(self.workflow, r"push:\n\s+branches: \[main\]")
-        self.assertRegex(self.workflow, r"pull_request:\n\s+branches: \[main\]")
-        self.assertIn("schedule:", self.workflow)
-        self.assertIn("workflow_dispatch:", self.workflow)
+    def test_scans_only_on_schedule_or_manual_dispatch(self):
+        triggers = self.workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", triggers, re.MULTILINE),
+                         ["schedule", "workflow_dispatch"])
+        self.assertIn("cron: '37 10 * * 3'", triggers)
         self.assertNotIn("paths-ignore:", self.workflow)
         self.assertNotIn("continue-on-error:", self.workflow)
         self.assertIn("category: /language:${{ matrix.language }}", self.workflow)
