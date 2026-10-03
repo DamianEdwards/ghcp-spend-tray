@@ -12,4 +12,8 @@
     <ProjectReference Include="../GHCPSpendTray.Application/GHCPSpendTray.Application.csproj" />
     <InternalsVisibleTo Include="GHCPSpendTray.SharedTests" />
   </ItemGroup>
+  <Target Name="RequireSupportedMacArchitecture" BeforeTargets="Restore;PrepareForBuild;Publish"
+          Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-')) and '$(RuntimeIdentifier)' != 'osx-arm64'">
+    <Error Text="The macOS native bridge supports only osx-arm64 (Apple silicon), not $(RuntimeIdentifier)." />
+  </Target>
 </Project>

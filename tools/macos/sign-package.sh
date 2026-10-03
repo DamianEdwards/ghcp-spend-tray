@@ -99,14 +99,12 @@ spctl --assess --type open --context context:primary-signature "$dmg"
 export GHCP_MAC_VERSION="$version"
 stage "write release metadata and checksums"
 python3 - <<'PY'
-import hashlib, json, os
+import hashlib, json, os, sys
 from pathlib import Path
+sys.path.insert(0, "tools/macos")
+from release import release_metadata
 root = Path("artifacts/macos-release")
-metadata = dict(platform="macos", version=os.environ["GHCP_MAC_VERSION"],
-                sourceCommit=os.environ["GITHUB_SHA"], releaseRunId=os.environ["GITHUB_RUN_ID"],
-                signed=True, notarized=True,
-                architectures=["arm64", "x86_64"], minimumOS="15.0",
-                bundleIdentifier="com.damianedwards.GHCPSpendTray")
+metadata = release_metadata(os.environ["GHCP_MAC_VERSION"], os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"])
 root.joinpath("release-macos.json").write_text(json.dumps(metadata, indent=2) + "\n")
 assets = sorted(path for path in root.iterdir() if path.name != "SHA256SUMS")
 root.joinpath("SHA256SUMS").write_text("".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in assets))

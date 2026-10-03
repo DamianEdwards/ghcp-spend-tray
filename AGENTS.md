@@ -24,14 +24,19 @@ serialization, or AOT-sensitive code, also run
 they share intermediate directories.
 
 On macOS, run `bash tools/macos/verify.sh` with stable Swift 6 Command Line Tools
-and the pinned .NET SDK. It includes managed/Native AOT shared tests, universal
-app packaging, synthetic Keychain CRUD, and native UI smoke runs.
+and the pinned .NET SDK on an Apple-silicon Mac, running natively (not under
+Rosetta). macOS Intel builds and execution are unsupported. Verification
+includes managed/Native AOT shared tests, arm64-only app packaging, synthetic
+Keychain CRUD, and native UI smoke runs.
 CI/release toolchains are pinned in `.github/actions/setup-macos` (Xcode 26.6,
 macOS 26.5 SDK). Support the latest patches of macOS 26 and 15; deployment
 minimum is 15.0. Advance this two-major-version window with each adopted stable
-major release. Routine CI builds once on macOS 26/Apple silicon and tests that
-exact universal artifact on macOS 15/Intel without rebuilding, deliberately not
-every OS/architecture pair. Production Mac signing also requires Xcode's
+major release. Routine CI builds once on macOS 26/Apple silicon (`macos-26`)
+and tests that exact arm64 artifact on macOS 15/Apple silicon (`macos-15`)
+without rebuilding.
+Executable and Native AOT bridge slices must be exactly arm64; universal
+and Intel-only artifacts are rejected. Windows x64/ARM64 support is unchanged.
+Production Mac signing also requires Xcode's
 `notarytool` and configured Apple credentials.
 Mac versions live in `packaging/macos/version.txt` for development and
 `macos-v*` release tags; Windows keeps `v*` tags. Preserve independent versioning.

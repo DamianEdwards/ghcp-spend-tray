@@ -2,7 +2,7 @@
 
 Windows and macOS are independently versioned and released. Windows keeps
 the existing `v<version>` tags and MSIX/Store identity; macOS uses
-`macos-v<version>` tags and a universal Developer ID signed/notarized app.
+`macos-v<version>` tags and an Apple-silicon-only Developer ID signed/notarized app.
 Dispatch **Release** and choose a version bump independently for each platform.
 Only selected platforms build, request environment approval, and publish.
 Shared changes should normally receive a release on both platforms, but their
@@ -243,7 +243,7 @@ generation, also run the isolated packaged smoke test documented in
 
 On PRs and main pushes, a Linux change-detection job routes verification before
 allocating native runners. Windows-only changes run Windows checks; Mac-only
-changes run Mac checks on Apple silicon and Intel. Changes to shared C# code,
+changes run Mac checks on Apple silicon across macOS 26 and 15. Changes to shared C# code,
 SDK/build configuration, CI routing, or unrecognized paths run both. Markdown
 changes run the Markdown job without native builds. Manual Verify runs run all
 checks. The stable **Verification** gate requires all applicable jobs to
@@ -257,7 +257,7 @@ keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
 and build outputs are never cached. Builds and publishes remain sequential
 within each checkout. Mac runners also cache NuGet packages by architecture.
 The final **Verification** job requires both Windows jobs for Windows-relevant
-changes, the Mac universal build plus older-macOS runtime compatibility for
+changes, the Mac arm64 build plus older-macOS runtime compatibility for
 Mac-relevant changes, and Markdown lint when
 applicable. Every unneeded job must be skipped; missing or invalid routing
 decisions fail closed. Failed change detection or Markdown
@@ -481,11 +481,15 @@ duplicate assets, mismatched source/version metadata, and GitHub API failures.
 ### Local macOS builds
 
 Support follows a two-major-version window: **macOS 26 and macOS 15**, using
-their latest patch releases. macOS 14 Sonoma is no longer supported. Advance
+their latest patch releases, on **Apple silicon only**. Intel Macs are no
+longer supported by current builds. Previously published universal releases
+remain unchanged historical assets, not current-support evidence.
+macOS 14 Sonoma is no longer supported. Advance
 this window, the deployment targets, metadata and runtime checks together when
 adopting a new stable major release.
 
-Use a supported macOS version, the .NET SDK in `global.json`, Python 3, and a stable
+Use an Apple-silicon Mac with native arm64 tools (not under Rosetta), a
+supported macOS version, the .NET SDK in `global.json`, Python 3, and a stable
 Swift 6 compiler/Apple SDK. CI and release jobs use **Xcode 26.6 with the
 macOS 26.5 SDK**, selected explicitly by `.github/actions/setup-macos` on
 `macos-26` runners, rather than inheriting runner defaults.
@@ -494,12 +498,14 @@ of the oldest supported runtime. Routine verification has exactly two Mac jobs:
 
 | Runtime target | Work |
 |---|---|
-| macOS 26 / Apple silicon | Shared tests, one universal app build, native smoke tests |
-| macOS 15 / Intel | Download that exact universal artifact, verify both slices, native smoke tests without rebuilding |
+| macOS 26 / Apple silicon (`macos-26`) | Shared tests, one arm64 app build, native smoke tests |
+| macOS 15 / Apple silicon (`macos-15`) | Download that exact arm64 artifact, verify executable and bridge slices, native smoke tests without rebuilding |
 
 Both jobs use the latest available hosted-runner images for their OS major and
-log the actual patch version. They cover both supported OS generations and CPU
-architectures, deliberately not every OS/architecture combination. Both exercise
+log the actual patch version and assert native arm64 execution. These labels
+are the arm64 images listed in GitHub's
+[hosted-runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+They cover both supported OS generations on Apple silicon. Both exercise
 the real read-only notification-settings callback and remain gated on relevant
 Mac/shared-code and build-tooling changes.
 
@@ -520,11 +526,15 @@ bash tools/macos/verify.sh
 open artifacts/macos/GHCPSpendTray.app
 ```
 
-The build sequentially publishes the C# Native AOT shared library for
-`osx-arm64` and `osx-x64`, compiles each SwiftUI frontend slice, and creates a
-universal `.app` with `lipo`. Its ICNS uses the shared dollar artwork and the
-optically tuned small PNGs, not a separate Mac logo. Both binaries and their runtime are bundled;
-users need neither .NET nor Rosetta on their native architecture. macOS 15 is
+The build publishes the C# Native AOT shared library for `osx-arm64` and
+compiles the SwiftUI frontend for `arm64-apple-macos15.0`. It replaces the
+bundle's executable and bridge outright, including when reusing an old
+universal output directory. Package and signing checks require **exactly
+arm64** in both Mach-O binaries; Intel-only and universal artifacts fail.
+Unsupported hosts and the removed smoke `--arch` argument fail explicitly.
+Its ICNS uses the shared dollar artwork and the optically tuned small PNGs,
+not a separate Mac logo. Both binaries and their runtime are bundled;
+users need no .NET installation. macOS 15 is
 the minimum deployment target. Keychain, notifications, and login-item calls
 are implemented natively in Swift; the shared C# application controller handles
 auth, storage, scheduling, accounting, and alert decisions. There is no IPC
@@ -606,9 +616,9 @@ and system-default trust, never an **Always Trust** override.
 ### Publish a macOS version
 
 1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
-   Mac-relevant changes run managed and native shared tests plus universal
-   a universal build/smoke check with the release toolchain on macOS 26 Apple
-   silicon, plus the same artifact on macOS 15 Intel without rebuilding.
+   Mac-relevant changes run managed and native shared tests plus an arm64
+   build/smoke check with the release toolchain on macOS 26 / Apple silicon,
+   plus the same artifact on macOS 15 / Apple silicon without rebuilding.
 2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
    to **no release** for a Mac-only release. Choose the preview designation,
    review the calculated versions, and approve the **production** deployment.
@@ -624,7 +634,8 @@ and system-default trust, never an **Always Trust** override.
 Mac release assets are `GHCPSpendTray-macOS-<version>.dmg`,
 `release-macos.json`, and `SHA256SUMS`. Metadata records platform, version,
 source commit, originating workflow run ID, bundle identifier, architectures,
-and notarization. Mac releases
+and notarization. Current metadata requires `architectures: ["arm64"]`;
+universal/Intel metadata is rejected before draft staging. Mac releases
 use `--latest=false` so they do not displace the repository's Windows "latest"
 download. Store selection additionally filters to Windows tags and does not
 rely on that convention.
