@@ -16,11 +16,18 @@ notification, so the callback is no longer hidden behind the demo service.
 The first fix passed the same macOS 15-built artifact on macOS 26 without
 rebuilding it (Verify run 37132765292). Build and release jobs now explicitly
 select Xcode 26.6 / macOS 26.5 SDK on macOS 26, instead of the macOS 15 runner's
-Xcode 16.4 default. The required compatibility jobs run the new artifact on
-macOS 15 Apple silicon and Intel without recompilation. Native callback smoke
-coverage runs on both current and older runtimes, catching combinations that
-compilation and synthetic service tests alone cannot cover. The minimum app
-deployment target remains macOS 14.
+Xcode 16.4 default.
+
+The support policy is the latest patch releases of two major versions:
+**macOS 26 and macOS 15**. The minimum app deployment target is macOS 15;
+macOS 14 Sonoma is dropped. Routine verification runs exactly two Mac jobs:
+macOS 26 / Apple silicon runs shared tests, builds the universal app once and
+smoke-tests it; macOS 15 / Intel downloads that exact artifact, verifies both
+architecture slices and runs native smoke tests without rebuilding. Both
+exercise the real read-only notification callback. Hosted image patches are
+logged. This deliberately covers both OS generations and CPU architectures,
+not every OS/architecture pair. Advance the window with each adopted stable
+major release.
 
 ## CodeQL configuration
 

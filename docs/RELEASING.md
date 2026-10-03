@@ -255,7 +255,7 @@ keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
 and build outputs are never cached. Builds and publishes remain sequential
 within each checkout. Mac runners also cache NuGet packages by architecture.
 The final **Verification** job requires both Windows jobs for Windows-relevant
-changes, both Mac build runners plus older-macOS runtime compatibility for
+changes, the Mac universal build plus older-macOS runtime compatibility for
 Mac-relevant changes, and Markdown lint when
 applicable. Every unneeded job must be skipped; missing or invalid routing
 decisions fail closed. Failed change detection or Markdown
@@ -450,13 +450,28 @@ duplicate assets, mismatched source/version metadata, and GitHub API failures.
 
 ### Local macOS builds
 
-Use macOS 14 or newer, the .NET SDK in `global.json`, Python 3, and a stable
+Support follows a two-major-version window: **macOS 26 and macOS 15**, using
+their latest patch releases. macOS 14 Sonoma is no longer supported. Advance
+this window, the deployment targets, metadata and runtime checks together when
+adopting a new stable major release.
+
+Use a supported macOS version, the .NET SDK in `global.json`, Python 3, and a stable
 Swift 6 compiler/Apple SDK. CI and release jobs use **Xcode 26.6 with the
 macOS 26.5 SDK**, selected explicitly by `.github/actions/setup-macos` on
-`macos-26` / `macos-26-intel` runners, rather than inheriting runner defaults.
-The minimum deployment target stays macOS 14; the build SDK is independent
-of the oldest supported runtime. The universal artifact is also launched on
-macOS 15 Apple silicon and Intel runners without recompilation.
+`macos-26` runners, rather than inheriting runner defaults.
+The minimum deployment target is macOS 15; the build SDK is independent
+of the oldest supported runtime. Routine verification has exactly two Mac jobs:
+
+| Runtime target | Work |
+|---|---|
+| macOS 26 / Apple silicon | Shared tests, one universal app build, native smoke tests |
+| macOS 15 / Intel | Download that exact universal artifact, verify both slices, native smoke tests without rebuilding |
+
+Both jobs use the latest available hosted-runner images for their OS major and
+log the actual patch version. They cover both supported OS generations and CPU
+architectures, deliberately not every OS/architecture combination. Both exercise
+the real read-only notification-settings callback and remain gated on relevant
+Mac/shared-code and build-tooling changes.
 
 For the closest local/release match, install Xcode 26.6 and run:
 
@@ -479,7 +494,7 @@ The build sequentially publishes the C# Native AOT shared library for
 `osx-arm64` and `osx-x64`, compiles each SwiftUI frontend slice, and creates a
 universal `.app` with `lipo`. Its ICNS uses the shared dollar artwork and the
 optically tuned small PNGs, not a separate Mac logo. Both binaries and their runtime are bundled;
-users need neither .NET nor Rosetta on their native architecture. macOS 14 is
+users need neither .NET nor Rosetta on their native architecture. macOS 15 is
 the minimum deployment target. Keychain, notifications, and login-item calls
 are implemented natively in Swift; the shared C# application controller handles
 auth, storage, scheduling, accounting, and alert decisions. There is no IPC
@@ -562,8 +577,8 @@ and system-default trust, never an **Always Trust** override.
 
 1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
    Mac-relevant changes run managed and native shared tests plus universal
-   builds/smoke checks with the release toolchain on Apple silicon and Intel
-   runners, plus the same artifact on older macOS.
+   a universal build/smoke check with the release toolchain on macOS 26 Apple
+   silicon, plus the same artifact on macOS 15 Intel without rebuilding.
 2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
    to **no release** for a Mac-only release. Choose the preview designation,
    review the calculated versions, and approve the **production** deployment.

@@ -15,6 +15,7 @@ runs:
         fi
         echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
         echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+        sw_vers -productVersion
         xcodebuild -version
         xcrun swiftc --version
         xcrun --sdk macosx --show-sdk-version

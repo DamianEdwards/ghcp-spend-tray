@@ -53,7 +53,10 @@ is **not** an in-place upgrade from the GitHub package.
 
 ### macOS
 
-Requires macOS 14 Sonoma or newer, on Apple silicon or Intel. Download
+Supports **macOS 26 and macOS 15**, on their latest patch releases, with a
+universal app for Apple silicon and Intel. We maintain a two-major-version
+support window and advance it when adopting a new stable macOS major release.
+macOS 14 Sonoma is no longer supported. Download
 `GHCPSpendTray-macOS-<version>.dmg` from a **macOS** release on
 [GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases).
 Open the disk image, drag **GHCPSpendTray** to **Applications**, then launch it.

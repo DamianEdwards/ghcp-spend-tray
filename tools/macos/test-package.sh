@@ -6,7 +6,7 @@ signed="${3:-false}"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" == com.damianedwards.GHCPSpendTray ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$version" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$version" ]]
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" == 14.0 ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" == 15.0 ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$app/Contents/Info.plist")" == true ]]
 for binary in "$app/Contents/MacOS/GHCPSpendTray" "$app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib"; do
     [[ "$(lipo -archs "$binary")" == "x86_64 arm64" ]]
@@ -17,7 +17,11 @@ for binary in "$app/Contents/MacOS/GHCPSpendTray" "$app/Contents/Frameworks/GHCP
             exit 1
         fi
         minimum="$(xcrun vtool -arch "$arch" -show-build "$binary" | awk '/minos/ { print $2 }')"
-        case "$minimum" in 12.0|13.0|14.0) ;; *) echo "Unexpected $arch minimum OS: $minimum" >&2; exit 1 ;; esac
+        case "$minimum" in 12.0|13.0|14.0|15.0) ;; *) echo "Unexpected $arch minimum OS: $minimum" >&2; exit 1 ;; esac
+        if [[ "$binary" == "$app/Contents/MacOS/GHCPSpendTray" && "$minimum" != 15.0 ]]; then
+            echo "The $arch application must target macOS 15.0, not $minimum." >&2
+            exit 1
+        fi
     done
 done
 codesign --verify --deep --strict "$app"

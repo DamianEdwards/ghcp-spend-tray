@@ -149,14 +149,10 @@ jobs:
             -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
 
   macos:
-    name: macOS (${{ matrix.runner }})
+    name: macOS 26 / Apple silicon
     needs: changes
     if: needs.changes.outputs.macos == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-26, macos-26-intel]
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -176,10 +172,8 @@ jobs:
       - name: Verify shared engine, native bridge, universal app and synthetic UI
         run: bash tools/macos/verify.sh
       - name: Archive development app
-        if: matrix.runner == 'macos-26'
         run: ditto -c -k --keepParent artifacts/macos/GHCPSpendTray.app artifacts/macos/GHCPSpendTray-development.zip
       - name: Retain ad-hoc signed development app
-        if: matrix.runner == 'macos-26'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos-development
@@ -188,14 +182,10 @@ jobs:
           retention-days: 7
 
   macos_runtime:
-    name: macOS runtime compatibility (${{ matrix.runner }})
+    name: macOS 15 / Intel runtime
     needs: [changes, macos]
     if: needs.changes.outputs.macos == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-15, macos-15-intel]
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -207,8 +197,10 @@ jobs:
           path: artifacts/macos-runtime
       - name: Launch the release-toolchain app on older macOS without rebuilding
         run: |
+          sw_vers -productVersion
           ditto -x -k artifacts/macos-runtime/GHCPSpendTray-development.zip artifacts/macos-runtime
-          python3 tools/macos/smoke-test.py artifacts/macos-runtime/GHCPSpendTray.app
+          bash tools/macos/test-package.sh artifacts/macos-runtime/GHCPSpendTray.app "$(cat packaging/macos/version.txt)"
+          python3 tools/macos/smoke-test.py artifacts/macos-runtime/GHCPSpendTray.app --arch x86_64
 
   verify:
     name: Verification
