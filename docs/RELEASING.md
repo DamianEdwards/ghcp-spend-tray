@@ -513,6 +513,16 @@ entitlement is needed for Native AOT. It then creates, signs, notarizes and
 staples a DMG containing the app and an Applications link. Temporary signing
 credentials/Keychain are removed by the script's exit trap.
 
+The signing step reports each preparation/signing/notarization stage and checks
+the imported identity before configuring private-key access. A P12 without a
+matching private key, a mismatched `MACOS_SIGNING_IDENTITY`, and an untrusted
+certificate chain produce distinct errors. GitHub secret names being present
+does not validate their contents. Export the **Developer ID Application**
+certificate with its private key from **login > My Certificates**, not just
+the downloaded `.cer`; the identity selector must refer to that certificate,
+not Apple's intermediate. Fix chain issues with the genuine Apple intermediate
+and system-default trust, never an **Always Trust** override.
+
 ### Publish a macOS version
 
 1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
