@@ -427,10 +427,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                     failure = PopupSmokeGeometry.anchorFailure(anchor, screen: screen.frame)
                 }
                 if presented {
-                    if let popupWindow, let view, let controller {
+                    if let popupWindow, let windowContentView = popupWindow.contentView, let view, let controller {
+                        // Preferred-size updates can resize the real window without updating NSPopover.contentSize.
                         let geometry = PopupSmokeGeometry(anchor: anchor, popup: popupWindow.frame,
                             screen: screen.frame, visibleScreen: screen.visibleFrame, contentBounds: view.bounds,
-                            contentSize: popover.contentSize, preferredContentSize: controller.preferredContentSize)
+                            windowContentBounds: windowContentView.bounds, preferredContentSize: controller.preferredContentSize)
                         frames += geometry.stabilityFrames + [popover.positioningRect, view.frame]
                         if failure == nil {
                             if !popover.isShown || !popupWindow.isVisible || view.isHiddenOrHasHiddenAncestor {
@@ -446,7 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                             }
                         }
                     } else {
-                        failure = failure ?? "Popup window or hosting view is missing."
+                        failure = failure ?? "Popup window, window content or hosting view is missing."
                     }
                 }
             } else {

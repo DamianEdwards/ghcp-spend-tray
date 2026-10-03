@@ -100,7 +100,7 @@ a failing assertion. The outer smoke process retains its 90-second limit.
 
 The original inclusive eight-point vertical limit is unchanged. Popup and
 button must be visible on the same screen, horizontally attached, and within
-the screen frame; content bounds, popover content size and hosting-controller
+the screen frame; hosting-view bounds, actual window content bounds and hosting-controller
 preferred size must converge. Growth/shrinkage and empty-to-populated insertion
 must also reach their expected content sizes, rather than passing on unchanged
 old content; a populated popup may retain its capped scroll height. Menu-bar checks
@@ -131,6 +131,20 @@ Rosetta launches also passed, without retry-on-failure. This does **not**
 establish macOS 15 behavior or prove the original failure's OS-level cause.
 The synchronization fix remains in the Apple-silicon-only app; removing Intel
 does not justify weakening popup assertions on either supported OS version.
+
+The first PR verification of the Apple-silicon-only change
+([run 37159513752](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37159513752))
+exposed a second test assumption on macOS 26.6.2: after notice removal, the
+window content, hosting view and preferred size had all correctly shrunk from
+321 to 261 points, with zero anchor gap, but `NSPopover.contentSize` still
+reported 321. That property is not a reliable measurement of the rendered
+window when hosting-controller preferred-size updates drive resizing.
+Readiness now compares the actual window content bounds with hosting bounds
+and preferred size; `NSPopover.contentSize` remains in failure diagnostics
+only. The exact CI geometry is a deterministic regression, alongside real
+window-size mismatch and permanent-detachment failures. No timeout, attachment
+tolerance, production sizing, supported-OS gate or content-growth/shrinkage
+expectation is relaxed.
 
 ### Apple-silicon-only artifact checks
 

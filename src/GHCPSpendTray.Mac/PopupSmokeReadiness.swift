@@ -8,7 +8,7 @@ struct PopupSmokeGeometry {
     let screen: CGRect
     let visibleScreen: CGRect
     let contentBounds: CGRect
-    let contentSize: CGSize
+    let windowContentBounds: CGRect
     let preferredContentSize: CGSize
 
     static func anchorFailure(_ anchor: CGRect, screen: CGRect) -> String? {
@@ -21,12 +21,12 @@ struct PopupSmokeGeometry {
 
     var failure: String? {
         if let failure = Self.anchorFailure(anchor, screen: screen) { return failure }
-        guard Self.usable(popup), Self.usable(contentBounds), Self.usable(visibleScreen) else {
+        guard Self.usable(popup), Self.usable(contentBounds), Self.usable(windowContentBounds), Self.usable(visibleScreen) else {
             return "Popup, content or visible-screen geometry is empty or nonfinite."
         }
-        guard Self.sameSize(contentBounds.size, contentSize),
+        guard Self.sameSize(contentBounds.size, windowContentBounds.size),
               Self.sameSize(contentBounds.size, preferredContentSize) else {
-            return "Popup content, popover size and hosting-controller preferred size have not converged."
+            return "Popup hosting view, window content and hosting-controller preferred size have not converged."
         }
         // A menu-bar popup should fit below its button; never accept a different edge
         // or a screen-clamped, detached window as evidence of correct anchoring.
@@ -49,8 +49,8 @@ struct PopupSmokeGeometry {
     var gap: CGFloat { anchor.minY - popup.maxY }
 
     var stabilityFrames: [CGRect] {
-        [anchor, popup, screen, visibleScreen, contentBounds,
-         CGRect(origin: .zero, size: contentSize), CGRect(origin: .zero, size: preferredContentSize)]
+        [anchor, popup, screen, visibleScreen, contentBounds, windowContentBounds,
+         CGRect(origin: .zero, size: preferredContentSize)]
     }
 
     private static func usable(_ rect: CGRect) -> Bool {

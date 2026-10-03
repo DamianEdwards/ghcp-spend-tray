@@ -12,7 +12,7 @@ enum PopupSmokeReadinessTests {
                 screen: CGRect(x: 0, y: 0, width: 1440, height: 924),
                 visibleScreen: CGRect(x: 0, y: 30, width: 1440, height: 870),
                 contentBounds: CGRect(x: 0, y: 0, width: 400, height: height),
-                contentSize: CGSize(width: 400, height: height),
+                windowContentBounds: CGRect(x: 0, y: 0, width: 400, height: height),
                 preferredContentSize: CGSize(width: 400, height: height))
         }
         func observe(_ geometry: PopupSmokeGeometry, _ readiness: inout PopupSmokeReadiness,
@@ -105,11 +105,11 @@ enum PopupSmokeReadinessTests {
         try check(fixture(height: .nan).failure != nil, "Nonfinite geometry cannot pass.")
         let mismatchedSize = PopupSmokeGeometry(anchor: empty.anchor, popup: empty.popup, screen: empty.screen,
             visibleScreen: empty.visibleScreen, contentBounds: empty.contentBounds,
-            contentSize: CGSize(width: 400, height: 320), preferredContentSize: empty.preferredContentSize)
+            windowContentBounds: CGRect(x: 0, y: 0, width: 400, height: 320), preferredContentSize: empty.preferredContentSize)
         try check(mismatchedSize.failure?.contains("not converged") == true,
-                  "The original default-height mismatch must not count as settled content.")
+                  "A real window left at the default height must not count as settled content.")
         let mismatchedPreferredSize = PopupSmokeGeometry(anchor: empty.anchor, popup: empty.popup, screen: empty.screen,
-            visibleScreen: empty.visibleScreen, contentBounds: empty.contentBounds, contentSize: empty.contentSize,
+            visibleScreen: empty.visibleScreen, contentBounds: empty.contentBounds, windowContentBounds: empty.windowContentBounds,
             preferredContentSize: CGSize(width: 400, height: 270))
         try check(mismatchedPreferredSize.failure?.contains("not converged") == true,
                   "A pending preferred-size update must not count as settled content.")
@@ -117,16 +117,29 @@ enum PopupSmokeReadinessTests {
         let offset = PopupSmokeGeometry(anchor: empty.anchor.offsetBy(dx: -1440, dy: -924),
             popup: empty.popup.offsetBy(dx: -1440, dy: -924), screen: offsetScreen,
             visibleScreen: empty.visibleScreen.offsetBy(dx: -1440, dy: -924),
-            contentBounds: empty.contentBounds, contentSize: empty.contentSize, preferredContentSize: empty.preferredContentSize)
+            contentBounds: empty.contentBounds, windowContentBounds: empty.windowContentBounds, preferredContentSize: empty.preferredContentSize)
         try check(offset.failure == nil, "Secondary-screen negative origins use screen coordinates, not fixed offsets.")
         let offscreen = PopupSmokeGeometry(anchor: empty.anchor, popup: empty.popup.offsetBy(dx: 400, dy: 0),
             screen: empty.screen, visibleScreen: empty.visibleScreen, contentBounds: empty.contentBounds,
-            contentSize: empty.contentSize, preferredContentSize: empty.preferredContentSize)
+            windowContentBounds: empty.windowContentBounds, preferredContentSize: empty.preferredContentSize)
         try check(offscreen.failure != nil, "Off-screen popup geometry cannot pass.")
         try check(PopupSmokeGeometry.anchorFailure(.zero, screen: empty.screen) != nil,
                   "A zero-size status button is not ready for show.")
         try check(PopupSmokeGeometry.anchorFailure(empty.anchor.offsetBy(dx: 1440, dy: 0), screen: empty.screen) != nil,
                   "A menu-bar item not yet placed on its screen is not ready for show.")
+        let ciShrink = PopupSmokeGeometry(anchor: CGRect(x: 765, y: 742, width: 38, height: 22),
+            popup: CGRect(x: 571, y: 455, width: 426, height: 287),
+            screen: CGRect(x: 0, y: 0, width: 1024, height: 768),
+            visibleScreen: CGRect(x: 0, y: 63, width: 1024, height: 674),
+            contentBounds: CGRect(x: 0, y: 0, width: 400, height: 261),
+            windowContentBounds: CGRect(x: 0, y: 0, width: 400, height: 261),
+            preferredContentSize: CGSize(width: 400, height: 261))
+        try check(ciShrink.failure == nil,
+                  "CI's actual 261-point window/hosting/preferred geometry is correct, independent of the cached requested size.")
+        var ciReadiness = PopupSmokeReadiness()
+        _ = observe(ciShrink, &ciReadiness, at: .zero)
+        try check(observe(ciShrink, &ciReadiness, at: .milliseconds(300)) == .ready,
+                  "Correct CI shrinkage must become ready without changing its cached NSPopover.contentSize.")
         print("PASS: popup geometry, bounded readiness, transient/permanent detachment and live content stability.")
     }
 }

@@ -115,3 +115,15 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn(".check_returncode()", launcher)
         self.assertIn('["/usr/bin/sample", str(process.pid)', launcher)
         self.assertIn("process.kill()", launcher)
+
+    def test_popup_readiness_checks_effective_window_size_not_cached_request(self):
+        source = (ROOT / "src/GHCPSpendTray.Mac/AppMain.swift").read_text()
+        wait = source.split("private func waitForPopupAnchor(")[1].split("private func popupSmokeDiagnostic(")[0]
+        self.assertIn("windowContentBounds: windowContentView.bounds", wait)
+        self.assertNotIn("contentSize: popover.contentSize", wait)
+        geometry = (ROOT / "src/GHCPSpendTray.Mac/PopupSmokeReadiness.swift").read_text()
+        self.assertIn("Self.sameSize(contentBounds.size, windowContentBounds.size)", geometry)
+        self.assertIn("Self.sameSize(contentBounds.size, preferredContentSize)", geometry)
+        self.assertIn("static let anchorTolerance: CGFloat = 8", geometry)
+        diagnostic = source.split("private func popupSmokeDiagnostic(")[1]
+        self.assertIn("contentSize=\\(popover.contentSize)", diagnostic)
