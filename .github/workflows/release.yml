@@ -305,7 +305,7 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Verify shared engine and universal native app
+      - name: Verify shared engine and arm64 native app
         run: bash tools/macos/verify.sh
       - name: Build release version
         run: |

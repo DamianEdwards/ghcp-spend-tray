@@ -20,6 +20,19 @@ def version(value):
     return parts
 
 
+def release_metadata(value, source, run_id):
+    version(value)
+    return dict(platform="macos", version=value, sourceCommit=source, releaseRunId=run_id,
+                signed=True, notarized=True, architectures=["arm64"], minimumOS="15.0",
+                bundleIdentifier="com.damianedwards.GHCPSpendTray")
+
+
+def check_metadata(metadata, value, source):
+    expected = release_metadata(value, source, os.environ["GITHUB_RUN_ID"])
+    if metadata != expected:
+        raise ValueError("Release metadata must describe the current signed/notarized Apple-silicon-only build.")
+
+
 def run(*arguments):
     return subprocess.check_output(arguments, text=True).strip()
 
@@ -90,6 +103,7 @@ def validate(value):
 def stage(value):
     validate(value)
     repository, source = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"]
+    check_metadata(json.loads(Path("artifacts/macos-release/release-macos.json").read_text()), value, source)
     tag = f"macos-v{value}"
     remote = run("git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}")
     if not remote:

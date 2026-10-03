@@ -61,8 +61,10 @@ is **not** an in-place upgrade from the GitHub package.
 
 ### macOS
 
-Supports **macOS 26 and macOS 15**, on their latest patch releases, with a
-universal app for Apple silicon and Intel. We maintain a two-major-version
+Supports **macOS 26 and macOS 15**, on their latest patch releases, on
+**Apple silicon only** (M-series Macs, arm64). Intel Macs are not supported
+by current builds. Previously published universal releases are historical
+artifacts and are not changed by this policy. We maintain a two-major-version
 support window and advance it when adopting a new stable macOS major release.
 macOS 14 Sonoma is no longer supported. Download
 `GHCPSpendTray-macOS-<version>.dmg` from a **macOS** release on
@@ -271,7 +273,9 @@ not the signed public release. For isolated synthetic UI checks, see
 
 ### macOS development
 
-Install the SDK pinned in `global.json` and stable Xcode Command Line Tools
+Use an Apple-silicon Mac running a supported macOS version, with native arm64
+tools (not under Rosetta). Install the SDK pinned in `global.json` and stable
+Xcode Command Line Tools
 with Swift 6 (`xcode-select --install` if missing). A separate .NET macOS
 workload, MAUI, or Xcode project is not required. Python 3 is used by build and
 release checks. From the repository root:
@@ -281,13 +285,16 @@ bash tools/macos/verify.sh
 open artifacts/macos/GHCPSpendTray.app
 ```
 
-Verification runs managed and native shared tests, builds a universal
-arm64/x86_64 app, exercises synthetic Keychain items, and launches populated
+Verification runs managed and native shared tests, builds an arm64-only
+app and Native AOT bridge, rejects Intel/universal binaries, exercises synthetic
+Keychain items, and launches populated
 and empty SwiftUI smoke scenarios. The Keychain test deletes its own uniquely
 named synthetic item; it never reads account credentials or enables login
 startup. The resulting app is ad-hoc signed for local development only.
 `bash tools/macos/build.sh` builds without running tests. If using a preview
 toolchain, select a stable SDK with `SDKROOT`; see [release documentation](docs/RELEASING.md).
+CI builds once on macOS 26 / Apple silicon, then tests that exact artifact
+on macOS 15 / Apple silicon without rebuilding.
 
 To run an empty, isolated preview alongside an installed release:
 

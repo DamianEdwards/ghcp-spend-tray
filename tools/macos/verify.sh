@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-case "$(uname -m)" in arm64) rid=osx-arm64 ;; x86_64) rid=osx-x64 ;; *) echo "Unsupported Mac architecture" >&2; exit 1 ;; esac
+python3 tools/macos/architecture.py host
+rid=osx-arm64
 python3 -m unittest discover -s tools/ci -p 'test_*.py'
 python3 -m unittest discover -s tools/release -p 'test_*.py'
 python3 -m unittest discover -s tools/macos -p 'test_*.py'
@@ -15,7 +16,7 @@ bash tools/macos/build.sh
 xcrun swiftc -swift-version 6 -warnings-as-errors -O \
     src/GHCPSpendTray.Mac/Models.swift src/GHCPSpendTray.Mac/Platform.swift \
     src/GHCPSpendTray.Mac/AppModel.swift src/GHCPSpendTray.Mac/TrayIconRenderer.swift \
-    src/GHCPSpendTray.Mac/Notifications.swift \
+    src/GHCPSpendTray.Mac/Notifications.swift src/GHCPSpendTray.Mac/PopupSmokeReadiness.swift \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     tests/GHCPSpendTray.MacTests/*.swift \
     artifacts/macos/GHCPSpendTray.app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib \

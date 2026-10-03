@@ -9,6 +9,10 @@ runs:
         DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       run: |
         set -euo pipefail
+        if [[ "$(uname -m)" != arm64 || "$RUNNER_ARCH" != ARM64 ]]; then
+          echo "macOS build and release jobs require an Apple-silicon runner and native arm64 execution." >&2
+          exit 1
+        fi
         if [[ ! -d "$DEVELOPER_DIR" ]]; then
           echo "Xcode 26.6 is required. Use a macos-26 runner with this toolchain installed." >&2
           exit 1

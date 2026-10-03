@@ -3,6 +3,10 @@ import Darwin
 import SwiftUI
 import UserNotifications
 
+#if !arch(arm64)
+#error("GHCPSpendTray for macOS supports only Apple silicon (arm64).")
+#endif
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     private var model: AppModel?
@@ -237,17 +241,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         func progress(_ phase: String) {
             FileHandle.standardError.write(Data("SMOKE: \(phase)\n".utf8))
         }
-        func checkPopupAnchor(_ button: NSStatusBarButton) throws {
-            guard let anchorWindow = button.window,
-                  let popupWindow = popover.contentViewController?.view.window else {
-                throw AppError.message("Popup anchor windows are missing.")
-            }
-            let anchor = anchorWindow.convertToScreen(button.convert(button.bounds, to: nil))
-            let gap = anchor.minY - popupWindow.frame.maxY
-            guard abs(gap) <= 8 else {
-                throw AppError.message("Menu-bar popup lost its anchor after resizing: \(gap)-point gap.")
-            }
-        }
         func savePopupSnapshot(_ name: String) throws {
             guard let view = popover.contentViewController?.view,
                   let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
@@ -278,31 +271,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             guard let button = statusItems["rollup"]?.button else {
                 throw AppError.message("Roll-up menu-bar item missing.")
             }
+            try await waitForPopupAnchor(button, phase: "initial menu-bar placement", presented: false)
             togglePopover(button)
-            try await Task.sleep(for: .milliseconds(250))
-            guard popover.isShown, let flyout = popover.contentViewController?.view else {
+            try await waitForPopupAnchor(button, phase: "\(empty ? "empty" : "populated") initial presentation") { bounds in
+                bounds.width == 400 && (!self.empty || bounds.height < 300)
+            }
+            guard let flyout = popover.contentViewController?.view else {
                 throw AppError.message("Menu-bar popup did not render.")
             }
-            guard flyout.bounds.width == 400, !empty || flyout.bounds.height < 300 else {
-                throw AppError.message("Empty menu-bar popup must be a compact account-setup prompt.")
-            }
-            try checkPopupAnchor(button)
             try savePopupSnapshot("Flyout")
-            if empty {
-                progress("checking popup growth and shrinkage")
-                let height = flyout.bounds.height
-                model.notice = "Synthetic popup height change.\nA second line exercises content growth."
-                try await Task.sleep(for: .milliseconds(250))
-                guard flyout.bounds.height > height else {
-                    throw AppError.message("Popup did not grow to fit its content.")
-                }
-                try checkPopupAnchor(button)
-                model.notice = nil
-                try await Task.sleep(for: .milliseconds(250))
-                guard abs(flyout.bounds.height - height) <= 1 else {
-                    throw AppError.message("Popup did not shrink back to its account-setup prompt.")
-                }
-                try checkPopupAnchor(button)
+            progress("checking popup growth and shrinkage")
+            let height = flyout.bounds.height
+            model.notice = "Synthetic popup height change.\nA second line exercises content growth."
+            try await waitForPopupAnchor(button, phase: "notice growth beyond \(height) points") { bounds in
+                bounds.width == 400 && bounds.height > height + 1
+            }
+            model.notice = nil
+            try await waitForPopupAnchor(button, phase: "notice shrinkage to \(height) points") { bounds in
+                bounds.width == 400 && abs(bounds.height - height) <= 1
             }
             popover.performClose(nil)
             openSettings()
@@ -377,14 +363,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             guard let sampleButton = statusItems["rollup"]?.button else {
                 throw AppError.message("Sample popup menu-bar item missing.")
             }
+            try await waitForPopupAnchor(sampleButton, phase: "example menu-bar placement", presented: false)
             togglePopover(sampleButton)
-            try await Task.sleep(for: .milliseconds(250))
+            try await waitForPopupAnchor(sampleButton, phase: "presentation before example insertion")
             let previousHeight = flyout.bounds.height
             let previousCount = model.dashboard?.accounts.count ?? 0
             let previousConsumption = model.dashboard?.consumptionUsd ?? 0
             model.addExampleAccount()
             try await waitUntil { !model.busy }
-            try await Task.sleep(for: .milliseconds(250))
+            try await waitForPopupAnchor(sampleButton, phase: "example insertion beyond \(previousHeight) points") { bounds in
+                bounds.width == 400 && (!self.empty || bounds.height > previousHeight + 1)
+            }
             guard model.error == nil, popover.isShown, !model.showingSignIn,
                   model.dashboard?.accounts.count == previousCount + 1,
                   model.dashboard?.consumptionUsd == previousConsumption + 12.5,
@@ -392,7 +381,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                   !empty || flyout.bounds.height > previousHeight else {
                 throw AppError.message("Example account did not update and resize the open popup without sign-in.")
             }
-            try checkPopupAnchor(sampleButton)
             try savePopupSnapshot("FlyoutWithExample")
             popover.performClose(nil)
             model.addAccount()
@@ -405,7 +393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             try await waitUntil { self.settingsWindow?.attachedSheet == nil }
             try "PASS: native menu bar, five settings pages, synthetic dashboard and settings bridge.\n"
                 .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
-            print("PASS: macOS \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
+            print("PASS: macOS arm64 \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
             progress("terminating")
             NSApplication.shared.terminate(nil)
         } catch {
@@ -413,6 +401,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             model.shutdown()
             exit(1)
         }
+    }
+
+    private func waitForPopupAnchor(_ button: NSStatusBarButton, phase: String, presented: Bool = true,
+                                    contentReady: (NSRect) -> Bool = { $0.width == 400 }) async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        var readiness = PopupSmokeReadiness()
+        var firstDiagnostic: String?
+        var samples = 0
+        while true {
+            let anchorWindow = button.window
+            let controller = popover.contentViewController
+            let view = controller?.view
+            let popupWindow = view?.window
+            let screen = anchorWindow?.screen
+            let anchor = anchorWindow?.convertToScreen(button.convert(button.bounds, to: nil))
+            var frames: [NSRect] = []
+            var failure: String?
+            if let anchor, let screen, let anchorWindow {
+                frames = [anchor, button.bounds, button.frame, anchorWindow.frame, screen.frame, screen.visibleFrame]
+                if !anchorWindow.isVisible || button.isHiddenOrHasHiddenAncestor || button.visibleRect.isEmpty {
+                    failure = "Menu-bar button is not visible."
+                } else {
+                    failure = PopupSmokeGeometry.anchorFailure(anchor, screen: screen.frame)
+                }
+                if presented {
+                    if let popupWindow, let windowContentView = popupWindow.contentView, let view, let controller {
+                        // Preferred-size updates can resize the real window without updating NSPopover.contentSize.
+                        let geometry = PopupSmokeGeometry(anchor: anchor, popup: popupWindow.frame,
+                            screen: screen.frame, visibleScreen: screen.visibleFrame, contentBounds: view.bounds,
+                            windowContentBounds: windowContentView.bounds, preferredContentSize: controller.preferredContentSize)
+                        frames += geometry.stabilityFrames + [popover.positioningRect, view.frame]
+                        if failure == nil {
+                            if !popover.isShown || !popupWindow.isVisible || view.isHiddenOrHasHiddenAncestor {
+                                failure = "Popup is not shown and visible."
+                            } else if popover.isDetached {
+                                failure = "Popup is detached from its positioning view."
+                            } else if popupWindow.screen != screen {
+                                failure = "Popup and menu-bar anchor are on different screens."
+                            } else if let geometryFailure = geometry.failure {
+                                failure = geometryFailure
+                            } else if !contentReady(view.bounds) {
+                                failure = "Expected content size for \(phase) has not appeared."
+                            }
+                        }
+                    } else {
+                        failure = failure ?? "Popup window, window content or hosting view is missing."
+                    }
+                }
+            } else {
+                failure = "Menu-bar anchor window or screen is missing."
+            }
+            samples += 1
+            let diagnostic = popupSmokeDiagnostic(button, anchor: anchor)
+            if firstDiagnostic == nil { firstDiagnostic = "readiness=\(failure ?? "geometry candidate"); \(diagnostic)" }
+            let elapsed = start.duration(to: clock.now)
+            switch readiness.observe(frames: frames, failure: failure, elapsed: elapsed) {
+            case .ready:
+                let attachment: String
+                if presented, let anchor, let popupWindow {
+                    attachment = "; gap=\(anchor.minY - popupWindow.frame.maxY) points"
+                } else {
+                    attachment = "; visible menu-bar button"
+                }
+                FileHandle.standardError.write(Data("SMOKE: stable \(phase) after \(elapsed), \(samples) samples\(attachment).\n".utf8))
+                return
+            case .timedOut:
+                throw AppError.message("Timed out waiting for \(phase) after \(elapsed), \(samples) samples: \(readiness.reason)\nFirst geometry: \(firstDiagnostic ?? "missing")\nLatest geometry: \(diagnostic)")
+            case .waiting:
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    private func popupSmokeDiagnostic(_ button: NSStatusBarButton, anchor: NSRect?) -> String {
+        let controller = popover.contentViewController
+        let view = controller?.view
+        let anchorWindow = button.window
+        let popupWindow = view?.window
+        let positioningRect = popover.positioningRect.isEmpty ? button.bounds : popover.positioningRect
+        let positioningScreenRect = anchorWindow?.convertToScreen(button.convert(positioningRect, to: nil))
+        let screens = NSScreen.screens.map {
+            "frame=\($0.frame), visibleFrame=\($0.visibleFrame), scale=\($0.backingScaleFactor)"
+        }.joined(separator: "; ")
+        return """
+        positioningRect=\(popover.positioningRect), positioningScreenRect=\(String(describing: positioningScreenRect)), preferredEdge=minY, shown=\(popover.isShown), detached=\(popover.isDetached), animated=\(popover.animates), appActive=\(NSApplication.shared.isActive);
+        button frame=\(button.frame), bounds=\(button.bounds), visibleRect=\(button.visibleRect), hidden=\(button.isHiddenOrHasHiddenAncestor), screenRect=\(String(describing: anchor));
+        anchorWindow frame=\(String(describing: anchorWindow?.frame)), contentBounds=\(String(describing: anchorWindow?.contentView?.bounds)), visible=\(String(describing: anchorWindow?.isVisible)), screen=\(String(describing: anchorWindow?.screen?.frame));
+        popupWindow frame=\(String(describing: popupWindow?.frame)), contentBounds=\(String(describing: popupWindow?.contentView?.bounds)), visible=\(String(describing: popupWindow?.isVisible)), screen=\(String(describing: popupWindow?.screen?.frame));
+        content frame=\(String(describing: view?.frame)), bounds=\(String(describing: view?.bounds)), hidden=\(String(describing: view?.isHiddenOrHasHiddenAncestor)), contentSize=\(popover.contentSize), preferredContentSize=\(String(describing: controller?.preferredContentSize));
+        screens=[\(screens)], macOS=\(ProcessInfo.processInfo.operatingSystemVersionString)
+        """
     }
 
     private func waitUntil(_ condition: () -> Bool) async throws {
