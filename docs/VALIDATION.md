@@ -1,5 +1,32 @@
 # GHCPSpendTray validation and release gates
 
+## macOS empty popup and menu-bar anchoring (October 3, 2026)
+
+With no connected accounts, the Mac popup now shows an Add Account prompt
+without unavailable totals, tray diagnostics, an empty scroll region, or a
+refresh button. The same prompt is used by the empty Usage page; actual
+initialization and account-data failures retain their existing error paths.
+
+The smaller popup exposed an AppKit sizing mismatch: `NSPopover` positioned
+its default 320-point content height before SwiftUI shrank the empty content
+to 225 points, leaving a measured 95.5-point gap below the menu-bar button.
+The frontend now measures the current fitting size before showing the popup
+and enables hosting-controller preferred-content-size updates. No screen
+offset or fixed popup height is used.
+
+Native smoke captures both empty and populated popups, checks the empty
+prompt stays under 300 points high at its 400-point width, and verifies the
+popup remains within 8 points of its menu-bar anchor. Synthetic notice
+growth and removal exercise both live expansion and shrinkage. The
+sample-only Add Example Account action also exercises the real shared bridge,
+updates consumption and allocation, and resizes the still-open popup from
+empty to populated without authentication. Managed and Native AOT fixtures
+cover repeated additions, unique account identities, refresh retention,
+session-only storage, and rejection by a normal-mode controller. These checks
+pass locally on macOS 26 / Apple silicon; macOS 15 / Intel remains a CI gate.
+AppKit render snapshots can omit GPU-composited text and do not establish
+pixel-perfect appearance or VoiceOver behavior.
+
 ## macOS 0.1.0 notification callback launch regression
 
 The installed, signed/notarized 0.1.0 app passed signature and Gatekeeper

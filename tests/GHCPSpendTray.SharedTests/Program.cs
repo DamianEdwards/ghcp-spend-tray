@@ -148,6 +148,51 @@ try
         draft = draft with { ExcludedTrayAccounts = ["github.com:1", "example.ghe.com:2"] };
         bridge.Send(new() { Id = "none", Method = "tray.preview", Settings = draft });
         Check((await Complete(bridge, "none")).Tray!.Icons.Single().NumericText == "?", "Unavailable preview is not zero.");
+        DashboardView? exampleDashboard = null;
+        bridge.Send(new() { Id = "populated-example", Method = "demo.account.add" });
+        var example = await Complete(bridge, "populated-example", e =>
+        {
+            if (e.Dashboard is not null) exampleDashboard = e.Dashboard;
+        });
+        Check(example.Error is null && exampleDashboard?.Accounts.Count == 3 &&
+            exampleDashboard.ConsumptionUsd == 55.25m, "Example account appends to existing sample data.");
+        Check(exampleDashboard!.Accounts.Select(a => a.Key).Distinct().Count() == 3 &&
+            exampleDashboard.Tray!.Icons.Any(i => i.AccountKey == "github.com:3"),
+            "Sample accounts have unique identities and newly added accounts join saved tray settings.");
+    }
+    string exampleDirectory = Path.Combine(root, "empty-demo-examples");
+    using (var bridge = new BridgeRuntime())
+    {
+        DashboardView? dashboard = null;
+        void Observe(BridgeEvent e) { if (e.Dashboard is not null) dashboard = e.Dashboard; }
+        bridge.Send(new() { Id = "empty-demo", Method = "initialize", Directory = exampleDirectory, Demo = true, Empty = true });
+        Check((await Complete(bridge, "empty-demo", Observe)).Error is null &&
+            dashboard?.Accounts.Count == 0 && dashboard.ConsumptionUsd is null, "Empty sample mode has no fabricated zero usage.");
+        bridge.Send(new() { Id = "first-example", Method = "demo.account.add" });
+        Check((await Complete(bridge, "first-example", Observe)).Error is null &&
+            dashboard?.Accounts.Count == 1 && dashboard.ConsumptionUsd == 12.5m,
+            "One example populates the empty sample dashboard with exact synthetic consumption.");
+        Check(dashboard!.Accounts[0].Name == "Example 1 (demo)" && dashboard.Accounts[0].Percent == 25m &&
+            dashboard.Tray!.RollUp.Percent == 25 && dashboard.Tray.RollUp.IncludedAccounts == 1,
+            "Example usage and tray allocation are coherent.");
+        bridge.Send(new() { Id = "second-example", Method = "demo.account.add" });
+        Check((await Complete(bridge, "second-example", Observe)).Error is null &&
+            dashboard?.Accounts.Count == 2 && dashboard.ConsumptionUsd == 25m &&
+            dashboard.Accounts.Select(a => a.Key).Distinct().Count() == 2,
+            "Repeated example additions append unique accounts instead of replacing or duplicating identities.");
+        bridge.Send(new() { Id = "refresh-examples", Method = "refresh" });
+        Check((await Complete(bridge, "refresh-examples", Observe)).Error is null &&
+            dashboard?.Accounts.Count == 2 && dashboard.Tray!.RollUp.Percent == 25,
+            "Refresh retains in-memory examples with fresh allocation data.");
+        Check(!Directory.Exists(exampleDirectory) || !Directory.EnumerateFiles(exampleDirectory, "*", SearchOption.AllDirectories).Any(),
+            "Example additions do not write account data or credentials.");
+    }
+    using (var bridge = new BridgeRuntime())
+    {
+        DashboardView? dashboard = null;
+        bridge.Send(new() { Id = "restart-examples", Method = "initialize", Directory = exampleDirectory, Demo = true, Empty = true });
+        await Complete(bridge, "restart-examples", e => { if (e.Dashboard is not null) dashboard = e.Dashboard; });
+        Check(dashboard?.Accounts.Count == 0, "Temporary example accounts do not survive a new isolated session.");
     }
     using (var bridge = new BridgeRuntime())
     {
@@ -161,6 +206,9 @@ try
         Check(bridge.Send(new() { Id = "busy", Method = "refresh" }).Error is not null, "Bridge serializes user mutations while waiting for platform.");
         bridge.Send(new() { Method = "platform.reply", TargetId = request!.Id, Reply = new() { CanChange = true, Description = "Synthetic startup." } });
         Check((await Complete(bridge, "real-init")).Error is null, "Platform completion unblocks shared initialization.");
+        bridge.Send(new() { Id = "forbidden-example", Method = "demo.account.add", Demo = true });
+        Check((await Complete(bridge, "forbidden-example")).Error == "Example accounts are only available in demonstration mode.",
+            "Normal mode rejects example accounts even when a command spoofs the demo flag.");
         bridge.Send(new() { Id = "startup", Method = "settings.save", Settings = new(30, "50, 80, 100", true, true) });
         request = null;
         await Until(() =>
@@ -199,7 +247,7 @@ static async Task Until(Func<bool> condition)
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     while (!condition()) await Task.Delay(10, timeout.Token);
 }
-static async Task<BridgeEvent> Complete(BridgeRuntime bridge, string id)
+static async Task<BridgeEvent> Complete(BridgeRuntime bridge, string id, Action<BridgeEvent>? observe = null)
 {
     BridgeEvent? result = null;
     await Until(() =>
@@ -207,8 +255,9 @@ static async Task<BridgeEvent> Complete(BridgeRuntime bridge, string id)
         var events = bridge.Poll();
         // Exercise generated event serialization used by the Native AOT ABI.
         var json = JsonSerializer.Serialize(events, BridgeJsonContext.Default.BridgeEventArray);
-        result = JsonSerializer.Deserialize(json, BridgeJsonContext.Default.BridgeEventArray)!
-            .FirstOrDefault(e => e.Kind == "completed" && e.Id == id);
+        var decoded = JsonSerializer.Deserialize(json, BridgeJsonContext.Default.BridgeEventArray)!;
+        foreach (var e in decoded) observe?.Invoke(e);
+        result = decoded.FirstOrDefault(e => e.Kind == "completed" && e.Id == id);
         return result is not null;
     });
     return result!;
