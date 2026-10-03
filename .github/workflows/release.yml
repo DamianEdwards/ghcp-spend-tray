@@ -282,7 +282,7 @@ jobs:
     name: Build, sign, notarize and publish macOS
     needs: plan
     if: needs.plan.outputs.macos_release == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 180
     environment: production
     permissions:
@@ -299,6 +299,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+      - uses: ./.github/actions/setup-macos
       - name: Validate macOS version and verified main source
         run: python3 tools/macos/release.py validate "$RELEASE_VERSION"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0

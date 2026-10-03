@@ -26,6 +26,8 @@ they share intermediate directories.
 On macOS, run `bash tools/macos/verify.sh` with stable Swift 6 Command Line Tools
 and the pinned .NET SDK. It includes managed/Native AOT shared tests, universal
 app packaging, synthetic Keychain CRUD, and native UI smoke runs. Production
+CI/release toolchains are pinned in `.github/actions/setup-macos` (Xcode 26.6,
+macOS 26.5 SDK); the minimum deployment target remains macOS 14.
 Mac signing also requires Xcode's `notarytool` and configured Apple credentials.
 Mac versions live in `packaging/macos/version.txt` for development and
 `macos-v*` release tags; Windows keeps `v*` tags. Preserve independent versioning.

@@ -155,13 +155,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-15-intel]
+        runner: [macos-26, macos-26-intel]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-macos
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
@@ -175,10 +176,10 @@ jobs:
       - name: Verify shared engine, native bridge, universal app and synthetic UI
         run: bash tools/macos/verify.sh
       - name: Archive development app
-        if: matrix.runner == 'macos-15'
+        if: matrix.runner == 'macos-26'
         run: ditto -c -k --keepParent artifacts/macos/GHCPSpendTray.app artifacts/macos/GHCPSpendTray-development.zip
       - name: Retain ad-hoc signed development app
-        if: matrix.runner == 'macos-15'
+        if: matrix.runner == 'macos-26'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos-development
@@ -187,10 +188,14 @@ jobs:
           retention-days: 7
 
   macos_runtime:
-    name: macOS 26 runtime compatibility
+    name: macOS runtime compatibility (${{ matrix.runner }})
     needs: [changes, macos]
     if: needs.changes.outputs.macos == 'true'
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -200,7 +205,7 @@ jobs:
         with:
           name: macos-development
           path: artifacts/macos-runtime
-      - name: Launch the macOS 15-built app on macOS 26
+      - name: Launch the release-toolchain app on older macOS without rebuilding
         run: |
           ditto -x -k artifacts/macos-runtime/GHCPSpendTray-development.zip artifacts/macos-runtime
           python3 tools/macos/smoke-test.py artifacts/macos-runtime/GHCPSpendTray.app

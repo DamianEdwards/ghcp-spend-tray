@@ -255,7 +255,7 @@ keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
 and build outputs are never cached. Builds and publishes remain sequential
 within each checkout. Mac runners also cache NuGet packages by architecture.
 The final **Verification** job requires both Windows jobs for Windows-relevant
-changes, both Mac build runners plus macOS 26 runtime compatibility for
+changes, both Mac build runners plus older-macOS runtime compatibility for
 Mac-relevant changes, and Markdown lint when
 applicable. Every unneeded job must be skipped; missing or invalid routing
 decisions fail closed. Failed change detection or Markdown
@@ -451,7 +451,22 @@ duplicate assets, mismatched source/version metadata, and GitHub API failures.
 ### Local macOS builds
 
 Use macOS 14 or newer, the .NET SDK in `global.json`, Python 3, and a stable
-Swift 6 compiler/Apple SDK from Xcode 16 or newer or its Command Line Tools.
+Swift 6 compiler/Apple SDK. CI and release jobs use **Xcode 26.6 with the
+macOS 26.5 SDK**, selected explicitly by `.github/actions/setup-macos` on
+`macos-26` / `macos-26-intel` runners, rather than inheriting runner defaults.
+The minimum deployment target stays macOS 14; the build SDK is independent
+of the oldest supported runtime. The universal artifact is also launched on
+macOS 15 Apple silicon and Intel runners without recompilation.
+
+For the closest local/release match, install Xcode 26.6 and run:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer bash tools/macos/verify.sh
+```
+
+Adjust the path if Xcode was installed under a different name. Command Line
+Tools are also supported for local development, but their compiler version may
+differ from CI; the workflow logs its actual Xcode, Swift, and SDK versions.
 `xcode-select --install` installs the tools if missing. No .NET platform
 workload or third-party UI package is required.
 
@@ -547,7 +562,8 @@ and system-default trust, never an **Always Trust** override.
 
 1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
    Mac-relevant changes run managed and native shared tests plus universal
-   builds/smoke checks on both Apple silicon and Intel runners.
+   builds/smoke checks with the release toolchain on Apple silicon and Intel
+   runners, plus the same artifact on older macOS.
 2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
    to **no release** for a Mac-only release. Choose the preview designation,
    review the calculated versions, and approve the **production** deployment.

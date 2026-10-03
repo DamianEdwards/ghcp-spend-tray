@@ -39,12 +39,15 @@ jobs:
           # Bridge.h contains declarations only, not a separate C/C++ implementation.
           # Trace the real Swift build; there is no Xcode project or Swift package.
           - language: swift
-            runner: macos-15
+            runner: macos-26
             build-mode: manual
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+      - name: Select Apple toolchain
+        if: matrix.language == 'swift'
+        uses: ./.github/actions/setup-macos
       - name: Install pinned SDK for the native bridge
         if: matrix.language == 'swift' || matrix.language == 'csharp'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0

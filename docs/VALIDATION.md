@@ -13,10 +13,14 @@ All three notification completion handlers now explicitly use `@Sendable`,
 transferring only values/errors through checked continuations. Smoke mode also
 queries real notification settings without requesting permission or sending a
 notification, so the callback is no longer hidden behind the demo service.
-Verify runs the same macOS 15-built app artifact on macOS 26 without rebuilding
-it. This is a required, Mac-change-gated runtime job in addition to the Apple
-silicon and Intel builds, catching SDK/runtime combinations that compilation
-and synthetic service tests alone cannot cover.
+The first fix passed the same macOS 15-built artifact on macOS 26 without
+rebuilding it (Verify run 37132765292). Build and release jobs now explicitly
+select Xcode 26.6 / macOS 26.5 SDK on macOS 26, instead of the macOS 15 runner's
+Xcode 16.4 default. The required compatibility jobs run the new artifact on
+macOS 15 Apple silicon and Intel without recompilation. Native callback smoke
+coverage runs on both current and older runtimes, catching combinations that
+compilation and synthetic service tests alone cannot cover. The minimum app
+deployment target remains macOS 14.
 
 ## CodeQL configuration
 

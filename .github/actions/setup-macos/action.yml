@@ -1,0 +1,20 @@
+name: Set up Apple toolchain
+description: Select the same current stable Xcode and SDK for all macOS build and release jobs.
+runs:
+  using: composite
+  steps:
+    - name: Select Xcode 26.6
+      shell: bash
+      env:
+        DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      run: |
+        set -euo pipefail
+        if [[ ! -d "$DEVELOPER_DIR" ]]; then
+          echo "Xcode 26.6 is required. Use a macos-26 runner with this toolchain installed." >&2
+          exit 1
+        fi
+        echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+        echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+        xcodebuild -version
+        xcrun swiftc --version
+        xcrun --sdk macosx --show-sdk-version
