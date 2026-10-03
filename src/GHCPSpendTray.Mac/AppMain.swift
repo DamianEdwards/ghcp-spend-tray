@@ -226,9 +226,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     }
 
     private func runSmoke(_ model: AppModel) async {
+        func progress(_ phase: String) {
+            FileHandle.standardError.write(Data("SMOKE: \(phase)\n".utf8))
+        }
         do {
+            progress("waiting for shared initialization")
             try await waitUntil { model.initialized && !model.busy }
             // Read-only native callback coverage: no permission prompt, alert, or account access.
+            progress("reading native notification settings")
             _ = await NativeNotifications().status()
             print("PASS: native notification settings callback.")
             guard model.error == nil, let dashboard = model.dashboard,
@@ -240,8 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 throw AppError.message("Adaptive menu bar indicator was not created.")
             }
             openSettings()
+            progress("opening settings")
             try await waitUntil { !model.busy }
             for page in SettingsPage.allCases {
+                progress("rendering \(page.rawValue)")
                 model.page = page
                 try await Task.sleep(for: .milliseconds(250))
                 guard let view = settingsWindow?.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
@@ -254,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 try png.write(to: model.directory.appendingPathComponent("\(page.rawValue).png"))
             }
             if var settings = model.settings {
+                progress("saving and previewing menu-bar settings")
                 settings.pollMinutes = 15
                 settings.spendIncrementUsd = 50
                 model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
@@ -299,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 }
             }
             model.addAccount()
+            progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))
             guard model.showingSignIn else { throw AppError.message("Account onboarding did not open.") }
             model.showingSignIn = false
@@ -306,6 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             try "PASS: native menu bar, five settings pages, synthetic dashboard and settings bridge.\n"
                 .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
             print("PASS: macOS \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
+            progress("terminating")
             NSApplication.shared.terminate(nil)
         } catch {
             fputs("FAIL: macOS synthetic smoke test: \(error.localizedDescription)\n", stderr)

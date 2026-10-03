@@ -17,7 +17,14 @@ def smoke(app, architecture=None):
                 command.append("--demo-empty")
             if architecture:
                 command = ["arch", f"-{architecture}", *command]
-            process = subprocess.run(command, timeout=90, capture_output=True, text=True)
+            try:
+                process = subprocess.run(command, timeout=90, capture_output=True, text=True)
+            except subprocess.TimeoutExpired as error:
+                for output, stream in ((error.stdout, sys.stdout), (error.stderr, sys.stderr)):
+                    if output:
+                        print(output.decode(errors="replace") if isinstance(output, bytes) else output,
+                              end="", file=stream)
+                raise
             print(process.stdout, end="")
             print(process.stderr, end="", file=sys.stderr)
             process.check_returncode()
