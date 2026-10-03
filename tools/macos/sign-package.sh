@@ -77,8 +77,7 @@ stage "verify application signature"
 codesign --verify --deep --strict "$app"
 ditto -c -k --keepParent "$app" "$temporary/app.zip"
 stage "submit application for notarization"
-xcrun notarytool submit "$temporary/app.zip" --key "$temporary/notary.p8" \
-    --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" --wait --timeout 20m
+bash tools/macos/notarize.sh "$temporary/app.zip" app
 stage "staple and assess notarized application"
 xcrun stapler staple "$app"
 bash tools/macos/test-package.sh "$app" "$version" true
@@ -92,8 +91,7 @@ dmg="$PWD/artifacts/macos-release/GHCPSpendTray-macOS-$version.dmg"
 hdiutil create -ov -volname GHCPSpendTray -srcfolder artifacts/macos-dmg -format UDZO "$dmg" >/dev/null
 codesign --force --sign "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" --timestamp "$dmg"
 stage "submit disk image for notarization"
-xcrun notarytool submit "$dmg" --key "$temporary/notary.p8" \
-    --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" --wait --timeout 20m
+bash tools/macos/notarize.sh "$dmg" dmg
 stage "staple and assess notarized disk image"
 xcrun stapler staple "$dmg"
 xcrun stapler validate "$dmg"

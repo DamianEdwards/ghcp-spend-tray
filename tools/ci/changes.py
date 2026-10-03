@@ -22,7 +22,7 @@ def classify(paths):
             ".github/workflows/release.yml",
         }:
             result.update(windows=True, macos=True)
-        elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/")):
+        elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/")) or path == ".github/workflows/notarization-status.yml":
             result["macos"] = True
         elif path.startswith(("src/GHCPSpendTray.App/", "tests/GHCPSpendTray.AppTests/", "tests/GHCPSpendTray.PlatformTests/")) or (
             path.startswith("tools/") and path.endswith(".ps1")

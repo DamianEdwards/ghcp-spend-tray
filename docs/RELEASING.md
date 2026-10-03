@@ -517,6 +517,21 @@ The temporary signing Keychain is added to the user's search list for
 Existing search entries, including entries added during signing, are preserved.
 Passing `codesign --keychain` alone is insufficient for all lookup paths.
 
+Each of the two notarizations has a 60-minute wait ceiling; the Mac release
+job has a 180-minute total ceiling for both submissions plus builds and packaging.
+Successful submissions return immediately. Submission receipts are saved before
+waiting and retained with status JSON in a `macos-notarization-<run>-<attempt>`
+Actions artifact, even on failure. A timeout does not reject or cancel the
+submission at Apple. Inspect or continue waiting on its recorded ID with
+`notarytool info` / `notarytool wait` before starting another upload. A new run
+does not automatically resume an earlier submission; do not blindly rerun after
+a wait timeout. The **Notarization Status** workflow can inspect the recorded
+UUID from `main` using the same protected production credentials; optionally
+enable its wait input to continue waiting for up to 60 minutes. It never signs,
+uploads, or publishes anything, and retains status (and rejection logs when
+available) as an Actions artifact. Timeout changes apply only to new workflow
+code/runs.
+
 The signing step reports each preparation/signing/notarization stage and checks
 the imported identity before configuring private-key access. A P12 without a
 matching private key, a mismatched `MACOS_SIGNING_IDENTITY`, and an untrusted

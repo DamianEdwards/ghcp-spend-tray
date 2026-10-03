@@ -6,7 +6,7 @@ class ChangesTests(unittest.TestCase):
     def test_platform_boundaries(self):
         for path in ("src/GHCPSpendTray.Mac/Views.swift", "src/GHCPSpendTray.MacBridge/Exports.cs",
                      "packaging/macos/Info.plist", "tests/GHCPSpendTray.MacTests/PlatformTests.swift",
-                     "tools/macos/build.sh"):
+                     "tools/macos/build.sh", ".github/workflows/notarization-status.yml"):
             self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
                      "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1", ".github/workflows/store-package.yml",
