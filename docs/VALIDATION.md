@@ -1,31 +1,5 @@
 # GHCPSpendTray validation and release gates
 
-## Windows notification icons and usage disclosures (October 3, 2026)
-
-Windows notifications now submit a separate, DPI-sized custom balloon icon
-with `NIIF_USER | NIIF_LARGE_ICON`, retaining quiet-time behavior. Allocation
-pies use the triggering snapshot's actual percentage, not the crossed threshold
-or tray roll-up; unknown/unlimited allocations with dollar milestones render
-the reached USD amount instead. The macOS adapter retains its existing native
-notification request and text.
-
-Each Windows Usage account starts with its advanced information collapsed.
-Native UI smoke expands one account without opening the other, refreshes it
-without losing disclosure state, and collapses it while retaining consumption.
-Account-management disclosures and the empty Usage page remain covered.
-
-`verify.ps1 -NativeTests` passed a warning-free Release build, 155 core tests,
-14 platform tests, 891 application assertions and 54 shared/bridge assertions
-under managed and executed x64 Native AOT. Notification regressions cover
-large-icon DPI metrics, artwork, Shell flags/text, rejected submissions,
-click-account routing and bounded GDI/USER handles. x64 Native AOT publishing
-and populated/empty portable UI smoke also passed, with startup unchanged.
-
-Shell acceptance does not prove visible delivery or Explorer rendering.
-Notification appearance across light/dark, contrast and DPI settings remains
-an interactive acceptance check. Native macOS packaging/UI was not run on this
-Windows host; the unchanged notification bridge contract was tested here.
-
 ## macOS 0.1.0 notification callback launch regression
 
 The installed, signed/notarized 0.1.0 app passed signature and Gatekeeper
