@@ -1,5 +1,23 @@
 # GHCPSpendTray validation and release gates
 
+## macOS 0.1.0 notification callback launch regression
+
+The installed, signed/notarized 0.1.0 app passed signature and Gatekeeper
+verification but crashed on macOS 26 while fetching notification settings.
+The faulting stack was `_dispatch_assert_queue_fail` in the callback inside
+`NativeNotifications.status()`. The older release SDK omits `Sendable` on that
+completion-handler declaration, so Swift inferred main-actor isolation even
+though UserNotifications invokes it on a background queue.
+
+All three notification completion handlers now explicitly use `@Sendable`,
+transferring only values/errors through checked continuations. Smoke mode also
+queries real notification settings without requesting permission or sending a
+notification, so the callback is no longer hidden behind the demo service.
+Verify runs the same macOS 15-built app artifact on macOS 26 without rebuilding
+it. This is a required, Mac-change-gated runtime job in addition to the Apple
+silicon and Intel builds, catching SDK/runtime combinations that compilation
+and synthetic service tests alone cannot cover.
+
 ## CodeQL configuration
 
 `.github/workflows/codeql.yml` uses advanced setup and explicitly scans
@@ -56,7 +74,9 @@ python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app --arch x86_6
 ```
 
 Smoke mode requires a unique absolute `--data-dir`, uses only synthetic
-accounts, and disables authentication, notifications and login startup.
+accounts, and disables authentication, notification delivery/permission prompts,
+and login startup. It reads the app's current native notification settings to
+exercise completion-handler threading; it does not change permissions.
 The smoke launcher uses a temporary directory and a bounded subprocess
 lifetime, then deletes its synthetic data. Render snapshots demonstrate view
 creation, not pixel-perfect layout or VoiceOver correctness; AppKit snapshots

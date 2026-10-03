@@ -47,9 +47,9 @@ protocol NotificationService {
 @MainActor
 final class NativeNotifications: NotificationService {
     func status() async -> NotificationPermission {
-        // Transfer values only; older Apple SDKs do not make notification objects Sendable.
+        // Older SDKs omit Sendable on these callbacks; macOS invokes them off the main actor.
         await withCheckedContinuation { continuation in
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
+            UNUserNotificationCenter.current().getNotificationSettings { @Sendable settings in
                 let permission: NotificationPermission
                 switch settings.authorizationStatus {
                 case .notDetermined: permission = .notDetermined
@@ -65,7 +65,7 @@ final class NativeNotifications: NotificationService {
 
     func requestAuthorization() async throws {
         let _: Bool = try await withCheckedThrowingContinuation { continuation in
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { allowed, error in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { @Sendable allowed, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume(returning: allowed) }
             }
@@ -82,7 +82,7 @@ final class NativeNotifications: NotificationService {
         if let key { content.userInfo = ["accountKey": key] }
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            UNUserNotificationCenter.current().add(request) { error in
+            UNUserNotificationCenter.current().add(request) { @Sendable error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }

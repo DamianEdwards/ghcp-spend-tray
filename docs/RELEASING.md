@@ -255,7 +255,8 @@ keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
 and build outputs are never cached. Builds and publishes remain sequential
 within each checkout. Mac runners also cache NuGet packages by architecture.
 The final **Verification** job requires both Windows jobs for Windows-relevant
-changes, both Mac runners for Mac-relevant changes, and Markdown lint when
+changes, both Mac build runners plus macOS 26 runtime compatibility for
+Mac-relevant changes, and Markdown lint when
 applicable. Every unneeded job must be skipped; missing or invalid routing
 decisions fail closed. Failed change detection or Markdown
 lint, cancelled jobs and unexpected skips fail the gate. Branch protection

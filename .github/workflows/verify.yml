@@ -186,9 +186,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  macos_runtime:
+    name: macOS 26 runtime compatibility
+    needs: [changes, macos]
+    if: needs.changes.outputs.macos == 'true'
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: macos-development
+          path: artifacts/macos-runtime
+      - name: Launch the macOS 15-built app on macOS 26
+        run: |
+          ditto -x -k artifacts/macos-runtime/GHCPSpendTray-development.zip artifacts/macos-runtime
+          python3 tools/macos/smoke-test.py artifacts/macos-runtime/GHCPSpendTray.app
+
   verify:
     name: Verification
-    needs: [changes, markdown, tests, package, macos]
+    needs: [changes, markdown, tests, package, macos, macos_runtime]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -4,6 +4,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 
@@ -16,7 +17,12 @@ def smoke(app, architecture=None):
                 command.append("--demo-empty")
             if architecture:
                 command = ["arch", f"-{architecture}", *command]
-            subprocess.run(command, check=True, timeout=90)
+            process = subprocess.run(command, timeout=90, capture_output=True, text=True)
+            print(process.stdout, end="")
+            print(process.stderr, end="", file=sys.stderr)
+            process.check_returncode()
+            if "PASS: native notification settings callback." not in process.stdout:
+                raise RuntimeError("The app did not exercise its native notification settings callback.")
             result = Path(directory, "smoke-result.txt").read_text()
             if not result.startswith("PASS:"):
                 raise RuntimeError("The application did not complete its smoke assertions.")

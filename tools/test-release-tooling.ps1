@@ -38,9 +38,10 @@ foreach ($windows in @('true', 'false')) {
                 tests = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
                 package = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
                 macos = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                macos_runtime = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
                 markdown = @{ result = $(if ($markdown -eq 'true') { 'success' } else { 'skipped' }) }
             }
-            foreach ($job in @('changes', 'tests', 'package', 'macos', 'markdown')) {
+            foreach ($job in @('changes', 'tests', 'package', 'macos', 'macos_runtime', 'markdown')) {
                 $original = $needs[$job].result
                 foreach ($result in $results) {
                     $needs[$job].result = $result

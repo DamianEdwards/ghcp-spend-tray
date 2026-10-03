@@ -11,7 +11,11 @@ foreach ($platform in @('windows', 'macos', 'markdown')) {
         'false' { 'skipped' }
         default { throw "Missing or invalid $platform change decision." }
     }
-    $jobs = if ($platform -eq 'windows') { @('tests', 'package') } else { @($platform) }
+    $jobs = switch ($platform) {
+        'windows' { @('tests', 'package') }
+        'macos' { @('macos', 'macos_runtime') }
+        default { @($platform) }
+    }
     foreach ($job in $jobs) {
         if ($needs.$job.result -cne $expected) {
             throw "Verification job '$job' must be '$expected', but was '$($needs.$job.result)'."

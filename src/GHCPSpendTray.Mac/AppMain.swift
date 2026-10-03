@@ -228,6 +228,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private func runSmoke(_ model: AppModel) async {
         do {
             try await waitUntil { model.initialized && !model.busy }
+            // Read-only native callback coverage: no permission prompt, alert, or account access.
+            _ = await NativeNotifications().status()
+            print("PASS: native notification settings callback.")
             guard model.error == nil, let dashboard = model.dashboard,
                   dashboard.accounts.count == (empty ? 0 : 2),
                   dashboard.consumptionUsd == (empty ? nil : Decimal(string: "42.75")),
