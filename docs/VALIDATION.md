@@ -399,6 +399,10 @@ interior, and unchanged pixels outside the warning corner. Unavailable pie
 and partial-usage indicators share this badge; unavailable percentage mode
 still shows `?`, and genuine zero usage remains an unbadged empty pie.
 
+Live menu-bar comparison (original on the left, circular badge on the right):
+
+![Original and updated macOS tray warning badges](images/macos-tray-warning-before-after.png)
+
 Reproduce current Apple-silicon-only verification with
 `bash tools/macos/verify.sh` on a native arm64 Mac. There is no Intel slice
 or Rosetta smoke path in current builds.
