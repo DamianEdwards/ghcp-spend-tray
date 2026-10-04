@@ -36,8 +36,14 @@ internal static class Program
             using var runtime = Bootstrap.Start(bootstrapArgs);
             if (runtime is null) return 0;
             Diagnostics.Initialize(runtime.DataDirectory);
+            if (smoke)
+            {
+                File.WriteAllText(Path.Combine(runtime.DataDirectory, "native-smoke-progress.txt"), "");
+                RecordSmokePhase(runtime.DataDirectory, "Bootstrap complete; initializing Reactor");
+            }
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
-            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo) :
+            var smokeTime = smoke ? new SmokeTimeProvider() : null;
+            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime) :
                 new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
             int smokeExit = 0;
             ReactorShell? shell = null;
@@ -46,6 +52,7 @@ internal static class Program
             {
                 ReactorApp.Run(context =>
                 {
+                    if (smoke) RecordSmokePhase(runtime.DataDirectory, "Reactor initialized; creating tray shell");
                     shell = new ReactorShell(controller);
                     Application.Current.UnhandledException += (_, e) =>
                     {
@@ -63,7 +70,8 @@ internal static class Program
                     runtime.RegisterActivationCallback(() => shell.Session.Post(shell.ShowFlyout));
                     shell.Start(!smoke && !runtime.IsStartup);
                     runtime.SignalReady();
-                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, code => smokeExit = code);
+                    if (smoke) RecordSmokePhase(runtime.DataDirectory, "Tray shell ready; starting synthetic smoke");
+                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, code => smokeExit = code);
                 });
             }
             finally { shell?.Dispose(); }
@@ -73,23 +81,30 @@ internal static class Program
         {
             Diagnostics.Record($"Application startup failed ({ex.GetType().Name}).");
             // Bootstrap errors are locally produced and contain no authentication payloads.
-            Win32.MessageBox(0, ex.Message, "GHCPSpendTray could not start", Win32.MB_ICONERROR);
+            if (!smoke)
+                Win32.MessageBox(0, ex.Message, "GHCPSpendTray could not start", Win32.MB_ICONERROR);
             return 1;
         }
     }
 
-    private static async Task RunSmokeAsync(ReactorShell shell, string directory, Action<int> setExit)
+    private static void RecordSmokePhase(string directory, string phase) =>
+        File.AppendAllText(Path.Combine(directory, "native-smoke-progress.txt"),
+            $"{DateTimeOffset.UtcNow:O} {phase}{Environment.NewLine}");
+
+    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time, Action<int> setExit)
     {
         try
         {
             if (PackageContext.IsPackaged)
             {
+                RecordSmokePhase(directory, "Checking package startup task and data directory");
                 var startup = await StartupRegistration.CreateAsync();
                 if (startup.Enabled)
                     throw new InvalidOperationException("Fresh development package unexpectedly enables login startup.");
                 if (!InstallationPaths.SamePath(directory, PackageContext.DataDirectory))
                     throw new InvalidOperationException("Packaged smoke test did not use package-local storage.");
             }
+            RecordSmokePhase(directory, "Testing tray mouse/keyboard activation and settings navigation");
             await Task.Delay(1800);
             await OnUI(shell, () =>
             {
@@ -162,7 +177,10 @@ internal static class Program
                 if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
                     throw new InvalidOperationException("Usage page still displayed sampled spending history.");
             });
+            RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
+            await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
+            RecordSmokePhase(directory, "Testing flyout focus transitions and account onboarding");
             await OnUI(shell, () => SendTraySelection(shell, 0x401));
             await Task.Delay(250);
             await OnUI(shell, () =>
@@ -277,7 +295,9 @@ internal static class Program
                 });
                 await Task.Delay(300);
             }
+            RecordSmokePhase(directory, "Testing tray settings, preview and callback lifecycle");
             await SmokeTraySettingsAsync(shell);
+            RecordSmokePhase(directory, "Testing settings close/reopen and native notification/credentials");
             await OnUI(shell, () => shell.SettingsWindow!.NativeWindow.Close());
             await Task.Delay(300);
             await OnUI(shell, () =>
@@ -293,9 +313,11 @@ internal static class Program
                 if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
+                RecordSmokePhase(directory, "All synthetic smoke assertions passed; exiting Reactor");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
                     "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
                     "Reactor cost flyout, usage-first settings without sampled chart, independent collapsed account diagnostics, " +
+                    "per-account estimate opt-in/off/unavailable, UTC disclosure and unchanged observed totals/tray, " +
                     "account avatars and diagnostics, add-account deep link, " +
                     "account Back controls and scoped keyboard accelerator registration, native controls, " +
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
@@ -309,8 +331,210 @@ internal static class Program
         catch (Exception ex)
         {
             setExit(1);
+            RecordSmokePhase(directory, $"Smoke failed ({ex.GetType().Name})");
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
+        }
+    }
+    private sealed class SmokeTimeProvider : TimeProvider
+    {
+        internal DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+    private static async Task SmokePeriodEstimateAsync(ReactorShell shell, SmokeTimeProvider time, Action<string> phase)
+    {
+        if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        phase("Estimates: loading account preferences");
+        var account = shell.Session.Dashboard.Accounts[0];
+        string key = account.Key;
+        var start = new DateTimeOffset(time.Now.Year, time.Now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var trayBefore = shell.Session.Dashboard.Tray!.RollUp;
+        string amount = UI.UI.ApproximateMoney(26.25m * (start.AddMonths(1) - start).Days / 3m);
+        await OnUI(shell, () => shell.Session.EditAccount(key));
+        await Task.Delay(150);
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "PeriodEstimate") is not null || Find(window, "PeriodEstimateDisclosure") is not null ||
+                Find(window, "ShowPeriodEstimate") is not CheckBox { IsChecked: false } preference)
+                throw new InvalidOperationException("Period estimate must be off by default and absent, not zero.");
+            time.Now = start.AddDays(3);
+            preference.IsChecked = true;
+        });
+        await Task.Delay(100);
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Controller.AccountSettings(key).ShowPeriodEstimate ||
+                Find(shell.SettingsWindow!, "PeriodEstimate") is not null)
+                throw new InvalidOperationException("Draft forecast opt-in changed saved usage before Save.");
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveAccount")!);
+        });
+        phase("Estimates: saving opt-in and checking account row");
+        await WaitForAccountSave();
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            AssertEstimateRow(window, "", amount);
+            if (Find(window, "PeriodEstimateWarning") is null ||
+                Find(window, "PeriodEstimateDisclosure") is not null ||
+                Find(window, "AccountConsumption") is not TextBlock { Text: "$26.25" } ||
+                shell.Session.Dashboard.ConsumptionUsd != 42.75m || shell.Session.Dashboard.Accounts[0].Percent != 105m ||
+                shell.Session.Dashboard.Tray!.RollUp != trayBefore)
+                throw new InvalidOperationException("Estimate row, collapsed disclosure or observed usage contract failed.");
+            ExpandDetails(window, "AdvancedAccountDetails");
+        });
+        await Task.Delay(150);
+        phase("Estimates: checking expanded account details");
+        await OnUI(shell, () =>
+        {
+            AssertEstimateDisclosure(shell.SettingsWindow!, "", amount);
+            shell.Session.Navigate(SettingsPage.Usage);
+        });
+        await Task.Delay(100);
+        phase("Estimates: checking Usage row");
+        await OnUI(shell, () =>
+        {
+            AssertEstimateRow(shell.SettingsWindow!, key + "_", amount);
+            if (Find(shell.SettingsWindow!, "example.ghe.com:2_PeriodEstimate") is not null)
+                throw new InvalidOperationException("Usage estimates are missing or not independently opt-in.");
+            ExpandDetails(shell.SettingsWindow!, key + "_AdvancedAccountDetails");
+        });
+        await Task.Delay(150);
+        phase("Estimates: checking expanded Usage details");
+        await OnUI(shell, () =>
+        {
+            AssertEstimateDisclosure(shell.SettingsWindow!, key + "_", amount);
+            shell.ShowFlyout();
+        });
+        await WaitForFlyoutVisibility(shell, true, "with account estimate enabled");
+        phase("Estimates: checking flyout row");
+        await Task.Delay(100);
+        await OnUI(shell, () =>
+        {
+            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount);
+            if (Find(shell.Flyout!, "example.ghe.com:2_Flyout_PeriodEstimate") is not null ||
+                Find(shell.Flyout!, "TotalConsumption") is not TextBlock { Text: "$42.75" })
+                throw new InvalidOperationException("Flyout estimate changed observed totals or another account.");
+            time.Now = start.AddHours(12);
+            shell.Session.EditAccount(key);
+            shell.Session.Refresh();
+        });
+        phase("Estimates: refreshing unavailable observation");
+        await WaitForIdle();
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            AssertEstimateRow(window, "", "Unavailable");
+            if (Find(window, "PeriodEstimateAmount") is not TextBlock { Text: "Unavailable" } ||
+                Find(window, "PeriodEstimateContext") is not TextBlock reason || !reason.Text.Contains("24 hours") ||
+                Find(window, "PeriodEstimateWarning") is not null || Find(window, "PeriodEstimateDisclosure") is not null ||
+                Find(window, "ShowPeriodEstimate") is not CheckBox { IsChecked: true } preference)
+                throw new InvalidOperationException("Unavailable forecast lost its opt-in, reason or collapsed disclosure.");
+            preference.IsChecked = false;
+            ExpandDetails(window, "AdvancedAccountDetails");
+        });
+        await Task.Delay(150);
+        phase("Estimates: checking expanded unavailable reason");
+        await OnUI(shell, () =>
+        {
+            AssertEstimateDisclosure(shell.SettingsWindow!, "", "Unavailable");
+            if (Find(shell.SettingsWindow!, "PeriodEstimateUnavailable") is not TextBlock reason || !reason.Text.Contains("24 hours"))
+                throw new InvalidOperationException("Expanded estimate details lost the unavailable reason.");
+        });
+        await Task.Delay(100);
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "PeriodEstimate") is null)
+                throw new InvalidOperationException("Draft disable hid the forecast before Save.");
+            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveAccount")!);
+        });
+        phase("Estimates: saving explicit disable");
+        await WaitForAccountSave();
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "PeriodEstimate") is not null ||
+                Find(shell.SettingsWindow!, "PeriodEstimateDisclosure") is not null)
+                throw new InvalidOperationException("Explicit disable did not omit the estimate and disclosure.");
+            time.Now = DateTimeOffset.UtcNow;
+            shell.Session.Refresh();
+        });
+        await WaitForIdle();
+        await OnUI(shell, () => shell.Session.Navigate(SettingsPage.Usage));
+        await Task.Delay(100);
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, key + "_PeriodEstimate") is not null)
+                throw new InvalidOperationException("Disabled forecast remained in Usage.");
+            shell.ShowFlyout();
+        });
+        await WaitForFlyoutVisibility(shell, true, "after disabling the account estimate");
+        phase("Estimates: checking disabled flyout row");
+        await Task.Delay(100);
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.Flyout!, key + "_Flyout_PeriodEstimate") is not null)
+                throw new InvalidOperationException("Disabled forecast remained in the flyout.");
+            shell.ShowSettings(SettingsPage.Usage);
+        });
+
+        static void ExpandDetails(ReactorWindow window, string id)
+        {
+            if (Find(window, id) is not Expander advanced ||
+                new ExpanderAutomationPeer(advanced).GetPattern(PatternInterface.ExpandCollapse) is not IExpandCollapseProvider expand)
+                throw new InvalidOperationException("Estimate disclosure is not keyboard/screen-reader accessible.");
+            expand.Expand();
+        }
+        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected)
+        {
+            if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
+                Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||
+                Find(window, prefix + "PeriodEstimateAmount") is not TextBlock amount || amount.Text != expected ||
+                AutomationProperties.GetLabeledBy(amount) != label ||
+                ToolTipService.GetToolTip(row) is null)
+                throw new InvalidOperationException("Compact estimate label, amount, help or accessibility association is missing.");
+            var labelOrigin = label.TransformToVisual(row).TransformPoint(new(0, 0));
+            var amountOrigin = amount.TransformToVisual(row).TransformPoint(new(0, 0));
+            if (row.ActualWidth <= 0 || Math.Abs(labelOrigin.Y - amountOrigin.Y) > 1 ||
+                amountOrigin.X < labelOrigin.X + label.ActualWidth ||
+                Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) > 1 ||
+                amount.FontSize >= 21)
+                throw new InvalidOperationException("Estimate is not a secondary, right-aligned row like the macOS reference.");
+        }
+        static void AssertEstimateDisclosure(ReactorWindow window, string prefix, string expected)
+        {
+            if (Find(window, prefix + "PeriodEstimateDisclosure") is null ||
+                Find(window, prefix + "PeriodEstimateMethod") is not TextBlock method || !method.Text.Contains("not an invoice") ||
+                Find(window, prefix + "PeriodEstimateDetailAmount") is not TextBlock amount || amount.Text != expected ||
+                Find(window, prefix + "PeriodEstimateDaily") is null ||
+                Find(window, prefix + "PeriodEstimateStart") is not TextBlock boundary || !boundary.Text.EndsWith("00:00:00 UTC") ||
+                Find(window, prefix + "PeriodEstimateReset") is null ||
+                Find(window, prefix + "PeriodEstimateObserved") is null)
+                throw new InvalidOperationException("Expanded Advanced information lost estimate method, amount or UTC diagnostics.");
+        }
+
+        async Task WaitForAccountSave()
+        {
+            await WaitForIdle();
+            await OnUI(shell, () =>
+            {
+                if (shell.Session.Notice != "Account settings saved.")
+                    throw new InvalidOperationException("Account estimate preference was not saved.");
+            });
+        }
+        async Task WaitForIdle()
+        {
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                bool ready = false;
+                await OnUI(shell, () =>
+                {
+                    if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
+                    ready = !shell.Session.Busy;
+                });
+                if (ready) { await Task.Delay(100); return; }
+                await Task.Delay(30);
+            }
+            throw new TimeoutException("Account estimate operation did not complete.");
         }
     }
     private static async Task SmokeUsageDisclosureAsync(ReactorShell shell)

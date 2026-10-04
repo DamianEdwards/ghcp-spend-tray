@@ -134,7 +134,8 @@ jobs:
                   & $makeappx unpack /p ".\artifacts\$directory\packages\GHCPSpendTray-0.1.0-x64.msix" `
                     /d $layout /o | Out-Null
                   if ($LASTEXITCODE -ne 0) { throw "Cannot extract packaged smoke-test payload: $directory" }
-                  .\tools\smoke-test-package.ps1 -Layout $layout
+                  .\tools\smoke-test-package.ps1 -Layout $layout `
+                    -DiagnosticsDirectory (Join-Path $logDirectory $directory)
               }
           }
           finally { Stop-Transcript }

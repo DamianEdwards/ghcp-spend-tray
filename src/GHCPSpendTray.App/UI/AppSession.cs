@@ -63,6 +63,7 @@ internal sealed class AppSession : IDisposable
     internal string AccountThresholds { get; set; } = "";
     internal string AccountIncrement { get; set; } = "";
     internal bool InheritIncrement { get; set; } = true;
+    internal bool ShowPeriodEstimate { get; set; }
 
     internal AppSession(IApplicationController controller, Action<Action> dispatch)
     {
@@ -139,6 +140,7 @@ internal sealed class AppSession : IDisposable
             DisplayName = account.DisplayName; AccountThresholds = account.Thresholds;
             InheritIncrement = account.SpendIncrementUsd is null;
             AccountIncrement = account.SpendIncrementUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
+            ShowPeriodEstimate = account.ShowPeriodEstimate;
             Page = SettingsPage.Accounts; Error = null; Notice = null;
             OpenSettings?.Invoke(SettingsPage.Accounts); Notify();
         }
@@ -224,7 +226,9 @@ internal sealed class AppSession : IDisposable
         if (!InheritIncrement && !TryAmount(AccountIncrement, out amount)) return;
         if (!InheritIncrement) amount ??= 0;
         string name = DisplayName, thresholds = AccountThresholds;
-        Run(() => Controller.SaveAccountAsync(key, name, thresholds, amount), () => Notice = "Account settings saved.");
+        bool showPeriodEstimate = ShowPeriodEstimate;
+        Run(() => Controller.SaveAccountAsync(key, name, thresholds, amount, showPeriodEstimate),
+            () => Notice = "Account settings saved.");
     }
     private bool TryAmount(string text, out decimal? amount)
     {
