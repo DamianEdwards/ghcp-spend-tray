@@ -361,6 +361,15 @@ build. Normal verification and release builds still compile both components
 with the same script. Analysis does not require production signing credentials
 or run the application.
 
+CodeQL's bundled Clang importer cannot consume the bridging-header PCH produced
+by Apple Clang (`PCH file ... built from a different branch`). During Swift
+CodeQL extraction only, the shared build script passes the supported
+`-disable-bridging-pch` driver flag so both compilers parse the original
+`Bridge.h`. Normal verification and release builds retain their usual PCH
+behavior. Failed Swift scans retain extractor diagnostics and the build-tracer
+log for seven days; a successful app build alone does not prove successful
+CodeQL extraction.
+
 GitHub's default setup cannot discover our command-line Swift build: there is
 no Xcode project/workspace or Swift package. It also detects `Bridge.h` as C/C++
 but fails extraction because the header only declares the C ABI implemented

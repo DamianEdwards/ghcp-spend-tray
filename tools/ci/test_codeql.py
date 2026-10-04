@@ -46,6 +46,14 @@ class CodeQLTests(unittest.TestCase):
         self.assertIn("src/GHCPSpendTray.Mac/*.swift", build)
         self.assertIn("bash tools/macos/test-package.sh", build)
 
+    def test_only_codeql_builds_disable_apple_bridging_pch(self):
+        build = (ROOT / "tools/macos/build.sh").read_text()
+        self.assertIn("swift_options=()", build)
+        options = build.split('if [[ -n "${CODEQL_EXTRACTOR_SWIFT_ROOT:-}" ]]; then\n', 1)[1].split("\nfi\n", 1)[0]
+        self.assertIn("swift_options+=(-disable-bridging-pch)", options)
+        self.assertIn('xcrun swiftc "${swift_options[@]}"', build)
+        self.assertIn("-import-objc-header src/GHCPSpendTray.Mac/Bridge.h", build)
+
     def test_scans_only_on_schedule_or_manual_dispatch(self):
         triggers = self.workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertEqual(re.findall(r"^  ([a-z_]+):", triggers, re.MULTILINE),

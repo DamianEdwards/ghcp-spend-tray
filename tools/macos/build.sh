@@ -32,7 +32,12 @@ if [[ "$build_mode" == bridge-only ]]; then
     echo "Built Apple-silicon-only Native AOT bridge: $output/GHCPSpendTray.MacBridge.dylib"
     exit 0
 fi
-xcrun swiftc -swift-version 6 -warnings-as-errors -O -g \
+swift_options=()
+if [[ -n "${CODEQL_EXTRACTOR_SWIFT_ROOT:-}" ]]; then
+    # CodeQL's Clang importer cannot read an Apple-Clang bridging PCH.
+    swift_options+=(-disable-bridging-pch)
+fi
+xcrun swiftc "${swift_options[@]}" -swift-version 6 -warnings-as-errors -O -g \
     -target arm64-apple-macos15.0 \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     src/GHCPSpendTray.Mac/*.swift \
