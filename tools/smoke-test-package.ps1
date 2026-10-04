@@ -1,5 +1,8 @@
 # Run in Windows PowerShell 5.1 with Developer Mode already enabled.
-param([string] $Layout = "$PSScriptRoot\..\artifacts\msix\x64")
+param(
+    [string] $Layout = "$PSScriptRoot\..\artifacts\msix\x64",
+    [string] $DiagnosticsDirectory
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $layoutPath = (Resolve-Path -LiteralPath $Layout).Path
@@ -40,23 +43,35 @@ try {
     $result = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalState\Data\native-smoke-result.txt"
     foreach ($arguments in @('--package-smoke-test', '--package-smoke-test --demo-empty')) {
         if (Test-Path -LiteralPath $result) { Remove-Item -LiteralPath $result -Force }
-        $processId = [PackageSmokeActivation]::Launch("$($package.PackageFamilyName)!App", $arguments)
-        $process = Get-Process -Id $processId
-        # Retain the native handle so ExitCode remains available after a fast startup crash.
-        $null = $process.Handle
-        if (-not $process.WaitForExit(45000)) {
-            Stop-Process -Id $processId
-            throw "Packaged smoke test timed out ($arguments)."
+        $dataDirectory = Split-Path $result -Parent
+        $progress = Join-Path $dataDirectory 'native-smoke-progress.txt'
+        if (Test-Path -LiteralPath $progress) { Remove-Item -LiteralPath $progress -Force }
+        try {
+            $processId = [PackageSmokeActivation]::Launch("$($package.PackageFamilyName)!App", $arguments)
+            $process = Get-Process -Id $processId
+            # Retain the native handle so ExitCode remains available after a fast startup crash.
+            $null = $process.Handle
+            if (-not $process.WaitForExit(45000)) {
+                Stop-Process -Id $processId
+                throw "Packaged smoke test timed out ($arguments)."
+            }
+            if (-not (Test-Path -LiteralPath $result)) {
+                throw "No packaged smoke result ($arguments). Exit code: $($process.ExitCode)"
+            }
+            $text = Get-Content -LiteralPath $result -Raw
+            if (-not $text.StartsWith('PASS:')) { throw $text }
+            if ($process.ExitCode -ne 0) { throw "Packaged smoke process failed ($arguments). Exit code: $($process.ExitCode)" }
+            Write-Output $text
         }
-        if (-not (Test-Path -LiteralPath $result)) {
-            throw "No packaged smoke result ($arguments). Exit code: $($process.ExitCode)"
+        finally {
+            if ($null -ne $process -and -not $process.HasExited) { Stop-Process -Id $process.Id }
+            if ($DiagnosticsDirectory) {
+                $scenario = if ($arguments -match '--demo-empty') { 'empty' } else { 'populated' }
+                & "$PSScriptRoot\export-smoke-diagnostics.ps1" -DataDirectory $dataDirectory `
+                    -Destination (Join-Path $DiagnosticsDirectory $scenario)
+            }
+            if ($null -ne $process) { $process.Dispose(); $process = $null }
         }
-        $text = Get-Content -LiteralPath $result -Raw
-        if (-not $text.StartsWith('PASS:')) { throw $text }
-        if ($process.ExitCode -ne 0) { throw "Packaged smoke process failed ($arguments). Exit code: $($process.ExitCode)" }
-        Write-Output $text
-        $process.Dispose()
-        $process = $null
     }
     Write-Output 'PASS: packaged activation, package-local data and disabled Windows StartupTask.'
 }

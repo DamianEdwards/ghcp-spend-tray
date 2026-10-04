@@ -36,6 +36,11 @@ internal static class Program
             using var runtime = Bootstrap.Start(bootstrapArgs);
             if (runtime is null) return 0;
             Diagnostics.Initialize(runtime.DataDirectory);
+            if (smoke)
+            {
+                File.WriteAllText(Path.Combine(runtime.DataDirectory, "native-smoke-progress.txt"), "");
+                RecordSmokePhase(runtime.DataDirectory, "Bootstrap complete; initializing Reactor");
+            }
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
             using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime) :
@@ -47,6 +52,7 @@ internal static class Program
             {
                 ReactorApp.Run(context =>
                 {
+                    if (smoke) RecordSmokePhase(runtime.DataDirectory, "Reactor initialized; creating tray shell");
                     shell = new ReactorShell(controller);
                     Application.Current.UnhandledException += (_, e) =>
                     {
@@ -64,6 +70,7 @@ internal static class Program
                     runtime.RegisterActivationCallback(() => shell.Session.Post(shell.ShowFlyout));
                     shell.Start(!smoke && !runtime.IsStartup);
                     runtime.SignalReady();
+                    if (smoke) RecordSmokePhase(runtime.DataDirectory, "Tray shell ready; starting synthetic smoke");
                     if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, code => smokeExit = code);
                 });
             }
@@ -74,10 +81,15 @@ internal static class Program
         {
             Diagnostics.Record($"Application startup failed ({ex.GetType().Name}).");
             // Bootstrap errors are locally produced and contain no authentication payloads.
-            Win32.MessageBox(0, ex.Message, "GHCPSpendTray could not start", Win32.MB_ICONERROR);
+            if (!smoke)
+                Win32.MessageBox(0, ex.Message, "GHCPSpendTray could not start", Win32.MB_ICONERROR);
             return 1;
         }
     }
+
+    private static void RecordSmokePhase(string directory, string phase) =>
+        File.AppendAllText(Path.Combine(directory, "native-smoke-progress.txt"),
+            $"{DateTimeOffset.UtcNow:O} {phase}{Environment.NewLine}");
 
     private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time, Action<int> setExit)
     {
@@ -85,12 +97,14 @@ internal static class Program
         {
             if (PackageContext.IsPackaged)
             {
+                RecordSmokePhase(directory, "Checking package startup task and data directory");
                 var startup = await StartupRegistration.CreateAsync();
                 if (startup.Enabled)
                     throw new InvalidOperationException("Fresh development package unexpectedly enables login startup.");
                 if (!InstallationPaths.SamePath(directory, PackageContext.DataDirectory))
                     throw new InvalidOperationException("Packaged smoke test did not use package-local storage.");
             }
+            RecordSmokePhase(directory, "Testing tray mouse/keyboard activation and settings navigation");
             await Task.Delay(1800);
             await OnUI(shell, () =>
             {
@@ -163,8 +177,10 @@ internal static class Program
                 if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
                     throw new InvalidOperationException("Usage page still displayed sampled spending history.");
             });
+            RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
-            await SmokePeriodEstimateAsync(shell, time);
+            await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
+            RecordSmokePhase(directory, "Testing flyout focus transitions and account onboarding");
             await OnUI(shell, () => SendTraySelection(shell, 0x401));
             await Task.Delay(250);
             await OnUI(shell, () =>
@@ -279,7 +295,9 @@ internal static class Program
                 });
                 await Task.Delay(300);
             }
+            RecordSmokePhase(directory, "Testing tray settings, preview and callback lifecycle");
             await SmokeTraySettingsAsync(shell);
+            RecordSmokePhase(directory, "Testing settings close/reopen and native notification/credentials");
             await OnUI(shell, () => shell.SettingsWindow!.NativeWindow.Close());
             await Task.Delay(300);
             await OnUI(shell, () =>
@@ -295,6 +313,7 @@ internal static class Program
                 if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
+                RecordSmokePhase(directory, "All synthetic smoke assertions passed; exiting Reactor");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
                     "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
                     "Reactor cost flyout, usage-first settings without sampled chart, independent collapsed account diagnostics, " +
@@ -312,6 +331,7 @@ internal static class Program
         catch (Exception ex)
         {
             setExit(1);
+            RecordSmokePhase(directory, $"Smoke failed ({ex.GetType().Name})");
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
@@ -321,9 +341,10 @@ internal static class Program
         internal DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
     }
-    private static async Task SmokePeriodEstimateAsync(ReactorShell shell, SmokeTimeProvider time)
+    private static async Task SmokePeriodEstimateAsync(ReactorShell shell, SmokeTimeProvider time, Action<string> phase)
     {
         if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        phase("Estimates: loading account preferences");
         var account = shell.Session.Dashboard.Accounts[0];
         string key = account.Key;
         var start = new DateTimeOffset(time.Now.Year, time.Now.Month, 1, 0, 0, 0, TimeSpan.Zero);
@@ -348,6 +369,7 @@ internal static class Program
                 throw new InvalidOperationException("Draft forecast opt-in changed saved usage before Save.");
             InvokeButton((Button)Find(shell.SettingsWindow!, "SaveAccount")!);
         });
+        phase("Estimates: saving opt-in and checking account row");
         await WaitForAccountSave();
         await OnUI(shell, () =>
         {
@@ -362,12 +384,14 @@ internal static class Program
             ExpandDetails(window, "AdvancedAccountDetails");
         });
         await Task.Delay(150);
+        phase("Estimates: checking expanded account details");
         await OnUI(shell, () =>
         {
             AssertEstimateDisclosure(shell.SettingsWindow!, "", amount);
             shell.Session.Navigate(SettingsPage.Usage);
         });
         await Task.Delay(100);
+        phase("Estimates: checking Usage row");
         await OnUI(shell, () =>
         {
             AssertEstimateRow(shell.SettingsWindow!, key + "_", amount);
@@ -376,12 +400,14 @@ internal static class Program
             ExpandDetails(shell.SettingsWindow!, key + "_AdvancedAccountDetails");
         });
         await Task.Delay(150);
+        phase("Estimates: checking expanded Usage details");
         await OnUI(shell, () =>
         {
             AssertEstimateDisclosure(shell.SettingsWindow!, key + "_", amount);
             shell.ShowFlyout();
         });
         await WaitForFlyoutVisibility(shell, true, "with account estimate enabled");
+        phase("Estimates: checking flyout row");
         await Task.Delay(100);
         await OnUI(shell, () =>
         {
@@ -393,6 +419,7 @@ internal static class Program
             shell.Session.EditAccount(key);
             shell.Session.Refresh();
         });
+        phase("Estimates: refreshing unavailable observation");
         await WaitForIdle();
         await OnUI(shell, () =>
         {
@@ -407,6 +434,7 @@ internal static class Program
             ExpandDetails(window, "AdvancedAccountDetails");
         });
         await Task.Delay(150);
+        phase("Estimates: checking expanded unavailable reason");
         await OnUI(shell, () =>
         {
             AssertEstimateDisclosure(shell.SettingsWindow!, "", "Unavailable");
@@ -420,6 +448,7 @@ internal static class Program
                 throw new InvalidOperationException("Draft disable hid the forecast before Save.");
             InvokeButton((Button)Find(shell.SettingsWindow!, "SaveAccount")!);
         });
+        phase("Estimates: saving explicit disable");
         await WaitForAccountSave();
         await OnUI(shell, () =>
         {
@@ -439,6 +468,7 @@ internal static class Program
             shell.ShowFlyout();
         });
         await WaitForFlyoutVisibility(shell, true, "after disabling the account estimate");
+        phase("Estimates: checking disabled flyout row");
         await Task.Delay(100);
         await OnUI(shell, () =>
         {

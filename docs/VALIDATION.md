@@ -38,6 +38,31 @@ controls and geometry checks, not proof of pixel-identical cross-platform
 appearance, screen-reader behavior or forecast accuracy. ARM64 execution,
 theme/accessibility review and real-provider semantics remain acceptance checks.
 
+### Packaged smoke timeout diagnostics
+
+PR #59 verification [run 37171108211](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37171108211)
+passed the managed/Native AOT harnesses, both macOS jobs and self-contained
+packaged populated/empty smoke. The first Store-packaged populated smoke timed
+out at the unchanged 45-second process limit. Its retained artifact contained
+only the launcher transcript, not application progress or diagnostics, so the
+stalled phase and root cause cannot be established from that run.
+
+The original Store x64 Native AOT build passed local populated/empty packaged
+activation with the resolved 2.5.1 runtime; that does not prove the CI timeout
+was fixed. Synthetic smoke now writes phase checkpoints, and CI copies only
+the result, phase progress and fixed-category diagnostic logs before removing
+the development registration, separated by packaging mode and scenario.
+Startup exceptions in smoke mode no longer open an unattended error dialog;
+ordinary app startup keeps its existing dialog. No timeout or UI assertion is
+relaxed and no retry-on-failure was added.
+
+PowerShell 5.1 regressions cover missing startup logs, phase-only timeout
+artifacts, assertion results, rotated logs and exclusion of account settings.
+Release-tooling checks, the Release solution build and all four managed
+harnesses passed. The instrumented Store x64 Native AOT app also passed both
+local packaged smoke scenarios, retained their final phase, and removed its
+isolated development registration. Hosted confirmation remains required.
+
 ## macOS per-account period estimates (October 3, 2026)
 
 Account preferences now include an off-by-default Show estimated period
