@@ -21,13 +21,30 @@ class CodeQLTests(unittest.TestCase):
         swift = re.search(r"- language: swift\n\s+runner: (\S+)\n\s+build-mode: (\S+)", self.workflow)
         self.assertIsNotNone(swift)
         self.assertEqual(swift.groups(), ("macos-26", "manual"))
+        bridge = self.workflow.index("run: bash tools/macos/build.sh --bridge-only")
         init = self.workflow.index("uses: github/codeql-action/init@")
-        build = self.workflow.index("run: bash tools/macos/build.sh")
+        build = self.workflow.index("run: bash tools/macos/build.sh --frontend-only")
         analyze = self.workflow.index("uses: github/codeql-action/analyze@")
+        self.assertLess(bridge, init)
         self.assertLess(init, build)
         self.assertLess(build, analyze)
         self.assertIn("global-json-file: global.json", self.workflow)
         self.assertIn("build-mode: ${{ matrix.build-mode }}", self.workflow)
+
+    def test_split_build_preserves_normal_build_and_checks_prerequisite(self):
+        build = (ROOT / "tools/macos/build.sh").read_text()
+        self.assertIn("build_mode=all", build)
+        self.assertIn('--bridge-only|--frontend-only) build_mode="${1#--}"; shift', build)
+        bridge = build.split('if [[ "$build_mode" != frontend-only ]]; then\n', 1)[1]
+        self.assertIn("dotnet publish src/GHCPSpendTray.MacBridge", bridge.split("\nfi\n", 1)[0])
+        self.assertIn('elif [[ ! -f "$output/GHCPSpendTray.MacBridge.dylib" ]]; then', bridge)
+        self.assertIn("exit 1", bridge.split("\nfi\n", 1)[0])
+        early_exit = build.split('if [[ "$build_mode" == bridge-only ]]; then\n', 1)[1].split("\nfi\n", 1)[0]
+        self.assertIn('architecture.py binary "$output/GHCPSpendTray.MacBridge.dylib"', early_exit)
+        self.assertIn("exit 0", early_exit)
+        self.assertLess(build.index(early_exit), build.index("xcrun swiftc"))
+        self.assertIn("src/GHCPSpendTray.Mac/*.swift", build)
+        self.assertIn("bash tools/macos/test-package.sh", build)
 
     def test_scans_only_on_schedule_or_manual_dispatch(self):
         triggers = self.workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]

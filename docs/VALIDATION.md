@@ -351,11 +351,15 @@ commit. CodeQL does not run automatically on pushes or pull requests; use
 **Actions > CodeQL > Run workflow** for an additional scan, such as before a
 release. This trades pre-merge CodeQL feedback for post-merge scheduled
 findings. The required **Verification** checks still run on PRs and main pushes.
-Swift analysis uses manual build
-mode on macOS, with `tools/macos/build.sh` running after CodeQL initialization
-so the extractor observes the real Swift compiler invocations. The pinned
-.NET SDK builds the in-process Native AOT bridge; analysis does not require
-production signing credentials or run the application.
+Swift analysis uses manual build mode on macOS. Before CodeQL initialization,
+`tools/macos/build.sh --bridge-only` uses the pinned .NET SDK to build the
+in-process Native AOT bridge. After initialization,
+`tools/macos/build.sh --frontend-only` compiles the real Swift frontend against
+that bridge, so the extractor observes the Swift compiler invocations without
+tracing the unrelated .NET/AOT build. A missing bridge is an error, not a skipped
+build. Normal verification and release builds still compile both components
+with the same script. Analysis does not require production signing credentials
+or run the application.
 
 GitHub's default setup cannot discover our command-line Swift build: there is
 no Xcode project/workspace or Swift package. It also detects `Bridge.h` as C/C++
@@ -369,6 +373,36 @@ workflow; default and advanced result uploads cannot coexist. Do not add a
 dummy C source, suppress extraction errors, or disable Swift scanning to make
 the check green. Add an appropriate C/C++ analysis job if native C/C++ sources
 are introduced later.
+
+## Dependency and repository security configuration
+
+Keep the dependency graph, automatic dependency submission, Dependabot alerts
+and Dependabot security updates enabled in GitHub repository settings.
+Automatic submission resolves the .NET dependency tree, including the shared
+engine and Mac bridge. The committed npm lock file supplies the artwork
+tooling's direct and transitive dependencies; GitHub also tracks the pinned
+Actions dependencies.
+
+`.github/dependabot.yml` schedules weekly Wednesday version updates for NuGet
+projects under `src` and `tests`, the pinned .NET SDK in `global.json`, GitHub
+Actions, and npm tooling under `tools`. Windows App SDK component updates stay
+grouped, as do Actions updates. SDK major and minor version updates remain
+ignored.
+
+The Swift frontend currently imports only Apple system frameworks and the
+local C ABI header. It has no `Package.swift`, `Package.resolved`, CocoaPods,
+or Carthage dependencies, so there is no separate Swift package graph or
+Dependabot update entry to configure. Add Swift Package Manager coverage when
+introducing external Swift packages. Xcode and Apple SDK updates require
+manual changes to the shared `.github/actions/setup-macos` toolchain and
+macOS verification; Dependabot does not update these toolchain pins.
+
+Keep secret scanning and push protection enabled. Actions use read-only
+default token permissions, require full-SHA action pins, and cannot approve
+pull requests. The main branch requires pull requests and the aggregate
+**Verification** check; the weekly/manual CodeQL scan is not a pre-merge gate.
+`tools/ci/test_dependabot.py` guards package coverage alongside the CodeQL
+workflow checks.
 
 ## macOS implementation evidence (October 1, 2026)
 

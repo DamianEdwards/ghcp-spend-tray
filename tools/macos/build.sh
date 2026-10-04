@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+build_mode=all
+case "${1:-}" in
+    --bridge-only|--frontend-only) build_mode="${1#--}"; shift ;;
+esac
 python3 tools/macos/architecture.py host
 
 version="${1:-$(cat packaging/macos/version.txt)}"
@@ -15,9 +19,19 @@ app="$PWD/artifacts/macos/GHCPSpendTray.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"
 
 output="$PWD/artifacts/macos/arm64"
-dotnet publish src/GHCPSpendTray.MacBridge -c Release -r osx-arm64 \
-    -p:IlcTreatWarningsAsErrors=true -o "$output" --nologo -v:q
-install_name_tool -id @rpath/GHCPSpendTray.MacBridge.dylib "$output/GHCPSpendTray.MacBridge.dylib"
+if [[ "$build_mode" != frontend-only ]]; then
+    dotnet publish src/GHCPSpendTray.MacBridge -c Release -r osx-arm64 \
+        -p:IlcTreatWarningsAsErrors=true -o "$output" --nologo -v:q
+    install_name_tool -id @rpath/GHCPSpendTray.MacBridge.dylib "$output/GHCPSpendTray.MacBridge.dylib"
+elif [[ ! -f "$output/GHCPSpendTray.MacBridge.dylib" ]]; then
+    echo "Build the Native AOT bridge with --bridge-only before using --frontend-only." >&2
+    exit 1
+fi
+if [[ "$build_mode" == bridge-only ]]; then
+    python3 tools/macos/architecture.py binary "$output/GHCPSpendTray.MacBridge.dylib"
+    echo "Built Apple-silicon-only Native AOT bridge: $output/GHCPSpendTray.MacBridge.dylib"
+    exit 0
+fi
 xcrun swiftc -swift-version 6 -warnings-as-errors -O -g \
     -target arm64-apple-macos15.0 \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
