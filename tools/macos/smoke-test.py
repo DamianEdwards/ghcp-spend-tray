@@ -6,17 +6,20 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from architecture import require_binary, require_host
 
 
-def smoke(app, architecture=None):
-    executable = Path(app).resolve() / "Contents/MacOS/GHCPSpendTray"
+def smoke(app):
+    require_host()
+    bundle = Path(app).resolve()
+    executable = bundle / "Contents/MacOS/GHCPSpendTray"
+    require_binary(executable)
+    require_binary(bundle / "Contents/Frameworks/GHCPSpendTray.MacBridge.dylib")
     for empty in (False, True):
         with tempfile.TemporaryDirectory(prefix="ghcp-mac-smoke-") as directory:
-            command = [str(executable), "--smoke-test", "--data-dir", directory]
+            command = ["arch", "-arm64", str(executable), "--smoke-test", "--data-dir", directory]
             if empty:
                 command.append("--demo-empty")
-            if architecture:
-                command = ["arch", f"-{architecture}", *command]
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
                 try:
                     stdout, stderr = process.communicate(timeout=90)
@@ -51,6 +54,5 @@ def smoke(app, architecture=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("app")
-    parser.add_argument("--arch", choices=["arm64", "x86_64"])
     args = parser.parse_args()
-    smoke(args.app, args.arch)
+    smoke(args.app)

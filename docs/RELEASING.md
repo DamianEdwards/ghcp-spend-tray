@@ -2,7 +2,7 @@
 
 Windows and macOS are independently versioned and released. Windows keeps
 the existing `v<version>` tags and MSIX/Store identity; macOS uses
-`macos-v<version>` tags and a universal Developer ID signed/notarized app.
+`macos-v<version>` tags and an Apple-silicon-only Developer ID signed/notarized app.
 Dispatch **Release** and choose a version bump independently for each platform.
 Only selected platforms build, request environment approval, and publish.
 Shared changes should normally receive a release on both platforms, but their
@@ -78,7 +78,7 @@ Do not run older copies of the pre-unification release workflows concurrently.
    **Package/Identity/Name**, **Package/Identity/Publisher**, and
    **Package/Properties/PublisherDisplayName**, plus the Store ID.
    These identity values are not necessarily the display name.
-4. For eventual Store packages, pass these exact values to `tools\package.ps1`.
+4. For eventual Store packages, pass these exact values to `tools\package.ps1 -Store`.
    The visible application name stays GHCPSpendTray.
 
 Reference: [Store product identity](https://learn.microsoft.com/windows/apps/publish/view-app-identity-details).
@@ -227,7 +227,9 @@ The app project copies these assets into each published payload.
 maps `Files/Assets/Square44x44Logo.png` to its size/theme candidates **and merges
 the generated `GHCPSpendTray.pri`**, including WinUI/Reactor XAML and localized
 resources, into the package's resource map. The original `GHCPSpendTray.pri`
-and `Reactor.pri` must also remain in the package. An icon-only `resources.pri`
+and `Reactor.pri` must also remain in the package. Store builds retain Reactor
+startup XAML here, but resolve WinUI's theme resources from the shared framework
+instead of copying them into the app. An icon-only `resources.pri`
 shadows runtime resource resolution and crashes packaged WinUI at startup,
 even when all the separate PRI/XBF files are present.
 
@@ -241,7 +243,7 @@ generation, also run the isolated packaged smoke test documented in
 
 On PRs and main pushes, a Linux change-detection job routes verification before
 allocating native runners. Windows-only changes run Windows checks; Mac-only
-changes run Mac checks on Apple silicon and Intel. Changes to shared C# code,
+changes run Mac checks on Apple silicon across macOS 26 and 15. Changes to shared C# code,
 SDK/build configuration, CI routing, or unrecognized paths run both. Markdown
 changes run the Markdown job without native builds. Manual Verify runs run all
 checks. The stable **Verification** gate requires all applicable jobs to
@@ -255,7 +257,7 @@ keyed by OS/architecture, job, SDK and dependency inputs; restores still run,
 and build outputs are never cached. Builds and publishes remain sequential
 within each checkout. Mac runners also cache NuGet packages by architecture.
 The final **Verification** job requires both Windows jobs for Windows-relevant
-changes, the Mac universal build plus older-macOS runtime compatibility for
+changes, the Mac arm64 build plus older-macOS runtime compatibility for
 Mac-relevant changes, and Markdown lint when
 applicable. Every unneeded job must be skipped; missing or invalid routing
 decisions fail closed. Failed change detection or Markdown
@@ -314,13 +316,35 @@ This section covers Windows; macOS instructions follow below.
 The placeholder values above must be replaced; they are not signing credentials.
 Local output is unsigned. Do not distribute it as a signed release.
 `-SkipPublish` packages existing matching-version payloads; use it only after
-publishing both architectures from the same source.
+publishing both architectures from the same source and in the same deployment
+mode. GitHub and local development builds remain self-contained by default.
 
 Packaging uses an explicit source manifest and Windows SDK `MakeAppx`, not a
 capture of an existing installation. This preserves the component-only Windows
 App SDK graph and Native AOT PRI/XBF resource handling without introducing the
 umbrella SDK solely for Visual Studio single-project packaging.
-The app remains full-trust, self-contained, and Store-shaped.
+The app remains full-trust and Native AOT in both deployment modes.
+
+Use `.\tools\package.ps1 -Store` for a framework-dependent Store build, with
+the assigned Partner Center identity arguments for submission. The conditional
+`Microsoft.WindowsAppSDK.Runtime` reference does not add the umbrella SDK.
+Packaging reads the resolved architecture-specific Microsoft framework's
+manifest to set its exact name, publisher and minimum version as a
+`PackageDependency`. The Store installs that dependency; no separate .NET
+runtime is required. The bootstrapper is a no-op under package identity, while
+unpackaged synthetic smoke runs require the runtime to be installed.
+
+Store payloads, symbols, layouts and bundles use `artifacts\publish-store`,
+`symbols-store`, `msix-store` and `release-store`, separately from the default
+GitHub/development outputs. Store validation requires the declared framework
+and rejects app-local WinUI/DWrite runtime DLLs. Staging also requires that
+mode; a self-contained bundle cannot accidentally be submitted as a Store build.
+The Store publish keeps its resolved NuGet metadata outside the payload at
+`artifacts\publish-store\project.assets.json`, so later self-contained restores
+do not change the dependency used by `-Store -SkipPublish` or staging.
+The first installation may still need to download the shared framework, which
+includes more components than our slim self-contained payload. The smaller app
+package primarily benefits runtime reuse and subsequent app updates.
 
 With Developer Mode already enabled and permission to register/remove an isolated
 test package, build with the default development identity and run:
@@ -362,8 +386,10 @@ Microsoft currently supports automated updates for free products.
    release's **What's Changed** PR titles, dropping contributor credits and
    the full-changelog link. Unexpected formatting, empty notes or more than
    1500 characters stop the workflow before any Store draft is created.
-3. Both architectures are rebuilt with the Partner Center identity, not the
-   Azure certificate's publisher. The workflow validates the unsigned bundle,
+3. Both architectures are rebuilt with `-Store` and the Partner Center identity,
+   not the Azure certificate's publisher. The selected Windows release must
+   include this Store deployment support; older immutable source is not patched
+   by the workflow. The workflow validates the unsigned framework-dependent bundle,
    including publisher display name, and uploads the
    `GHCPSpendTray-<version>-store` Actions artifact before submission.
 4. With **publish** enabled, the workflow signs in via GitHub OIDC and verifies
@@ -441,8 +467,12 @@ listing: review existing listing text before automating an update. Only the
 the five GitHub **What's Changed** titles become the Store release notes;
 review the release body before submission.
 
-The **Verify** workflow exercises both development and Store-shaped packaging,
-using a synthetic Store identity without production credentials or API calls.
+The **Verify** workflow exercises self-contained development and
+framework-dependent Store packaging for x64/ARM64, including dependency and
+resource mutation regressions. On the disposable hosted runner it installs the
+resolved x64 Microsoft framework when needed and runs packaged smoke scenarios
+for both modes, then stages a synthetic Store identity without production
+credentials or API calls.
 The offline release-selection tests reject drafts, mutable releases, missing or
 duplicate assets, mismatched source/version metadata, and GitHub API failures.
 
@@ -451,11 +481,15 @@ duplicate assets, mismatched source/version metadata, and GitHub API failures.
 ### Local macOS builds
 
 Support follows a two-major-version window: **macOS 26 and macOS 15**, using
-their latest patch releases. macOS 14 Sonoma is no longer supported. Advance
+their latest patch releases, on **Apple silicon only**. Intel Macs are no
+longer supported by current builds. Previously published universal releases
+remain unchanged historical assets, not current-support evidence.
+macOS 14 Sonoma is no longer supported. Advance
 this window, the deployment targets, metadata and runtime checks together when
 adopting a new stable major release.
 
-Use a supported macOS version, the .NET SDK in `global.json`, Python 3, and a stable
+Use an Apple-silicon Mac with native arm64 tools (not under Rosetta), a
+supported macOS version, the .NET SDK in `global.json`, Python 3, and a stable
 Swift 6 compiler/Apple SDK. CI and release jobs use **Xcode 26.6 with the
 macOS 26.5 SDK**, selected explicitly by `.github/actions/setup-macos` on
 `macos-26` runners, rather than inheriting runner defaults.
@@ -464,12 +498,14 @@ of the oldest supported runtime. Routine verification has exactly two Mac jobs:
 
 | Runtime target | Work |
 |---|---|
-| macOS 26 / Apple silicon | Shared tests, one universal app build, native smoke tests |
-| macOS 15 / Intel | Download that exact universal artifact, verify both slices, native smoke tests without rebuilding |
+| macOS 26 / Apple silicon (`macos-26`) | Shared tests, one arm64 app build, native smoke tests |
+| macOS 15 / Apple silicon (`macos-15`) | Download that exact arm64 artifact, verify executable and bridge slices, native smoke tests without rebuilding |
 
 Both jobs use the latest available hosted-runner images for their OS major and
-log the actual patch version. They cover both supported OS generations and CPU
-architectures, deliberately not every OS/architecture combination. Both exercise
+log the actual patch version and assert native arm64 execution. These labels
+are the arm64 images listed in GitHub's
+[hosted-runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+They cover both supported OS generations on Apple silicon. Both exercise
 the real read-only notification-settings callback and remain gated on relevant
 Mac/shared-code and build-tooling changes.
 
@@ -490,11 +526,15 @@ bash tools/macos/verify.sh
 open artifacts/macos/GHCPSpendTray.app
 ```
 
-The build sequentially publishes the C# Native AOT shared library for
-`osx-arm64` and `osx-x64`, compiles each SwiftUI frontend slice, and creates a
-universal `.app` with `lipo`. Its ICNS uses the shared dollar artwork and the
-optically tuned small PNGs, not a separate Mac logo. Both binaries and their runtime are bundled;
-users need neither .NET nor Rosetta on their native architecture. macOS 15 is
+The build publishes the C# Native AOT shared library for `osx-arm64` and
+compiles the SwiftUI frontend for `arm64-apple-macos15.0`. It replaces the
+bundle's executable and bridge outright, including when reusing an old
+universal output directory. Package and signing checks require **exactly
+arm64** in both Mach-O binaries; Intel-only and universal artifacts fail.
+Unsupported hosts and the removed smoke `--arch` argument fail explicitly.
+Its ICNS uses the shared dollar artwork and the optically tuned small PNGs,
+not a separate Mac logo. Both binaries and their runtime are bundled;
+users need no .NET installation. macOS 15 is
 the minimum deployment target. Keychain, notifications, and login-item calls
 are implemented natively in Swift; the shared C# application controller handles
 auth, storage, scheduling, accounting, and alert decisions. There is no IPC
@@ -576,9 +616,9 @@ and system-default trust, never an **Always Trust** override.
 ### Publish a macOS version
 
 1. Merge to `main` and wait for **Verify / Verification** on the exact commit.
-   Mac-relevant changes run managed and native shared tests plus universal
-   a universal build/smoke check with the release toolchain on macOS 26 Apple
-   silicon, plus the same artifact on macOS 15 Intel without rebuilding.
+   Mac-relevant changes run managed and native shared tests plus an arm64
+   build/smoke check with the release toolchain on macOS 26 / Apple silicon,
+   plus the same artifact on macOS 15 / Apple silicon without rebuilding.
 2. Dispatch **Release** from `main`, choose the macOS bump, and set Windows
    to **no release** for a Mac-only release. Choose the preview designation,
    review the calculated versions, and approve the **production** deployment.
@@ -594,7 +634,8 @@ and system-default trust, never an **Always Trust** override.
 Mac release assets are `GHCPSpendTray-macOS-<version>.dmg`,
 `release-macos.json`, and `SHA256SUMS`. Metadata records platform, version,
 source commit, originating workflow run ID, bundle identifier, architectures,
-and notarization. Mac releases
+and notarization. Current metadata requires `architectures: ["arm64"]`;
+universal/Intel metadata is rejected before draft staging. Mac releases
 use `--latest=false` so they do not displace the repository's Windows "latest"
 download. Store selection additionally filters to Windows tags and does not
 rely on that convention.

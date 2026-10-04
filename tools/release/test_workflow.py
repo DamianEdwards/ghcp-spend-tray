@@ -68,7 +68,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertIn("actions/attest@", job)
             self.assertIn("ref: ${{ github.sha }}", job)
         self.assertIn("releaseRunId = $env:GITHUB_RUN_ID", windows)
-        self.assertIn('releaseRunId=os.environ["GITHUB_RUN_ID"]', (ROOT / "tools/macos/sign-package.sh").read_text())
+        signing = (ROOT / "tools/macos/sign-package.sh").read_text()
+        self.assertIn('release_metadata(os.environ["GHCP_MAC_VERSION"], os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"])', signing)
+        self.assertIn("releaseRunId=run_id", (ROOT / "tools/macos/release.py").read_text())
 
 
 if __name__ == "__main__":

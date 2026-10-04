@@ -1,4 +1,7 @@
-param([Parameter(Mandatory)][string] $Layout)
+param(
+    [Parameter(Mandatory)][string] $Layout,
+    [switch] $Store
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.Drawing
@@ -25,8 +28,9 @@ $identity = $manifest.Package.Identity.Name
 $map = $dump.SelectSingleNode('/PriInfo/ResourceMap')
 if ($null -eq $map -or $map.name -cne $identity) { throw 'Shell PRI identity does not match the package.' }
 # File presence alone is insufficient: the package's primary map must resolve startup XAML.
-foreach ($relativePath in @('Reactor\Hosting\ReactorApplication.xbf',
-    'Microsoft.UI.Xaml\Themes\generic.xbf', 'Microsoft.UI.Xaml\Themes\themeresources.xbf')) {
+$startupPaths = @('Reactor\Hosting\ReactorApplication.xbf')
+if (-not $Store) { $startupPaths += @('Microsoft.UI.Xaml\Themes\generic.xbf', 'Microsoft.UI.Xaml\Themes\themeresources.xbf') }
+foreach ($relativePath in $startupPaths) {
     $runtimeUri = "ms-resource://$identity/Files/$($relativePath.Replace('\', '/'))"
     $runtimeResource = @($map.SelectNodes('.//NamedResource') | Where-Object { $_.uri -ceq $runtimeUri })
     if ($runtimeResource.Count -ne 1) { throw "Missing startup PRI resource: $relativePath" }

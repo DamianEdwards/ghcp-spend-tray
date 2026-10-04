@@ -39,6 +39,32 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 release.check_source("example/repo", source)
 
+    def test_release_metadata_contract_is_signed_arm64_only(self):
+        metadata = release.release_metadata("0.2.0", "synthetic-source", "123")
+        self.assertEqual(metadata["architectures"], ["arm64"])
+        self.assertEqual(metadata["minimumOS"], "15.0")
+        self.assertTrue(metadata["signed"])
+        self.assertTrue(metadata["notarized"])
+        with patch.dict(release.os.environ, GITHUB_RUN_ID="123"):
+            release.check_metadata(metadata, "0.2.0", "synthetic-source")
+            for mutation in ({"architectures": ["arm64", "x86_64"]}, {"architectures": ["x86_64"]},
+                             {"signed": False}, {"notarized": False}, {"minimumOS": "26.0"},
+                             {"sourceCommit": "stale-source"}, {"releaseRunId": "old-run"},
+                             {"version": "0.1.0"}, {"bundleIdentifier": "other.app"}):
+                with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "Apple-silicon-only"):
+                    release.check_metadata(dict(metadata, **mutation), "0.2.0", "synthetic-source")
+
+    def test_stage_rejects_universal_metadata_before_tag_or_upload(self):
+        with patch.object(release, "validate"), \
+                patch.dict(release.os.environ, GITHUB_RUN_ID="123", GITHUB_REPOSITORY="example/repo",
+                           GITHUB_SHA="synthetic-source"), \
+                patch.object(release.Path, "read_text", return_value=release.json.dumps(dict(
+                    release.release_metadata("0.2.0", "synthetic-source", "123"), architectures=["arm64", "x86_64"]))), \
+                patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "Apple-silicon-only"):
+                release.stage("0.2.0")
+            run.assert_not_called()
+
     def test_published_release_cannot_be_overwritten(self):
         with patch.object(release, "existing_release", return_value={"draft": False}):
             with self.assertRaises(ValueError):

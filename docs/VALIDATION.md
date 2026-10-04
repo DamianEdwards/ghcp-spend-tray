@@ -25,7 +25,7 @@ UTC offsets, precise elapsed-time thresholds, source/fetch timestamps, stable
 cached projections, stale/error/rollover handling, zero usage, allocation
 variants, extreme/invalid decimals, legacy defaults, persistence, omitted-save
 preservation, explicit disable, reconnect, and unchanged actual alerts.
-The universal development app builds with warnings treated as errors and
+The Apple-silicon development app builds with warnings treated as errors and
 passes its existing bundle/signature checks. Swift fixtures additionally
 cover exact decimal decoding, whole-dollar/sub-dollar text, early/warning/UTC
 labels, and enabled/disabled/unavailable account-row sizing and rendering.
@@ -36,10 +36,62 @@ the real Native AOT bridge, unchanged totals/tray percentages, popup anchoring,
 account settings rendering, and explicit disable. SwiftUI view tests now use
 the same stable-SDK selection as app builds. Snapshot captures can omit
 GPU-composited text and do not establish pixel-perfect appearance or VoiceOver
-behavior. macOS 15/Intel execution and real-provider period/timestamp semantics
+behavior. macOS 15/Apple-silicon execution and real-provider period/timestamp semantics
 remain validation gates; Windows forecast UI is a separate implementation.
 
+## Store-only shared Windows App Runtime (October 3, 2026)
+
+Store packaging opts into `StorePackage=true` / `WindowsAppSDKSelfContained=false`
+with the component-only `Microsoft.WindowsAppSDK.Runtime` reference. GitHub
+and ordinary development builds remain self-contained. Both retain Native AOT
+and require no separate .NET runtime. Store manifests derive the framework
+identity, Microsoft publisher and minimum version from the resolved Microsoft
+MSIX, currently `Microsoft.WindowsAppRuntime.2` / `2.5.1.0`.
+
+Local `verify.ps1 -NativeTests` passed all four managed and executed x64 Native
+AOT harnesses. Real x64 publishes of both modes passed populated and empty
+synthetic UI smoke, without real accounts or startup writes. Store payloads,
+including license notices and excluding symbols, were 18.84 MiB for x64 and
+19.63 MiB for ARM64. Runtime metadata checks also passed under Windows
+PowerShell 5.1, matching the hosted smoke step.
+
+Synthetic bundle mutations reject missing, duplicate or incorrect framework
+dependencies, mismatched dependency architecture, bundled runtime DLLs/themes,
+and missing application resources. Store staging rejects self-contained input.
+Store PRI fixtures require Reactor startup XAML without app-local WinUI themes;
+the existing self-contained resource requirements remain enforced. Initial
+bundle/staging contract fixtures used explicitly synthetic ARM64 PE metadata
+and were deleted after use. After installing the ARM64 C++ tools, real x64 and
+ARM64 Native AOT publishing, packaging and deployment mutation regressions
+passed in both modes; framework-dependent staging also passed with a synthetic
+Store identity. The Store metadata
+snapshot and `-Store -SkipPublish` also remained valid after a default
+self-contained build restored the project.
+
+The compressed two-architecture bundles measured 60.40 MiB self-contained and
+14.37 MiB framework-dependent, a 76% app-bundle reduction excluding the shared
+runtime download. ARM64 was cross-published, not executed.
+
+After the owner enabled Developer Mode, real x64 MSIXs from both modes were
+extracted and registered under the isolated development identity. Populated and
+empty packaged smoke scenarios passed for both, including actual UI creation,
+package-local data and disabled Windows StartupTask. Each development
+registration was removed afterward; no production registration, account data
+or startup preference was changed.
+
+Verify mirrors this by building real Native AOT payloads for both architectures
+and modes, installing the resolved x64 framework on its disposable runner when
+needed, and smoke-testing both extracted packages. Hosted runs, clean Store
+installation/upgrading, ARM64 execution and Store certification remain release
+acceptance checks. No production Store submission was made.
+
 ## macOS empty popup and menu-bar anchoring (October 3, 2026)
+
+Current macOS builds support **Apple silicon only**, on the latest patches
+of macOS 26 and 15, with a 15.0 deployment minimum. This removes Intel
+support, not macOS 15 support; Windows x64/ARM64 support is unchanged.
+Previously published universal releases and the Intel investigation below
+remain historical evidence and are not modified by this policy.
 
 With no connected accounts, the Mac popup now shows an Add Account prompt
 without unavailable totals, tray diagnostics, an empty scroll region, or a
@@ -56,15 +108,120 @@ offset or fixed popup height is used.
 Native smoke captures both empty and populated popups, checks the empty
 prompt stays under 300 points high at its 400-point width, and verifies the
 popup remains within 8 points of its menu-bar anchor. Synthetic notice
-growth and removal exercise both live expansion and shrinkage. The
+growth and removal exercise both live expansion and shrinkage in both states. The
 sample-only Add Example Account action also exercises the real shared bridge,
 updates consumption and allocation, and resizes the still-open popup from
 empty to populated without authentication. Managed and Native AOT fixtures
 cover repeated additions, unique account identities, refresh retention,
 session-only storage, and rejection by a normal-mode controller. These checks
-pass locally on macOS 26 / Apple silicon; macOS 15 / Intel remains a CI gate.
+pass locally on macOS 26 / Apple silicon; macOS 15 / Apple silicon remains a CI gate.
 AppKit render snapshots can omit GPU-composited text and do not establish
 pixel-perfect appearance or VoiceOver behavior.
+
+### Bounded popup geometry synchronization
+
+Before the Apple-silicon-only policy, main Verify
+[run 37156192286, attempt 1](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37156192286/attempts/1)
+failed on macOS 15.7.9 / Intel with a 536-point gap at the initial populated
+popup check. The failed-job rerun passed on the identical commit using the same
+universal artifact. The original log recorded no window or screen geometry,
+so it cannot distinguish unfinished AppKit positioning, desktop layout or a
+production anchoring defect. A successful rerun is not proof of a fix.
+
+The smoke test previously sampled geometry once after a fixed 250 ms sleep.
+It now waits for a visible, on-screen menu-bar button with stable geometry
+before calling `show` (AppKit does nothing if its positioning view is not
+visible). Initial presentation, reopening, notice growth/shrinkage and example
+insertion then require correct, stable geometry for 300 ms, sampled every
+50 ms, within a five-second monotonic deadline per phase. There is no
+reopening, reanchoring, disabled animation or repeated process launch to rescue
+a failing assertion. The outer smoke process retains its 90-second limit.
+
+The original inclusive eight-point vertical limit is unchanged. Popup and
+button must be visible on the same screen, horizontally attached, and within
+the screen frame; hosting-view bounds, actual window content bounds and hosting-controller
+preferred size must converge. Growth/shrinkage and empty-to-populated insertion
+must also reach their expected content sizes, rather than passing on unchanged
+old content; a populated popup may retain its capped scroll height. Menu-bar checks
+still require downward (`minY`) placement; an undersized display that cannot
+fit the popup below its button fails explicitly rather than accepting a
+different edge or a detached, screen-clamped window. Screen origins are not
+assumed to be zero. The working production pre-show fitting-size and
+preferred-content-size updates are unchanged.
+
+Timeouts print the phase, elapsed time, sample count, readiness reason and
+first/latest geometry: positioning rectangle, button frame/bounds/visible
+rectangle and screen conversion, anchor/popup window frames and content
+bounds, popup visibility, content/preferred sizes, all screen and visible
+frames, scale and OS version. These diagnostics contain geometry only, not
+account data or credentials, and run only in synthetic smoke mode.
+
+Deterministic Swift regressions cover delayed placement versus a permanent
+536-point detachment, missing/invisible geometry, expected-content readiness,
+initial empty/populated sizes, growth/shrinkage and example sizes, subpixel
+noise versus cumulative drift, deadlines, strict vertical/horizontal
+attachment, unconverged sizes, constrained displays and negative screen
+origins. Before removal of Intel support, local full verification passed on macOS 26.7 / Apple silicon with
+the pinned .NET 10.0.401 SDK and stable macOS 26 SDK: 155 Core tests and
+64 shared assertions in managed and executed arm64 Native AOT, universal app
+packaging, native model/geometry/notification/Keychain checks, and both real
+synthetic popup launches. Additional populated/empty native and Intel-slice
+Rosetta launches also passed, without retry-on-failure. This does **not**
+establish macOS 15 behavior or prove the original failure's OS-level cause.
+The synchronization fix remains in the Apple-silicon-only app; removing Intel
+does not justify weakening popup assertions on either supported OS version.
+
+The first PR verification of the Apple-silicon-only change
+([run 37159513752](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37159513752))
+exposed a second test assumption on macOS 26.6.2: after notice removal, the
+window content, hosting view and preferred size had all correctly shrunk from
+321 to 261 points, with zero anchor gap, but `NSPopover.contentSize` still
+reported 321. That property is not a reliable measurement of the rendered
+window when hosting-controller preferred-size updates drive resizing.
+Readiness now compares the actual window content bounds with hosting bounds
+and preferred size; `NSPopover.contentSize` remains in failure diagnostics
+only. The exact CI geometry is a deterministic regression, alongside real
+window-size mismatch and permanent-detachment failures. No timeout, attachment
+tolerance, production sizing, supported-OS gate or content-growth/shrinkage
+expectation is relaxed.
+
+### Apple-silicon-only artifact checks
+
+Builds publish only `osx-arm64` and compile only the arm64 Swift target.
+Distribution validation requires exactly `arm64` in both the executable and
+Native AOT library, rejects universal and Intel-only Mach-O files, and retains
+dependency-path, deployment-minimum and signature checks. Reused bundle output
+is replaced rather than merged with old architecture slices. Release metadata
+declares only arm64 and is validated before draft staging; historical
+published releases are not changed. Build, verification and smoke launchers
+reject unsupported hosts, and smoke executes explicitly with `arch -arm64`.
+
+Synthetic tooling regressions cover native-host rejection (including Rosetta),
+exact-slice validation, failed Mach-O inspection, checking both binaries before
+launch, removed architecture arguments, release metadata/provenance, Mac-only
+tool routing, and both fail-closed OS gates with same-artifact reuse. Current
+verification uses `macos-26` for the release-toolchain build and `macos-15`
+for execution of that exact arm64 artifact without rebuilding. Both are
+Apple-silicon labels in the authoritative
+[GitHub-hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+Runner architecture is asserted explicitly. Local macOS 26 execution cannot
+establish macOS 15 behavior; that remains a hosted CI gate.
+
+The arm64-only change passed local full verification on macOS 26.7 /
+Apple silicon with .NET 10.0.401 and the installed stable macOS 26 SDK:
+155 Core tests and 64 shared assertions in managed and executed arm64
+Native AOT, native model/geometry/notification/Keychain checks, both
+populated/empty smoke launches, and package dependency/minimum/signature
+checks. Both final Mach-O files report exactly `arm64`, including after
+reusing the former universal bundle output; the obsolete generated Intel
+build directory is removed. Popup growth/shrinkage and example insertion
+remain covered, with measured anchor gaps of at most half a point locally.
+Real disposable Mach-O package fixtures additionally reject Intel/universal
+slices in either binary, a newer bridge deployment minimum, absolute
+non-system dependencies, missing binaries and unsigned bundles. The Intel
+fixtures are negative-test inputs only, not supported app builds.
+No production signing, notarization, release publication or macOS 15
+execution was performed by this local validation.
 
 ## macOS 0.1.0 notification callback launch regression
 
@@ -87,12 +244,12 @@ Xcode 16.4 default.
 The support policy is the latest patch releases of two major versions:
 **macOS 26 and macOS 15**. The minimum app deployment target is macOS 15;
 macOS 14 Sonoma is dropped. Routine verification runs exactly two Mac jobs:
-macOS 26 / Apple silicon runs shared tests, builds the universal app once and
-smoke-tests it; macOS 15 / Intel downloads that exact artifact, verifies both
-architecture slices and runs native smoke tests without rebuilding. Both
+macOS 26 / Apple silicon runs shared tests, builds the arm64 app once and
+smoke-tests it; macOS 15 / Apple silicon downloads that exact artifact, verifies
+the executable and bridge are arm64-only and runs native smoke tests without rebuilding. Both
 exercise the real read-only notification callback. Hosted image patches are
-logged. This deliberately covers both OS generations and CPU architectures,
-not every OS/architecture pair. Advance the window with each adopted stable
+logged. This covers both OS generations on the only supported Mac architecture.
+Advance the window with each adopted stable
 major release.
 
 ## CodeQL configuration
@@ -128,12 +285,14 @@ are introduced later.
 The native Mac frontend shares the C# controller, host-scoped OAuth, decimal
 accounting, storage, scheduler and alerts with Windows, rather than
 reimplementing them in Swift.
+The table records historical October 1 evidence, before Intel support was
+removed; its universal/Rosetta results are not current distribution claims.
 
 | Check | Evidence |
 |---|---|
 | Shared engine | 155 Core tests and 49 shared controller/bridge assertions pass under managed .NET and executed arm64 Native AOT; tray weighting/eligibility, persistence, exclusion-preserving reconnect, and draft-preview isolation use the same C# code on both platforms |
 | Native app | Universal arm64/x86_64 SwiftUI executable and C# Native AOT library build with warnings treated as errors; bundle versions, both slices, dependency paths and ad-hoc signatures checked |
-| UI smoke | Empty/populated launches, navigation/rendering of all five settings pages, onboarding sheet, exact synthetic $42.75 summary, 34.2% weighted allocation, draft-vs-saved indicators, per-account selection/navigation, unavailable fallback and normal shutdown exercised on Apple silicon. The pre-sync Intel slice also passed under Rosetta; native Intel is a CI gate |
+| UI smoke | Empty/populated launches, navigation/rendering of all five settings pages, onboarding sheet, exact synthetic $42.75 summary, 34.2% weighted allocation, draft-vs-saved indicators, per-account selection/navigation, unavailable fallback and normal shutdown exercised on Apple silicon. The historical pre-sync Intel slice also passed under Rosetta; Intel is no longer a supported runtime |
 | Native model tests | Synthetic bridge/clipboard fixtures exercise immediate github.com sign-in, automatic code copy and retry, automatic completion, cancellation draining, late callback suppression, custom hosts and immutable reconnect. Pie/percentage/unavailable template graphics contain visible antialiased glyphs on a transparent background |
 | Notification permission UX | Synthetic service fixtures cover explicit first-use permission, denial without a repeated prompt, opening Settings, refresh after external changes, quiet delivery, actual API errors, in-flight deduplication and side-effect-free demo/background behavior. System Settings deep-link selection may vary by macOS release; the UI includes manual navigation fallback |
 | Keychain | Uniquely named synthetic device-local item create/read/update/delete, missing-item behavior and target isolation exercised using Security.framework; no real account credentials read |
@@ -143,12 +302,9 @@ reimplementing them in Swift.
 | Windows extraction | Windows platform adapter test project compiles on macOS; full WinUI build/execution requires Windows SDK executables and remains a Windows CI gate |
 | Production distribution | Signing/notarization automation implemented; not executed locally without the owner's Developer ID/API credentials |
 
-Reproduce with `bash tools/macos/verify.sh`. To exercise the Intel slice on
-Apple silicon with Rosetta already installed:
-
-```bash
-python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app --arch x86_64
-```
+Reproduce current Apple-silicon-only verification with
+`bash tools/macos/verify.sh` on a native arm64 Mac. There is no Intel slice
+or Rosetta smoke path in current builds.
 
 Smoke mode requires a unique absolute `--data-dir`, uses only synthetic
 accounts, and disables authentication, notification delivery/permission prompts,
@@ -162,7 +318,7 @@ permission is requested or changed by these tests.
 
 ### Required before macOS production acceptance
 
-- Run both native architecture CI jobs; Rosetta is not Intel hardware evidence.
+- Run both supported-OS Apple-silicon CI jobs; macOS 26 alone is not macOS 15 evidence.
 - Install the signed/notarized DMG on a clean standard-user Mac with Gatekeeper
   enabled, and update between two signed versions without losing settings,
   history, credentials or login preference.

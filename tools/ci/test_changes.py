@@ -6,17 +6,19 @@ class ChangesTests(unittest.TestCase):
     def test_platform_boundaries(self):
         for path in ("src/GHCPSpendTray.Mac/Views.swift", "src/GHCPSpendTray.MacBridge/Exports.cs",
                      "packaging/macos/Info.plist", "tests/GHCPSpendTray.MacTests/PlatformTests.swift",
-                     "tools/macos/build.sh", ".github/workflows/notarization-status.yml"):
+                     "tools/macos/build.sh", "tools/macos/architecture.py", "tools/macos/test_architecture.py",
+                     ".github/actions/setup-macos/action.yml", ".github/workflows/notarization-status.yml"):
             self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
-                     "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1", ".github/workflows/store-package.yml",
+                     "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1",
+                     "tools/get-windows-app-runtime.ps1", "tools/test-windows-app-runtime.ps1",
+                     "tools/test-package-deployment.ps1", ".github/workflows/store-package.yml",
                      "GHCPSpendTray.slnx"):
             self.assertEqual(classify([path]), dict(windows=True, macos=False, markdown=False), path)
 
     def test_shared_and_unknown(self):
         for path in ("src/GHCPSpendTray.Core/Models.cs", "src/GHCPSpendTray.Application/UiModels.cs",
                      "global.json", "Directory.Build.props", ".github/workflows/verify.yml", ".github/workflows/codeql.yml",
-                     ".github/actions/setup-macos/action.yml",
                      "tools/ci/changes.py", "tests/GHCPSpendTray.SharedTests/Program.cs", "new-file",
                      "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",
                      "src/GHCPSpendTray.App/Assets/Square44x44Logo.targetsize-32.png",

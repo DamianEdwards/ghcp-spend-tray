@@ -11,6 +11,8 @@
     <key>CFBundleVersion</key><string>0.1.0</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
+    <key>LSArchitecturePriority</key><array><string>arm64</string></array>
+    <key>LSRequiresNativeExecution</key><true/>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Damian Edwards</string>

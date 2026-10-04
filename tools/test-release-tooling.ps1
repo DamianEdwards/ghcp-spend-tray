@@ -73,4 +73,5 @@ Write-Output 'PASS: verification gate rejects failures, cancellations, unexpecte
 & "$PSScriptRoot\test-store-submission-status.ps1"
 & "$PSScriptRoot\test-icon-assets.ps1"
 & "$PSScriptRoot\test-package-icon-tooling.ps1"
+& "$PSScriptRoot\test-windows-app-runtime.ps1"
 Write-Output 'PASS: release version boundaries, development identity and PowerShell syntax.'
