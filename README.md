@@ -230,6 +230,13 @@ popup, Usage summary, and details. It is off by default; choose **Save** to
 apply it. There is no combined forecast, forecast-based alert, or change to
 the observed allocation meter or menu-bar icons.
 
+Accounts rows use the same shaded panels as Usage and show an explicit
+**Manage account** action; clicking anywhere in the card opens that account's
+settings. Clicking the menu-bar icon gives the popup keyboard focus and
+normal active control colors. On Usage and account details,
+click anywhere across the **Advanced Details** heading to expand or collapse
+the diagnostics, not just the disclosure arrow.
+
 The estimate extrapolates the account's average consumption so far across a
 UTC calendar month, not its recent usage trend. It assumes the same pace
 continues and is not an invoice. A supplied reset must match the next first

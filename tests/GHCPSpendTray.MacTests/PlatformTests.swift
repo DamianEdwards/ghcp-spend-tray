@@ -6,6 +6,7 @@ enum PlatformTests {
     @MainActor static func main() async throws {
         try ModelTests.run()
         try PeriodEstimateTests.run()
+        try NavigationInteractionTests.run()
         try TrayIconRendererTests.run()
         try PopupSmokeReadinessTests.run()
         try await NotificationTests.run()

@@ -39,6 +39,22 @@ GPU-composited text and do not establish pixel-perfect appearance or VoiceOver
 behavior. macOS 15/Apple-silicon execution and real-provider period/timestamp semantics
 remain validation gates; Windows forecast UI is a separate implementation.
 
+Advanced Details uses one full-width disclosure button shared by Usage and
+account details, with an expanded/collapsed accessibility value. Accounts rows
+use the same native shaded GroupBox as Usage, show a visible Manage account
+action, and remain clickable across their whole area. Native offscreen mouse-event fixtures verify expansion from the heading
+text, collapse from the far end of the heading, existing chevron activation,
+and account navigation from both the information area and explicit action.
+These fixtures send events only to their own synthetic test window.
+
+Menu-bar activation now makes the shown popover window key as well as
+activating the app, so controls receive normal active colors and keyboard
+focus without forcing a SwiftUI color environment. Real synthetic popup smoke
+requires the active key window at initial presentation, reopening, and live
+resizing, alongside its existing attachment and content-size checks. Failure
+diagnostics include the popup's key-window and key-eligibility state. Transient
+outside-click dismissal, toggle-to-close, and settings navigation are unchanged.
+
 ## Store-only shared Windows App Runtime (October 3, 2026)
 
 Store packaging opts into `StorePackage=true` / `WindowsAppSDKSelfContained=false`

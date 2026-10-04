@@ -261,6 +261,32 @@ struct UsageView: View {
     }
 }
 
+struct FullWidthDisclosureGroupStyle: DisclosureGroupStyle {
+    var accessibilityIdentifier = "AdvancedDetailsToggle"
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation { configuration.isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption).frame(width: 10).accessibilityHidden(true)
+                    configuration.label
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .help(configuration.isExpanded ? "Hide advanced details" : "Show advanced details")
+            if configuration.isExpanded { configuration.content }
+        }
+    }
+}
+
 struct AccountDiagnosticsView: View {
     let account: AccountData
     var body: some View {
@@ -288,6 +314,7 @@ struct AccountDiagnosticsView: View {
             }
             .font(.caption).textSelection(.enabled).padding(.top, 8)
         }
+        .disclosureGroupStyle(FullWidthDisclosureGroupStyle(accessibilityIdentifier: account.key + "_AdvancedDetailsToggle"))
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -309,14 +336,42 @@ struct AccountsView: View {
                 AccountEditor(model: model, account: account).id(account.key)
             } else {
                 List(model.dashboard?.accounts ?? []) { account in
-                    Button { model.selectedAccount = account.key } label: { AccountRow(account: account) }
-                        .buttonStyle(.plain).padding(.vertical, 6)
+                    AccountManagementRow(account: account) { model.selectedAccount = account.key }
+                        .listRowSeparator(.hidden).listRowBackground(Color.clear)
                 }
                 if model.dashboard?.accounts.isEmpty == true {
                     Text("No connected accounts.").foregroundStyle(.secondary).padding(24)
                 }
             }
         }
+    }
+}
+
+struct AccountManagementRow: View {
+    let account: AccountData
+    let manage: () -> Void
+
+    var body: some View {
+        Button(action: manage) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    AccountRow(account: account)
+                    HStack(spacing: 4) {
+                        Spacer()
+                        Text("Manage account")
+                        Image(systemName: "chevron.right").accessibilityHidden(true)
+                    }
+                    .font(.caption).foregroundStyle(Color.accentColor)
+                }
+                .padding(6).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Manage \(account.name) on \(account.host)")
+        .accessibilityLabel("Manage account \(account.name) on \(account.host)")
+        .accessibilityHint("Open account preferences and diagnostics")
+        .accessibilityIdentifier(account.key + "_ManageAccount")
     }
 }
 

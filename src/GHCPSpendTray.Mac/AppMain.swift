@@ -173,6 +173,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             popover.contentSize = view.fittingSize
             NSApplication.shared.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            guard popover.isShown, let window = view.window else {
+                model?.error = "The menu-bar popup could not be shown. Reopen the app to access Settings."
+                return
+            }
+            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -473,6 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                         if failure == nil {
                             if !popover.isShown || !popupWindow.isVisible || view.isHiddenOrHasHiddenAncestor {
                                 failure = "Popup is not shown and visible."
+                            } else if !NSApplication.shared.isActive || !popupWindow.isKeyWindow {
+                                failure = "Popup has not become the active key window."
                             } else if popover.isDetached {
                                 failure = "Popup is detached from its positioning view."
                             } else if popupWindow.screen != screen {
@@ -526,7 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         positioningRect=\(popover.positioningRect), positioningScreenRect=\(String(describing: positioningScreenRect)), preferredEdge=minY, shown=\(popover.isShown), detached=\(popover.isDetached), animated=\(popover.animates), appActive=\(NSApplication.shared.isActive);
         button frame=\(button.frame), bounds=\(button.bounds), visibleRect=\(button.visibleRect), hidden=\(button.isHiddenOrHasHiddenAncestor), screenRect=\(String(describing: anchor));
         anchorWindow frame=\(String(describing: anchorWindow?.frame)), contentBounds=\(String(describing: anchorWindow?.contentView?.bounds)), visible=\(String(describing: anchorWindow?.isVisible)), screen=\(String(describing: anchorWindow?.screen?.frame));
-        popupWindow frame=\(String(describing: popupWindow?.frame)), contentBounds=\(String(describing: popupWindow?.contentView?.bounds)), visible=\(String(describing: popupWindow?.isVisible)), screen=\(String(describing: popupWindow?.screen?.frame));
+        popupWindow frame=\(String(describing: popupWindow?.frame)), contentBounds=\(String(describing: popupWindow?.contentView?.bounds)), visible=\(String(describing: popupWindow?.isVisible)), key=\(String(describing: popupWindow?.isKeyWindow)), canBecomeKey=\(String(describing: popupWindow?.canBecomeKey)), screen=\(String(describing: popupWindow?.screen?.frame));
         content frame=\(String(describing: view?.frame)), bounds=\(String(describing: view?.bounds)), hidden=\(String(describing: view?.isHiddenOrHasHiddenAncestor)), contentSize=\(popover.contentSize), preferredContentSize=\(String(describing: controller?.preferredContentSize));
         screens=[\(screens)], macOS=\(ProcessInfo.processInfo.operatingSystemVersionString)
         """
