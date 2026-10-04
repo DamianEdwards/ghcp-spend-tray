@@ -1,5 +1,43 @@
 # GHCPSpendTray validation and release gates
 
+## Windows period-estimate parity (October 3, 2026)
+
+Windows now consumes the shared calculation, result and per-account persistence
+from the macOS implementation merged in main. No duplicate forecasting policy
+remains. The only shared adjustment is an optional `TimeProvider` for the
+synthetic demo controller; ordinary demo behavior retains the system clock.
+macOS UI and bridge commands are unchanged by this Windows integration.
+
+The three macOS reference screenshots on issue #47 were compared with the
+Windows estimate surfaces. Windows keeps native Fluent cards and controls while
+matching the secondary row hierarchy: Estimated at reset at the left,
+approximate amount at the right, then early/projected-excess/UTC-reset context.
+Projected excess uses a theme-aware caution brush and a warning glyph, not
+a projected progress bar. Small positive amounts use `<$1` and small excesses
+use Less than $1 over allocation, matching macOS without implying zero.
+The existing Advanced information/details disclosure on Usage and account
+settings exposes the method, amount, average per day, UTC boundaries and
+observation time. An unavailable result exposes its reason in both the compact
+row and expanded details.
+
+Local release-tooling verification, the Release solution build and all four
+managed and executed x64 Native AOT harnesses passed: 170 Core tests, 14 platform
+tests, 911 Windows integration assertions and 81 shared/bridge assertions.
+Windows fixtures check draft/save/account-switch isolation, exact equality with
+the shared result, matching whole/sub-dollar and UTC text, and unchanged actual
+consumption, totals and tray allocation.
+
+An x64 Native AOT app publish passed populated and empty native WinUI smoke.
+Populated smoke drives the real preference checkbox, Save and accessible
+expanders, checks all three estimate surfaces, and measures that the label
+and amount share a baseline, the amount reaches the row's right edge without
+overlapping the label, and forecast text remains smaller than actual consumption.
+It also checks label association/help, expanded diagnostics on Usage and
+account settings, and unavailable/explicit-off behavior. These are synthetic
+controls and geometry checks, not proof of pixel-identical cross-platform
+appearance, screen-reader behavior or forecast accuracy. ARM64 execution,
+theme/accessibility review and real-provider semantics remain acceptance checks.
+
 ## macOS per-account period estimates (October 3, 2026)
 
 Account preferences now include an off-by-default Show estimated period

@@ -224,11 +224,15 @@ periods are not counted as current spend. GitHub's quota snapshot does not
 provide a verified per-day consumption breakdown, so the app does not chart
 daily usage from its locally sampled refreshes.
 
-On macOS, **Settings > Accounts > select an account > Show estimated period
-consumption** enables an optional **Estimated at reset** row in that account's
-popup, Usage summary, and details. It is off by default; choose **Save** to
-apply it. There is no combined forecast, forecast-based alert, or change to
-the observed allocation meter or menu-bar icons.
+On either platform, **Settings > Accounts > select an account > Show estimated
+period consumption** enables an optional **Estimated at reset** row in that
+account's tray flyout/menu-bar popup, Usage summary, and details. It is off by
+default; choose **Save account** on Windows or **Save** on macOS to apply it.
+The whole-dollar amount is right-aligned below observed allocation, with a
+secondary early/reset/projected-excess line. Windows uses a theme-aware caution
+color and warning glyph for projected excess. There is no combined forecast,
+forecast-based alert, or change to the observed allocation meter or tray/menu-bar
+icons.
 
 Accounts rows use the same shaded panels as Usage and show an explicit
 **Manage account** action; clicking anywhere in the card opens that account's
@@ -247,7 +251,10 @@ or inconsistent with that period. Estimates are rounded to whole USD
 (`<$1` for small nonzero values); actual consumption retains cents.
 Unknown or unlimited allocation still allows a dollar forecast without an
 over-allocation comparison. Advanced Details explains the method and shows
-the average per day, period boundaries, and observation time.
+the average per day, period boundaries, and observation time. On Windows these
+fields are in the existing **Advanced information** disclosure on Usage and
+**Advanced details** on account settings. Estimate boundaries explicitly use
+UTC; other account diagnostics retain their existing local-time formatting.
 
 ## Privacy and removal
 

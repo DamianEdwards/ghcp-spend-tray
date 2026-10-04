@@ -3,8 +3,9 @@ using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.Shared;
 
-public sealed class DemoController(string directory, bool empty = false) : IApplicationController
+public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null) : IApplicationController
 {
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly List<AccountView> _examples = [];
     private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
         bool ShowPeriodEstimate)> _preferences = [];
@@ -15,7 +16,7 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
     public Task InitializeAsync() => RefreshAsync();
     public Task RefreshAsync(string? accountKey = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         if (empty && _examples.Count == 0)
         {
             Changed?.Invoke(new("No accounts", "Synthetic demonstration only.", "GHCPSpendTray DEMO | No accounts", [],
@@ -78,7 +79,7 @@ public sealed class DemoController(string directory, bool empty = false) : IAppl
     }
     public Task AddExampleAccountAsync()
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         string id = (_examples.Count + (empty ? 1 : 3)).ToString(CultureInfo.InvariantCulture);
         _examples.Add(new($"github.com:{id}", $"Example {id} (demo)", $"demo-example-{id}", "github.com",
             new(1250m, 12.5m, 50m, 25m, false, now, null, now.AddHours(1), "synthetic", true, null),

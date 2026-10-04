@@ -84,6 +84,65 @@ internal static class UI
                 .AutomationId(id).LabeledBy(id + "Label"));
     internal static string Timestamp(DateTimeOffset? value, string missing = "Not available") =>
         value?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? missing;
+    internal const string EstimateDescription =
+        "Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.";
+    internal const string EstimateMethod =
+        "Period-to-date consumption divided by exact elapsed UTC time, scaled to the whole UTC calendar month. " +
+        "Uses the source observation time, or fetch time when not supplied, not when this account was connected. " +
+        "Available after 24 hours; qualified as an Early estimate before 72 hours. " +
+        "AI-credit consumption value, not an invoice.";
+    internal static string ApproximateMoney(decimal value) =>
+        value is > 0 and < 1 ? "<$1" :
+            "~$" + decimal.Round(value, 0, MidpointRounding.AwayFromZero).ToString("N0", CultureInfo.GetCultureInfo("en-US"));
+    internal static string UtcTimestamp(DateTimeOffset? value) =>
+        value?.ToUniversalTime().ToString("MMM d, yyyy HH:mm:ss 'UTC'", CultureInfo.CurrentCulture) ?? "Not available";
+    internal static string EstimateAmount(PeriodEstimate estimate) =>
+        estimate.EstimatedConsumptionUsd is { } amount ? ApproximateMoney(amount) : "Unavailable";
+    internal static string EstimateContext(PeriodEstimate estimate)
+    {
+        if (estimate.UnavailableReason is { } reason) return reason;
+        var parts = new List<string>();
+        if (estimate.IsEarly) parts.Add("Early estimate");
+        if (estimate.OverAllocationUsd is > 0 and < 1)
+            parts.Add("Less than $1 over allocation");
+        else if (estimate.OverAllocationUsd is { } over && over > 0)
+            parts.Add($"About ${decimal.Round(over, 0, MidpointRounding.AwayFromZero).ToString("N0", CultureInfo.GetCultureInfo("en-US"))} over allocation");
+        if (estimate.ResetAtUtc is { } boundary)
+            parts.Add($"Resets {boundary.ToUniversalTime().ToString("MMM d, yyyy 'UTC'", CultureInfo.CurrentCulture)}");
+        return string.Join(" \u00B7 ", parts);
+    }
+    internal static Element? EstimateRow(AccountView account, string idPrefix) =>
+        account.PeriodEstimate is { } estimate
+            ? VStack(3,
+                Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                    Copy("Estimated at reset").FontSize(12).Grid(column: 0).Margin(0, 0, 12, 0)
+                        .AutomationId(idPrefix + "PeriodEstimateLabel"),
+                    Copy(EstimateAmount(estimate)).FontSize(12).Grid(column: 1).HAlign(HorizontalAlignment.Right)
+                        .AutomationId(idPrefix + "PeriodEstimateAmount").LabeledBy(idPrefix + "PeriodEstimateLabel")),
+                Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
+                    estimate.OverAllocationUsd is > 0
+                        ? Icon(FontIcon("\uE7BA", "Segoe Fluent Icons", 12))
+                            .AutomationName("Projected over allocation, not observed usage")
+                            .AutomationId(idPrefix + "PeriodEstimateWarning").Grid(column: 0).Margin(0, 0, 6, 0) : null,
+                    Copy(EstimateContext(estimate)).FontSize(12)
+                        .Foreground(estimate.OverAllocationUsd is > 0
+                            ? Theme.Ref("SystemFillColorCautionBrush") : Theme.SecondaryText)
+                        .AutomationId(idPrefix + "PeriodEstimateContext").Grid(column: 1))
+            ).ToolTip(EstimateDescription + " " + EstimateMethod).AutomationId(idPrefix + "PeriodEstimate")
+            : null;
+    internal static Element? EstimateDetails(AccountView account, string idPrefix = "") => account.PeriodEstimate is { } estimate
+        ? VStack(12,
+            DetailRow("Estimate method", EstimateMethod, idPrefix + "PeriodEstimateMethod"),
+            DetailRow("Estimated at reset", EstimateAmount(estimate), idPrefix + "PeriodEstimateDetailAmount"),
+            DetailRow("Average per day", estimate.AverageDailyConsumptionUsd is { } daily
+                ? ApproximateMoney(daily) : "Unavailable", idPrefix + "PeriodEstimateDaily"),
+            DetailRow("Period starts", UtcTimestamp(estimate.PeriodStartUtc), idPrefix + "PeriodEstimateStart"),
+            DetailRow("Period resets", UtcTimestamp(estimate.ResetAtUtc), idPrefix + "PeriodEstimateReset"),
+            DetailRow("Observation time", UtcTimestamp(estimate.ObservedAtUtc), idPrefix + "PeriodEstimateObserved"),
+            estimate.UnavailableReason is { } reason
+                ? DetailRow("Estimate unavailable", reason, idPrefix + "PeriodEstimateUnavailable") : null
+        ).AutomationId(idPrefix + "PeriodEstimateDisclosure")
+        : null;
 }
 
 internal abstract class SessionComponent(AppSession session) : Component
@@ -157,6 +216,7 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
                     UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation").FontSize(12))
                 : UI.Copy("Allocation percentage not available").FontSize(12),
+            UI.EstimateRow(account, account.Key + "_Flyout_"),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
                 Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")
@@ -432,8 +492,11 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             CheckBox(Session.InheritIncrement, value => { Session.InheritIncrement = value; Session.Notify(); },
                 "Use default spending increment"),
             TextBox(Session.AccountIncrement, value => Session.AccountIncrement = value, "0 = off; e.g. 50")
-                .IsEnabled(!Session.InheritIncrement).AutomationName("Account USD spending increment"))),
-        HStack(10, Button("Save account", Session.SaveAccount).IsEnabled(!Session.Busy),
+                .IsEnabled(!Session.InheritIncrement).AutomationName("Account USD spending increment"),
+            CheckBox(Session.ShowPeriodEstimate, value => { Session.ShowPeriodEstimate = value == true; Session.Notify(); },
+                "Show estimated period consumption").AutomationId("ShowPeriodEstimate").IsEnabled(!Session.Busy),
+            UI.Copy(UI.EstimateDescription).FontSize(12))),
+        HStack(10, Button("Save account", Session.SaveAccount).AutomationId("SaveAccount").IsEnabled(!Session.Busy),
             Button("Refresh", () => Session.RefreshAccount(account.Key)).IsEnabled(!Session.Busy),
             Button("Reconnect", () => Session.Reconnect(account)).IsEnabled(!Session.Busy)),
         UI.Copy("Removing an account deletes its local credential, not the OAuth grant. History follows your retention policy."),
@@ -454,6 +517,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
                 UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation"))
             : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available"),
+        UI.EstimateRow(account, idPrefix),
         UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
     )).AutomationId(idPrefix + "AccountSummary");
 
@@ -473,6 +537,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.DetailRow("Billing reset", UI.Timestamp(account.Details.ResetAtUtc, "Calendar-month fallback"), idPrefix + "DetailReset"),
         UI.DetailRow("Next refresh", UI.Timestamp(account.Details.NextRefreshUtc, "Pending"), idPrefix + "DetailNextRefresh"),
         UI.Copy("Times are shown in your local time zone.").FontSize(12),
+        UI.EstimateDetails(account, idPrefix),
         !account.Details.IsCurrentPeriod && account.Details.CreditsUsed is not null
             ? UI.Copy("This observation is from a previous billing period and is excluded from current consumption.") : null
     ).AutomationId(idPrefix + "AccountDiagnosticsTable");
