@@ -3,13 +3,23 @@ import Security
 
 @main
 enum PlatformTests {
-    @MainActor static func main() async throws {
+    @MainActor static func main() async {
+        do {
+            try await run()
+        } catch {
+            FileHandle.standardError.write(Data("FAIL: native macOS tests: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+
+    @MainActor private static func run() async throws {
         try ModelTests.run()
         try PeriodEstimateTests.run()
         try NavigationInteractionTests.run()
         try TrayIconRendererTests.run()
         try PopupSmokeReadinessTests.run()
         try UpdateTests.run()
+        try await CallbackWaitTests.run()
         try await SparkleTests.run()
         try await NotificationTests.run()
         func check(_ condition: Bool, _ message: String) throws {

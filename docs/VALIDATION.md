@@ -75,15 +75,37 @@ and smoke modes do not instantiate it or read/write updater preferences.
 
 Local full `bash tools/macos/verify.sh` passes the existing 170 Core tests and
 81 shared controller/bridge assertions in managed and executed arm64 Native
-AOT, 16 CI-routing tests, 30 release-planning/workflow tests and 52 Mac tooling
+AOT, 17 CI-routing tests, 30 release-planning/workflow tests and 52 Mac tooling
 tests, plus native Swift fixtures and both populated/empty UI smoke runs.
 Updater fixtures cover isolation, duplicate startup, preference forwarding,
 disabled actions, update reminders, downloaded/install-on-quit relaunch
 availability, startup failure and explicit errors. The real Sparkle updater
-reads signed synthetic appcasts from a loopback-only fixture server and rejects
-tampered/unsigned feeds and incompatible OS requirements without downloading or
-installing an archive. Test preferences use unique synthetic defaults domains,
-and fixture servers/files are removed after each case.
+reads signed synthetic appcasts from a loopback-only native fixture server and
+rejects tampered/unsigned feeds and incompatible OS requirements without
+downloading or installing an archive. Test preferences use unique synthetic
+defaults domains, and fixture servers/files are removed after each case.
+
+PR #62's first hosted macOS 26 run failed while the Sparkle fixture awaited
+Python subprocess/file-sentinel readiness, not in a navigation/UI assertion.
+The generic startup error and absent retained diagnostics did not establish
+whether Python exited or missed its deadline. The fixture now uses an
+in-process Network.framework listener bound exclusively to `127.0.0.1` and
+awaits its ready callback and Sparkle's completion callback directly. An actual
+HTTP request verifies the listener serves the exact feed bytes before starting
+Sparkle. There are no fixture polling loops or unconditional settling delays;
+ten-second deadlines only guard missing callbacks. Callback fixtures cover
+early completion, duplicate completion, timeout and cancellation.
+
+Per-scenario progress, listener states, HTTP responses, signing exit status and
+Sparkle callback errors go to stderr and `artifacts/macos-test-diagnostics`.
+The native harness exits with a readable failure instead of trapping on an
+uncaught Swift error, and Verify/Release retain these synthetic logs on failure.
+The signed/tampered/unsigned/OS-incompatible cases still execute the real
+Sparkle updater, and negative cases assert appcast-verification callbacks and
+the precise signature-validation/OS-incompatibility error codes rather than
+accepting an arbitrary transport failure as success. The existing UI geometry
+assertions, readiness thresholds and job limits are unchanged. Hosted
+confirmation of the revised fixture remains required.
 
 Real Sparkle signing tools also generate an appcast from a synthetic arm64 DMG.
 Fixtures verify the signature of the exact archive bytes, tampered-feed/archive

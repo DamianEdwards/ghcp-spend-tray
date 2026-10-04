@@ -6,6 +6,8 @@ import Sparkle
 enum SparkleTests {
     static func run() async throws {
         for scenario in ["valid", "tampered", "unsigned", "incompatible"] {
+            let diagnostics = try SparkleDiagnostics(scenario: scenario)
+            diagnostics.record("Starting scenario; macOS \(ProcessInfo.processInfo.operatingSystemVersionString).")
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ghcp-sparkle-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let identifier = "com.damianedwards.GHCPSpendTray.synthetic." + UUID().uuidString
@@ -33,48 +35,19 @@ enum SparkleTests {
                 feed += "<!-- sparkle-signatures:\nedSignature: \(feedSignature)\nlength: \(data.count)\n-->"
             }
             if scenario == "tampered" { feed = feed.replacingOccurrences(of: "0.3.0", with: "0.4.0") }
-            let feedURL = directory.appendingPathComponent("appcast.xml")
-            try Data(feed.utf8).write(to: feedURL)
-            let server = Process()
-            let readiness = directory.appendingPathComponent("port.txt")
-            server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            server.arguments = ["python3", "-u", "-c", """
-            import http.server, pathlib, sys
-            class Handler(http.server.BaseHTTPRequestHandler):
-                def do_GET(self):
-                    if self.path != "/appcast.xml":
-                        self.send_error(404)
-                        return
-                    data = pathlib.Path(sys.argv[1]).read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/xml")
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                def log_message(self, *args):
-                    pass
-            server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-            ready = pathlib.Path(sys.argv[2])
-            temporary = ready.with_suffix(".pending")
-            temporary.write_text(str(server.server_port))
-            temporary.replace(ready)
-            server.serve_forever()
-            """, feedURL.path, readiness.path]
-            server.standardOutput = FileHandle.nullDevice
-            try server.run()
-            defer {
-                if server.isRunning { server.terminate() }
-                server.waitUntilExit()
+            let feedData = Data(feed.utf8)
+            let server = try LoopbackAppcastServer(feed: feedData, report: diagnostics.record)
+            defer { server.stop() }
+            let feedURL = try await server.start()
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            var request = URLRequest(url: feedURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+            request.httpMethod = "GET"
+            let (responseData, response) = try await session.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200, responseData == feedData else {
+                throw AppError.message("The native appcast listener failed its exact-byte HTTP readiness check.")
             }
-            let startupDeadline = ContinuousClock.now.advanced(by: .seconds(10))
-            while !FileManager.default.fileExists(atPath: readiness.path) && server.isRunning &&
-                ContinuousClock.now < startupDeadline { try await Task.sleep(for: .milliseconds(25)) }
-            guard FileManager.default.fileExists(atPath: readiness.path), server.isRunning else {
-                throw AppError.message("The synthetic loopback update server did not start.")
-            }
-            guard let port = Int(try String(contentsOf: readiness, encoding: .utf8)), (1...65535).contains(port) else {
-                throw AppError.message("The synthetic loopback server returned an invalid port.")
-            }
+            diagnostics.record("Listener responsive; exact-byte HTTP check passed.")
             let app = directory.appendingPathComponent("Synthetic.app")
             let contents = app.appendingPathComponent("Contents")
             let macOS = contents.appendingPathComponent("MacOS")
@@ -85,7 +58,7 @@ enum SparkleTests {
                 "CFBundleIdentifier": identifier, "CFBundleName": "Synthetic",
                 "CFBundleExecutable": "Synthetic", "CFBundlePackageType": "APPL",
                 "CFBundleVersion": "0.1.0", "CFBundleShortVersionString": "0.1.0",
-                "SUFeedURL": "http://127.0.0.1:\(port)/appcast.xml", "SUPublicEDKey": key.publicKey.rawRepresentation.base64EncodedString(),
+                "SUFeedURL": feedURL.absoluteString, "SUPublicEDKey": key.publicKey.rawRepresentation.base64EncodedString(),
                 "SUEnableAutomaticChecks": false, "SUEnableSystemProfiling": false, "SUDefaultsDomain": identifier,
                 "SURequireSignedFeed": true, "SUVerifyUpdateBeforeExtraction": true, "SUEnableDownloaderService": false
             ]
@@ -96,26 +69,47 @@ enum SparkleTests {
             sign.arguments = ["--force", "--sign", "-", app.path]
             try sign.run()
             sign.waitUntilExit()
+            diagnostics.record("Synthetic bundle signing exit status: \(sign.terminationStatus).")
             guard sign.terminationStatus == 0, let bundle = Bundle(url: app) else {
                 throw AppError.message("Could not sign the synthetic updater fixture.")
             }
-            let probe = SparkleProbe()
+            let probe = SparkleProbe(report: diagnostics.record)
+            server.failed = { [weak probe] error in probe?.completion.complete(.failure(error)) }
             let driver = SPUStandardUserDriver(hostBundle: bundle, delegate: nil)
             let updater = SPUUpdater(hostBundle: bundle, applicationBundle: bundle, userDriver: driver, delegate: probe)
             try updater.start()
+            diagnostics.record("Updater started; requesting update information.")
             updater.checkForUpdateInformation()
-            let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-            while !probe.finished && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
-            guard probe.finished else { throw AppError.message("Timed out reading the \(scenario) synthetic appcast.") }
+            try await probe.completion.value(failure: "Timed out awaiting Sparkle's \(scenario) update-cycle callback.")
+            try diagnostics.check()
+            guard probe.loadedAppcast == (scenario == "valid" || scenario == "incompatible") else {
+                throw AppError.message("Sparkle's \(scenario) appcast verification outcome was unexpected.")
+            }
             if scenario == "valid" {
                 guard probe.foundVersion == "0.3.0", probe.error == nil else {
                     throw AppError.message("Sparkle did not accept the signed loopback appcast: \((probe.error as NSError?)?.userInfo.description ?? "no valid update").")
                 }
             } else {
-                guard probe.foundVersion == nil, probe.error != nil else {
+                guard probe.foundVersion == nil, let error = probe.error as NSError?,
+                      error.domain == SUSparkleErrorDomain else {
                     throw AppError.message("Sparkle accepted the \(scenario) synthetic appcast.")
                 }
+                if scenario == "incompatible" {
+                    guard error.code == Int(SUError.noUpdateError.rawValue),
+                          (error.userInfo[SPUNoUpdateFoundReasonKey] as? NSNumber)?.intValue ==
+                            Int(SPUNoUpdateFoundReason.systemIsTooOld.rawValue) else {
+                        throw AppError.message("Sparkle did not reject the fixture for the required OS version.")
+                    }
+                } else {
+                    let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
+                    guard error.code == Int(SUError.appcastParseError.rawValue),
+                          underlying?.domain == SUSparkleErrorDomain,
+                          underlying?.code == Int(SUError.validationError.rawValue) else {
+                        throw AppError.message("Sparkle's \(scenario) failure was not appcast signature rejection.")
+                    }
+                }
             }
+            diagnostics.record("PASS: \(scenario); version=\(probe.foundVersion ?? "none"); completed HTTP responses=\(server.servedFeeds).")
         }
         print("PASS: real Sparkle signed appcast discovery, tampering/unsigned-feed rejection and OS filtering without installation or external network access.")
     }
@@ -123,12 +117,55 @@ enum SparkleTests {
 
 @MainActor
 private final class SparkleProbe: NSObject, SPUUpdaterDelegate {
+    let completion = CallbackWait<Void>()
+    private let report: (String) -> Void
     var foundVersion: String?
-    var finished = false
+    var loadedAppcast = false
     var error: Error?
-    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) { foundVersion = item.versionString }
+    init(report: @escaping (String) -> Void) { self.report = report }
+    func updater(_ updater: SPUUpdater, didFinishLoading appcast: SUAppcast) {
+        loadedAppcast = true
+        report("Sparkle finished loading the verified appcast.")
+    }
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        foundVersion = item.versionString
+        report("Sparkle found valid update \(item.versionString).")
+    }
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
         self.error = error
-        finished = true
+        report("Sparkle update-cycle callback: \((error as NSError?)?.description ?? "success").")
+        completion.complete(.success(()))
+    }
+}
+
+@MainActor
+private final class SparkleDiagnostics {
+    private let path: URL
+    private let scenario: String
+    private var lines = ""
+    private var error: Error?
+
+    init(scenario: String) throws {
+        self.scenario = scenario
+        let directory = URL(fileURLWithPath: "artifacts/macos-test-diagnostics", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        path = directory.appendingPathComponent("sparkle-\(scenario).log")
+        try Data().write(to: path)
+    }
+
+    func record(_ message: String) {
+        let line = "SPARKLE [\(scenario)] \(Date().ISO8601Format()): \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+        lines += line
+        do {
+            try lines.write(to: path, atomically: true, encoding: .utf8)
+        } catch {
+            self.error = error
+            FileHandle.standardError.write(Data("Could not retain synthetic Sparkle diagnostics: \(error.localizedDescription)\n".utf8))
+        }
+    }
+
+    func check() throws {
+        if let error { throw error }
     }
 }

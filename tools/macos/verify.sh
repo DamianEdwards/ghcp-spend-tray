@@ -27,5 +27,6 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -O \
     artifacts/macos/GHCPSpendTray.app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib \
     -Xlinker -rpath -Xlinker @executable_path/GHCPSpendTray.app/Contents/Frameworks \
     -o artifacts/macos/platform-tests
-artifacts/macos/platform-tests
+mkdir -p artifacts/macos-test-diagnostics
+artifacts/macos/platform-tests 2>&1 | tee artifacts/macos-test-diagnostics/platform-tests.log
 python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app
