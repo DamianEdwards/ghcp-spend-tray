@@ -44,11 +44,37 @@ struct AccountRow: View {
                 Text(account.details.unlimited ? "Unlimited allocation" : "Allocation unavailable")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let estimate = account.periodEstimate {
+                PeriodEstimateRow(estimate: estimate)
+            }
             Text(account.freshness).font(.caption)
                 .foregroundStyle(account.freshness == "Fresh" ? Color.secondary : Color.orange)
             if let message = account.details.message { Text(message).font(.caption).foregroundStyle(.orange) }
         }
         .padding(.vertical, 5)
+    }
+}
+
+struct PeriodEstimateRow: View {
+    let estimate: PeriodEstimateData
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Estimated at reset")
+                Spacer()
+                Text(estimatedMoney(estimate.estimatedConsumptionUsd)).monospacedDigit()
+                    .accessibilityLabel("Estimated consumption: \(estimatedMoney(estimate.estimatedConsumptionUsd))")
+            }
+            if let reason = estimate.unavailableReason {
+                Text(reason).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(estimate.summary).fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle((estimate.overAllocationUsd ?? 0) > 0 ? Color.orange : Color.secondary)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .help("Based on your average consumption so far this UTC calendar month. Assumes the same pace continues; not an invoice.")
+        .accessibilityIdentifier("PeriodEstimate")
     }
 }
 
@@ -235,6 +261,32 @@ struct UsageView: View {
     }
 }
 
+struct FullWidthDisclosureGroupStyle: DisclosureGroupStyle {
+    var accessibilityIdentifier = "AdvancedDetailsToggle"
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation { configuration.isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption).frame(width: 10).accessibilityHidden(true)
+                    configuration.label
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .help(configuration.isExpanded ? "Hide advanced details" : "Show advanced details")
+            if configuration.isExpanded { configuration.content }
+        }
+    }
+}
+
 struct AccountDiagnosticsView: View {
     let account: AccountData
     var body: some View {
@@ -250,9 +302,19 @@ struct AccountDiagnosticsView: View {
                 row("Resets", dateText(account.details.resetAtUtc))
                 row("Next refresh", dateText(account.details.nextRefreshUtc))
                 row("Period", account.details.periodId ?? "Unavailable")
+                if let estimate = account.periodEstimate {
+                    row("Estimate method", "Average pace so far this UTC calendar month. Assumes the same pace continues; not an invoice.")
+                    row("Estimated at reset", estimatedMoney(estimate.estimatedConsumptionUsd))
+                    row("Average per day (estimated)", estimatedMoney(estimate.averageDailyConsumptionUsd))
+                    row("Estimate period starts", utcTimestampText(estimate.periodStartUtc))
+                    row("Estimate resets", utcTimestampText(estimate.resetAtUtc))
+                    row("Estimate observed at", utcTimestampText(estimate.observedAtUtc))
+                    if let reason = estimate.unavailableReason { row("Estimate unavailable", reason) }
+                }
             }
             .font(.caption).textSelection(.enabled).padding(.top, 8)
         }
+        .disclosureGroupStyle(FullWidthDisclosureGroupStyle(accessibilityIdentifier: account.key + "_AdvancedDetailsToggle"))
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -274,14 +336,42 @@ struct AccountsView: View {
                 AccountEditor(model: model, account: account).id(account.key)
             } else {
                 List(model.dashboard?.accounts ?? []) { account in
-                    Button { model.selectedAccount = account.key } label: { AccountRow(account: account) }
-                        .buttonStyle(.plain).padding(.vertical, 6)
+                    AccountManagementRow(account: account) { model.selectedAccount = account.key }
+                        .listRowSeparator(.hidden).listRowBackground(Color.clear)
                 }
                 if model.dashboard?.accounts.isEmpty == true {
                     Text("No connected accounts.").foregroundStyle(.secondary).padding(24)
                 }
             }
         }
+    }
+}
+
+struct AccountManagementRow: View {
+    let account: AccountData
+    let manage: () -> Void
+
+    var body: some View {
+        Button(action: manage) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    AccountRow(account: account)
+                    HStack(spacing: 4) {
+                        Spacer()
+                        Text("Manage account")
+                        Image(systemName: "chevron.right").accessibilityHidden(true)
+                    }
+                    .font(.caption).foregroundStyle(Color.accentColor)
+                }
+                .padding(6).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Manage \(account.name) on \(account.host)")
+        .accessibilityLabel("Manage account \(account.name) on \(account.host)")
+        .accessibilityHint("Open account preferences and diagnostics")
+        .accessibilityIdentifier(account.key + "_ManageAccount")
     }
 }
 
@@ -292,6 +382,7 @@ struct AccountEditor: View {
     @State private var thresholds = ""
     @State private var increment = ""
     @State private var inherit = true
+    @State private var showPeriodEstimate = false
     @State private var loaded = false
     @State private var removing = false
     var body: some View {
@@ -315,10 +406,16 @@ struct AccountEditor: View {
                     TextField("USD increment (0 disables)", text: $increment)
                         .textFieldStyle(.roundedBorder)
                 }
+                Toggle("Show estimated period consumption", isOn: $showPeriodEstimate)
+                    .disabled(!loaded || model.busy)
+                    .accessibilityIdentifier("ShowPeriodEstimate")
+                Text("Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Save") {
                         do {
-                            var fields: [String: Any] = ["key": account.key, "displayName": name, "thresholds": thresholds]
+                            var fields: [String: Any] = ["key": account.key, "displayName": name, "thresholds": thresholds,
+                                                       "showPeriodEstimate": showPeriodEstimate]
                             if !inherit { fields["spendIncrementUsd"] = NSDecimalNumber(decimal: try parseAmount(increment) ?? 0) }
                             model.perform("account.save", fields: fields)
                         } catch { model.error = error.localizedDescription }
@@ -335,6 +432,7 @@ struct AccountEditor: View {
                 thresholds = value.thresholds
                 increment = decimalText(value.spendIncrementUsd)
                 inherit = value.spendIncrementUsd == nil
+                showPeriodEstimate = value.showPeriodEstimate
                 loaded = true
             }
         }

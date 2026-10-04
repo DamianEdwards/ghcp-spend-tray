@@ -69,7 +69,8 @@ public sealed class BridgeRuntime : IDisposable
                 _events.Enqueue(new()
                 {
                     Kind = "completed", Id = command.Id,
-                    Preferences = new(preferences.DisplayName, preferences.Thresholds, preferences.SpendIncrementUsd, Controller.AccountClientId(key))
+                    Preferences = new(preferences.DisplayName, preferences.Thresholds, preferences.SpendIncrementUsd,
+                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate)
                 });
                 return new();
             }
@@ -119,7 +120,7 @@ public sealed class BridgeRuntime : IDisposable
                     break;
                 case "account.save":
                     await Controller.SaveAccountAsync(Required(command.Key), command.DisplayName ?? "",
-                        command.Thresholds ?? "", command.SpendIncrementUsd);
+                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate);
                     break;
                 case "account.remove":
                     await Controller.RemoveAsync(Required(command.Key));

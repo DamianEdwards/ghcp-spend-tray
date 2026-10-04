@@ -14,6 +14,7 @@ public sealed record Account
     public decimal[]? ThresholdOverrides { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public bool ExcludeFromTray { get; init; }
+    public bool ShowPeriodEstimate { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
 
     public void Validate()

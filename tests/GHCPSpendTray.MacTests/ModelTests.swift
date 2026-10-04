@@ -107,7 +107,7 @@ enum ModelTests {
         model.reconnectAccount(account)
         let preferences = bridge.lastRequest
         try bridge.enqueue("completed", id: preferences["id"], values: ["preferences": [
-            "displayName": "Synthetic", "thresholds": "", "clientId": "original-registration"
+            "displayName": "Synthetic", "thresholds": "", "clientId": "original-registration", "showPeriodEstimate": true
         ]])
         model.poll()
         let reconnect = bridge.lastRequest
@@ -120,7 +120,9 @@ enum ModelTests {
         try check(model.notice == "Account reconnected.", "Reconnect success feedback.")
         model.reconnectAccount(account)
         let legacy = bridge.lastRequest
-        try bridge.enqueue("completed", id: legacy["id"], values: ["preferences": ["displayName": "Synthetic", "thresholds": ""]])
+        try bridge.enqueue("completed", id: legacy["id"], values: ["preferences": [
+            "displayName": "Synthetic", "thresholds": "", "showPeriodEstimate": false
+        ]])
         model.poll()
         try check(model.editingHost && !model.signingIn, "Legacy custom-host reconnect requires its missing client ID.")
 

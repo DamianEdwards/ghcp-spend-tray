@@ -191,9 +191,10 @@ internal static class BackNavigationTests
         public Task RefreshAsync(string? accountKey = null) => _demo.RefreshAsync(accountKey);
         public Task RefreshAccountAsync(string accountKey) => _demo.RefreshAccountAsync(accountKey);
         public Task SaveSettingsAsync(SettingsView settings) => _demo.SaveSettingsAsync(settings);
-        public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null) =>
-            _demo.SaveAccountAsync(key, displayName, thresholds, spendIncrementUsd);
-        public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd) AccountSettings(string key) =>
+        public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
+            bool? showPeriodEstimate = null) =>
+            _demo.SaveAccountAsync(key, displayName, thresholds, spendIncrementUsd, showPeriodEstimate);
+        public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key) =>
             _demo.AccountSettings(key);
         public Task RemoveAsync(string key) => _demo.RemoveAsync(key);
         public Task AddAsync(string host, bool offlineAccess, string? reconnectKey, Action<DevicePrompt> prompt,

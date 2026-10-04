@@ -1,5 +1,71 @@
 # GHCPSpendTray validation and release gates
 
+## macOS per-account period estimates (October 3, 2026)
+
+Account preferences now include an off-by-default Show estimated period
+consumption toggle. Saving it adds an Estimated at reset row to that account's
+popup, Usage page, and account details, with whole-dollar approximate amounts,
+an early-period qualification, UTC reset date, and projected over-allocation
+when applicable. Advanced Details exposes the method, average per day, UTC
+boundaries, and observation time. There is no combined forecast or change to
+actual totals, allocation meters, menu-bar icons, or alert thresholds.
+
+The shared C# calculation explicitly assumes UTC calendar months and rejects
+provider resets that disagree with the next month boundary. Source observation
+time is used when supplied, otherwise fetch time; frozen data never changes its
+pace estimate merely because the clock advances. Freshness and rollover still
+invalidate it. Estimates are unavailable before 24 elapsed hours and marked
+early before 72 hours. Unknown/unlimited allocation does not prevent a dollar
+projection. These are transparent estimation assumptions, not a verified
+provider billing contract or a promise about invoices.
+
+Local managed and executed arm64 Native AOT runs pass 170 Core tests and
+81 shared application/bridge assertions, including calendar/leap-year lengths,
+UTC offsets, precise elapsed-time thresholds, source/fetch timestamps, stable
+cached projections, stale/error/rollover handling, zero usage, allocation
+variants, extreme/invalid decimals, legacy defaults, persistence, omitted-save
+preservation, explicit disable, reconnect, and unchanged actual alerts.
+The Apple-silicon development app builds with warnings treated as errors and
+passes its existing bundle/signature checks. Swift fixtures additionally
+cover exact decimal decoding, whole-dollar/sub-dollar text, early/warning/UTC
+labels, and enabled/disabled/unavailable account-row sizing and rendering.
+Use exact decimal fixtures rather than binary floating-point JSON values.
+
+Populated and empty native smoke runs exercise forecast preference save/read,
+the real Native AOT bridge, unchanged totals/tray percentages, popup anchoring,
+account settings rendering, and explicit disable. SwiftUI view tests now use
+the same stable-SDK selection as app builds. Snapshot captures can omit
+GPU-composited text and do not establish pixel-perfect appearance or VoiceOver
+behavior. macOS 15/Apple-silicon execution and real-provider period/timestamp semantics
+remain validation gates; Windows forecast UI is a separate implementation.
+
+Advanced Details uses one full-width disclosure button shared by Usage and
+account details, with an expanded/collapsed accessibility value. Accounts rows
+use the same native shaded GroupBox as Usage, show a visible Manage account
+action, and remain clickable across their whole area. Native offscreen mouse-event fixtures verify expansion from the heading
+text, collapse from the far end of the heading, existing chevron activation,
+and account navigation from both the information area and explicit action.
+These fixtures send events only to their own synthetic test window.
+
+The first hosted run of the click fixtures failed the whitespace-collapse
+assertion after its fixed 250 ms animation wait. Interaction readiness now
+requires the expected layout/navigation state and stable fitting/bounds
+geometry for 300 ms within a five-second monotonic deadline, using the same
+readiness helper as popup smoke. Synthetic clicks use advancing uptime
+timestamps and event numbers, and deliver mouse-up exactly once whether
+AppKit consumes the queued event during tracking or requires explicit
+delivery. Timeout diagnostics retain the phase, first/latest sizes, bounds,
+window frame, sample count and OS. Five consecutive local native harness
+runs passed without retry-on-failure; hosted confirmation remains required.
+
+Menu-bar activation now makes the shown popover window key as well as
+activating the app, so controls receive normal active colors and keyboard
+focus without forcing a SwiftUI color environment. Real synthetic popup smoke
+requires the active key window at initial presentation, reopening, and live
+resizing, alongside its existing attachment and content-size checks. Failure
+diagnostics include the popup's key-window and key-eligibility state. Transient
+outside-click dismissal, toggle-to-close, and settings navigation are unchanged.
+
 ## Store-only shared Windows App Runtime (October 3, 2026)
 
 Store packaging opts into `StorePackage=true` / `WindowsAppSDKSelfContained=false`

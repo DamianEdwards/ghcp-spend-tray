@@ -45,7 +45,8 @@ def smoke(app):
             result = Path(directory, "smoke-result.txt").read_text()
             if not result.startswith("PASS:"):
                 raise RuntimeError("The application did not complete its smoke assertions.")
-            for page in ("Flyout", "FlyoutWithExample", "Usage", "Accounts", "General", "Notifications", "About"):
+            for page in ("Flyout", "FlyoutWithExample", "FlyoutWithEstimate", "AccountWithEstimate",
+                         "Usage", "Accounts", "General", "Notifications", "About"):
                 if Path(directory, f"{page}.png").stat().st_size < 1000:
                     raise RuntimeError(f"{page} did not render.")
 

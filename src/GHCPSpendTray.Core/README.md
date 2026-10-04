@@ -84,6 +84,15 @@ are not added. SSO/approval failures are surfaced, not bypassed.
 - Local observations remain available for retention and diagnostics, but sampled
   refreshes are not presented as a per-day consumption chart: the quota
   snapshot does not supply a verified daily breakdown.
+- `PeriodEstimates.Create` provides opt-in, per-account UTC calendar-month
+  forecasts; `null` means disabled and an enabled unavailable result carries a
+  reason. A supplied reset must match the next UTC month boundary. Calculations
+  use the source observation time (fetch time when absent), require fresh
+  current-period data and at least 24 elapsed hours, and identify early estimates
+  before 72 hours. Unknown/unlimited allocation permits a dollar estimate but
+  no allocation comparison. Forecasts never feed actual totals, tray indicators,
+  or alerts. `Account.ShowPeriodEstimate` defaults off; reconnect and older
+  account-save callers that omit the nullable preference preserve its value.
 - Configuration and alert ledgers use flush-to-disk, atomic promotion, and a recovery
   copy. Unsupported or damaged primary schemas recover visibly; two invalid copies
   fail rather than silently resetting account configuration or alert state.

@@ -173,6 +173,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             popover.contentSize = view.fittingSize
             NSApplication.shared.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            guard popover.isShown, let window = view.window else {
+                model?.error = "The menu-bar popup could not be shown. Reopen the app to access Settings."
+                return
+            }
+            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -252,6 +257,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             }
             try png.write(to: model.directory.appendingPathComponent("\(name).png"))
         }
+        func saveSettingsSnapshot(_ name: String) throws {
+            guard let view = settingsWindow?.contentView,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                throw AppError.message("Settings view did not render.")
+            }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            guard bitmap.pixelsWide >= 730, let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw AppError.message("Settings render was empty.")
+            }
+            try png.write(to: model.directory.appendingPathComponent("\(name).png"))
+        }
         do {
             progress("waiting for shared initialization")
             try await waitUntil { model.initialized && !model.busy }
@@ -298,14 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 progress("rendering \(page.rawValue)")
                 model.page = page
                 try await Task.sleep(for: .milliseconds(250))
-                guard let view = settingsWindow?.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-                    throw AppError.message("Settings view did not render.")
-                }
-                view.cacheDisplay(in: view.bounds, to: bitmap)
-                guard bitmap.pixelsWide >= 730, let png = bitmap.representation(using: .png, properties: [:]) else {
-                    throw AppError.message("Settings render was empty.")
-                }
-                try png.write(to: model.directory.appendingPathComponent("\(page.rawValue).png"))
+                try saveSettingsSnapshot(page.rawValue)
             }
             if var settings = model.settings {
                 progress("saving and previewing menu-bar settings")
@@ -382,7 +391,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 throw AppError.message("Example account did not update and resize the open popup without sign-in.")
             }
             try savePopupSnapshot("FlyoutWithExample")
+            progress("checking per-account estimate opt-in")
+            guard let example = model.dashboard?.accounts.last, example.periodEstimate == nil else {
+                throw AppError.message("New sample account must default its estimate off.")
+            }
+            let actual = model.dashboard?.consumptionUsd
+            let percentage = model.dashboard?.tray?.rollUp.percent
+            model.perform("account.save", fields: ["key": example.key, "displayName": example.name,
+                                                   "showPeriodEstimate": true])
+            try await waitUntil { !model.busy }
+            try await waitForPopupAnchor(sampleButton, phase: "account estimate opt-in")
+            guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate != nil,
+                  model.dashboard?.accounts.dropLast().allSatisfy({ $0.periodEstimate == nil }) == true,
+                  model.dashboard?.consumptionUsd == actual, model.dashboard?.tray?.rollUp.percent == percentage else {
+                throw AppError.message("Account estimate changed actual totals, other accounts or allocation indicators.")
+            }
+            try savePopupSnapshot("FlyoutWithEstimate")
+            var preferences: AccountPreferences?
+            model.send("account.preferences", fields: ["key": example.key]) { preferences = $0.preferences }
+            try await waitUntil { preferences != nil }
+            guard preferences?.showPeriodEstimate == true else {
+                throw AppError.message("Account estimate preference did not round-trip.")
+            }
             popover.performClose(nil)
+            model.selectedAccount = example.key
+            model.openSettings(.accounts)
+            try await Task.sleep(for: .milliseconds(500))
+            guard model.error == nil else { throw AppError.message("Account estimate settings did not load.") }
+            try saveSettingsSnapshot("AccountWithEstimate")
+            model.perform("account.save", fields: ["key": example.key, "displayName": example.name,
+                                                   "showPeriodEstimate": false])
+            try await waitUntil { !model.busy }
+            guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate == nil else {
+                throw AppError.message("Disabling an account estimate must remove the forecast.")
+            }
             model.addAccount()
             progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))
@@ -436,6 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                         if failure == nil {
                             if !popover.isShown || !popupWindow.isVisible || view.isHiddenOrHasHiddenAncestor {
                                 failure = "Popup is not shown and visible."
+                            } else if !NSApplication.shared.isActive || !popupWindow.isKeyWindow {
+                                failure = "Popup has not become the active key window."
                             } else if popover.isDetached {
                                 failure = "Popup is detached from its positioning view."
                             } else if popupWindow.screen != screen {
@@ -489,7 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         positioningRect=\(popover.positioningRect), positioningScreenRect=\(String(describing: positioningScreenRect)), preferredEdge=minY, shown=\(popover.isShown), detached=\(popover.isDetached), animated=\(popover.animates), appActive=\(NSApplication.shared.isActive);
         button frame=\(button.frame), bounds=\(button.bounds), visibleRect=\(button.visibleRect), hidden=\(button.isHiddenOrHasHiddenAncestor), screenRect=\(String(describing: anchor));
         anchorWindow frame=\(String(describing: anchorWindow?.frame)), contentBounds=\(String(describing: anchorWindow?.contentView?.bounds)), visible=\(String(describing: anchorWindow?.isVisible)), screen=\(String(describing: anchorWindow?.screen?.frame));
-        popupWindow frame=\(String(describing: popupWindow?.frame)), contentBounds=\(String(describing: popupWindow?.contentView?.bounds)), visible=\(String(describing: popupWindow?.isVisible)), screen=\(String(describing: popupWindow?.screen?.frame));
+        popupWindow frame=\(String(describing: popupWindow?.frame)), contentBounds=\(String(describing: popupWindow?.contentView?.bounds)), visible=\(String(describing: popupWindow?.isVisible)), key=\(String(describing: popupWindow?.isKeyWindow)), canBecomeKey=\(String(describing: popupWindow?.canBecomeKey)), screen=\(String(describing: popupWindow?.screen?.frame));
         content frame=\(String(describing: view?.frame)), bounds=\(String(describing: view?.bounds)), hidden=\(String(describing: view?.isHiddenOrHasHiddenAncestor)), contentSize=\(popover.contentSize), preferredContentSize=\(String(describing: controller?.preferredContentSize));
         screens=[\(screens)], macOS=\(ProcessInfo.processInfo.operatingSystemVersionString)
         """

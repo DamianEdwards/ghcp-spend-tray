@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source tools/macos/sdk.sh
 python3 tools/macos/architecture.py host
 rid=osx-arm64
 python3 -m unittest discover -s tools/ci -p 'test_*.py'
@@ -17,6 +18,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -O \
     src/GHCPSpendTray.Mac/Models.swift src/GHCPSpendTray.Mac/Platform.swift \
     src/GHCPSpendTray.Mac/AppModel.swift src/GHCPSpendTray.Mac/TrayIconRenderer.swift \
     src/GHCPSpendTray.Mac/Notifications.swift src/GHCPSpendTray.Mac/PopupSmokeReadiness.swift \
+    src/GHCPSpendTray.Mac/Views.swift \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     tests/GHCPSpendTray.MacTests/*.swift \
     artifacts/macos/GHCPSpendTray.app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib \

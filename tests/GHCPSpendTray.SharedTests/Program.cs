@@ -45,6 +45,8 @@ try
         Check(authorized == 1 && credentials.Values.Count == 1, "Browser approval saves the verified identity without another confirmation.");
         await controller.RefreshAsync();
         Check(dashboard?.ConsumptionUsd == 26.25m && dashboard.Accounts[0].Percent == 105m, "Account consumption and allocation.");
+        Check(dashboard!.Accounts[0].PeriodEstimate is null && !controller.AccountSettings("github.com:1").ShowPeriodEstimate,
+            "New accounts have no estimate until explicitly enabled.");
         Check(notifications == 1, "Percentage and dollar milestones coalesce.");
         Check(notification is { AccountKey: "github.com:1", PercentConsumed: 105m, SpendMilestoneUsd: 20m } &&
             notification.Message.Contains("$26.25") && notification.Title == "GHCPSpendTray consumption alert",
@@ -68,14 +70,28 @@ try
             "Artwork data uses current consumption rather than rounding down to the crossed allocation threshold.");
         Check(credentials.Values.Count == 1, "Credentials are persisted through injected platform store.");
         Check(dashboard?.Tray?.RollUp.Percent == 105 && dashboard.Tray.RollUp.IsOverAllocation, "Shared dashboard includes truthful tray allocation.");
+        await controller.SaveAccountAsync("github.com:1", "", "", showPeriodEstimate: true);
+        Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate && dashboard!.Accounts[0].PeriodEstimate is not null,
+            "Enabling an account estimate updates the shared dashboard.");
+        Check((await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].ShowPeriodEstimate,
+            "Account estimate preference persists.");
+        Check(dashboard!.Accounts[0].PeriodEstimate == PeriodEstimates.Create(dashboard.TrayStates![0],
+            DateTimeOffset.UtcNow, TimeSpan.FromMinutes(controller.Settings.PollMinutes)),
+            "Controller exposes the shared calculation rather than frontend-specific arithmetic.");
+        await Reject<AppOperationException>(() => controller.SaveAccountAsync("github.com:1", "Bad\nname", "", showPeriodEstimate: false));
+        Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate, "Invalid account saves preserve the estimate preference.");
         await controller.SaveSettingsAsync(controller.Settings with
         {
             TrayStyle = TrayIconStyle.Percentage, TrayMode = TrayDisplayMode.PerAccount, ExcludedTrayAccounts = ["github.com:1"]
         });
         Check(dashboard?.Tray?.Icons.Count == 1 && dashboard.Tray.RollUp.Percent is null, "Excluding all accounts retains unavailable roll-up.");
         Check((await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].ExcludeFromTray, "Tray exclusions persist.");
+        Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate, "Global settings saves preserve account estimates.");
         await controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default);
         Check(controller.Settings.ExcludedTrayAccounts?.SequenceEqual(["github.com:1"]) == true, "Reconnect preserves tray exclusion.");
+        Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate &&
+            (await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].ShowPeriodEstimate,
+            "Reconnect preserves and persists account estimate opt-in.");
         await Reject<AppOperationException>(() => controller.AddAsync("github.com", false, null, _ => { }, () => { }, default));
         handler.UserId = "2";
         await Reject<AppOperationException>(() => controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default));
@@ -84,7 +100,12 @@ try
             await Reject<OperationCanceledException>(() => controller.AddAsync("github.com", false, null, _ => cancel.Cancel(), () => { }, cancel.Token));
         Check(credentials.Values.Count == 1, "Cancelled sign-in is not saved.");
         await controller.SaveAccountAsync("github.com:1", "Example", "60, 90", 0m);
-        Check(controller.AccountSettings("github.com:1") == ("Example", "60, 90", 0m), "Per-account inheritance and disable settings.");
+        Check(controller.AccountSettings("github.com:1") == ("Example", "60, 90", 0m, true),
+            "Account saves that omit the estimate argument preserve opt-in.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "60, 90", 0m, showPeriodEstimate: false);
+        Check(!controller.AccountSettings("github.com:1").ShowPeriodEstimate && dashboard!.Accounts[0].PeriodEstimate is null &&
+            !(await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].ShowPeriodEstimate,
+            "Explicit disable persists and completely removes the estimate.");
         handler.UserId = "1";
         await controller.RefreshAccountAsync("github.com:1");
         var persisted = await new JsonStore(root).LoadSettingsAsync();
@@ -111,12 +132,38 @@ try
     }
     using (var bridge = new BridgeRuntime())
     {
+        DashboardView? estimateDashboard = null;
+        void ObserveEstimate(BridgeEvent e) { if (e.Dashboard is not null) estimateDashboard = e.Dashboard; }
         var init = new Command { Id = "init", Method = "initialize", Directory = Path.Combine(root, "demo"), Demo = true };
         var encoded = JsonSerializer.Serialize(init, BridgeJsonContext.Default.Command);
         Check(JsonSerializer.Deserialize(encoded, BridgeJsonContext.Default.Command) == init, "Source-generated command round-trip.");
         Check(bridge.Send(init).Error is null, "Bridge accepts initialization.");
-        var initialized = await Complete(bridge, "init");
+        var initialized = await Complete(bridge, "init", ObserveEstimate);
         Check(initialized.Error is null && initialized.Settings?.PollMinutes == 60, "Bridge reports asynchronous initialization.");
+        Check(estimateDashboard!.Accounts.All(a => a.PeriodEstimate is null), "Demo also defaults estimates off.");
+        bridge.Send(new() { Id = "estimate-default", Method = "account.preferences", Key = "github.com:1" });
+        Check((await Complete(bridge, "estimate-default")).Preferences?.ShowPeriodEstimate == false,
+            "Bridge preferences expose explicit default-off opt-in.");
+        var estimateCommand = new Command { Id = "estimate-on", Method = "account.save", Key = "github.com:1",
+            DisplayName = "Personal (demo)", ShowPeriodEstimate = true };
+        Check(JsonSerializer.Deserialize(JsonSerializer.Serialize(estimateCommand, BridgeJsonContext.Default.Command),
+            BridgeJsonContext.Default.Command) == estimateCommand, "Source-generated command retains the nullable estimate preference.");
+        bridge.Send(estimateCommand);
+        Check((await Complete(bridge, "estimate-on", ObserveEstimate)).Error is null &&
+            estimateDashboard!.Accounts[0].PeriodEstimate is not null && estimateDashboard.Accounts[1].PeriodEstimate is null,
+            "Native AOT bridge serializes per-account results without fabricating an aggregate.");
+        Check(estimateDashboard!.ConsumptionUsd == 42.75m && estimateDashboard.Tray!.RollUp.Percent == 34.2,
+            "Enabling estimates leaves actual consumption and menu-bar allocation unchanged.");
+        bridge.Send(new() { Id = "estimate-omit", Method = "account.save", Key = "github.com:1", DisplayName = "Personal (demo)" });
+        await Complete(bridge, "estimate-omit", ObserveEstimate);
+        Check(estimateDashboard!.Accounts[0].PeriodEstimate is not null, "Omitted bridge argument does not disable an existing estimate.");
+        bridge.Send(new() { Id = "estimate-preferences", Method = "account.preferences", Key = "github.com:1" });
+        Check((await Complete(bridge, "estimate-preferences")).Preferences?.ShowPeriodEstimate == true,
+            "Enabled preference round-trips through generated bridge JSON.");
+        bridge.Send(new() { Id = "estimate-off", Method = "account.save", Key = "github.com:1",
+            DisplayName = "Personal (demo)", ShowPeriodEstimate = false });
+        await Complete(bridge, "estimate-off", ObserveEstimate);
+        Check(estimateDashboard!.Accounts.All(a => a.PeriodEstimate is null), "Explicit bridge disable removes the result.");
         Check(bridge.Send(new() { Id = "save", Method = "settings.save", Settings = new(30, "50, 80, 100", true, false, 12.50m) }).Error is null, "Bridge accepts settings.");
         var saved = await Complete(bridge, "save");
         Check(saved.Settings?.SpendIncrementUsd == 12.50m, "Decimal settings retain exact cents across bridge.");
