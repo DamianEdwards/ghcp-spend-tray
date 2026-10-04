@@ -66,6 +66,15 @@ class CodeQLTests(unittest.TestCase):
             else:
                 self.assertRegex(action, r"@[0-9a-f]{40}$")
 
+    def test_failed_swift_extraction_retains_diagnostics(self):
+        diagnostics = self.workflow.split("- name: Retain failed Swift extraction diagnostics\n", 1)[1]
+        self.assertIn("if: failure() && matrix.language == 'swift'", diagnostics)
+        self.assertIn("codeql_databases/swift/log/", diagnostics)
+        self.assertIn("codeql_databases/swift/diagnostic/", diagnostics)
+        self.assertIn("codeql_databases/log/build-tracer.log", diagnostics)
+        self.assertIn("if-no-files-found: error", diagnostics)
+        self.assertIn("retention-days: 7", diagnostics)
+
 
 if __name__ == "__main__":
     unittest.main()
