@@ -392,6 +392,13 @@ removed; its universal/Rosetta results are not current distribution claims.
 | Windows extraction | Windows platform adapter test project compiles on macOS; full WinUI build/execution requires Windows SDK executables and remains a Windows CI gate |
 | Production distribution | Signing/notarization automation implemented; not executed locally without the owner's Developer ID/API credentials |
 
+The October 4 macOS warning-badge update uses a compact, bold exclamation
+inside a 10-point circular border with transparent clearance from the pie.
+Native renderer checks at 1x and 2x cover the border, stem, dot, transparent
+interior, and unchanged pixels outside the warning corner. Unavailable pie
+and partial-usage indicators share this badge; unavailable percentage mode
+still shows `?`, and genuine zero usage remains an unbadged empty pie.
+
 Reproduce current Apple-silicon-only verification with
 `bash tools/macos/verify.sh` on a native arm64 Mac. There is no Intel slice
 or Rosetta smoke path in current builds.
