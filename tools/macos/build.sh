@@ -8,6 +8,7 @@ channel="${2:-Development}"
 python3 tools/macos/release.py version "$version" >/dev/null
 case "$channel" in Development|Preview|Stable) ;; *) echo "Invalid release channel." >&2; exit 1 ;; esac
 source tools/macos/sdk.sh
+source tools/macos/sparkle.sh
 export MACOSX_DEPLOYMENT_TARGET=15.0
 # Remove the obsolete generated Intel build output, never release assets.
 rm -rf artifacts/macos/x64
@@ -22,6 +23,7 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -O -g \
     -target arm64-apple-macos15.0 \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     src/GHCPSpendTray.Mac/*.swift \
+    -F "$SPARKLE_ROOT" -framework Sparkle \
     "$output/GHCPSpendTray.MacBridge.dylib" \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     -o "$output/GHCPSpendTray"
@@ -29,10 +31,20 @@ python3 tools/macos/architecture.py binary "$output/GHCPSpendTray" "$output/GHCP
 # Replace old bundle binaries outright so a reused universal app cannot retain Intel slices.
 cp "$output/GHCPSpendTray" "$app/Contents/MacOS/GHCPSpendTray"
 cp "$output/GHCPSpendTray.MacBridge.dylib" "$app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib"
+rm -rf "$app/Contents/Frameworks/Sparkle.framework"
+ditto "$SPARKLE_ROOT/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
+while IFS= read -r binary; do
+    if file "$binary" | grep -q 'Mach-O'; then
+        lipo "$binary" -thin arm64 -output "$binary.arm64"
+        mv "$binary.arm64" "$binary"
+    fi
+done < <(find "$app/Contents/Frameworks/Sparkle.framework" -type f)
 cp packaging/macos/Info.plist "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :GHCPReleaseChannel $channel" "$app/Contents/Info.plist"
+python3 tools/macos/updates.py configure "$app/Contents/Info.plist" "$channel"
+cp "$SPARKLE_ROOT/LICENSE" "$app/Contents/Resources/Sparkle-LICENSE.txt"
 cp LICENSE "$app/Contents/Resources/LICENSE.txt"
 cp PRIVACY.md "$app/Contents/Resources/PRIVACY.md"
 
@@ -55,6 +67,7 @@ done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
 # Local output is ad-hoc signed only. Release automation replaces these signatures.
 codesign --force --sign - "$app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib"
+bash tools/macos/sign-sparkle.sh "$app" -
 codesign --force --sign - "$app"
 bash tools/macos/test-package.sh "$app" "$version"
 echo "Built Apple-silicon-only development app: $app"

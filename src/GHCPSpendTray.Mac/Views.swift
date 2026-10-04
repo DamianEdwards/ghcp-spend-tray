@@ -180,6 +180,7 @@ struct FlyoutView: View {
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
             }
+            UpdateReminder(updates: model.updates)
         }
         .padding(18).frame(width: 400)
     }
@@ -674,23 +675,24 @@ struct SignInView: View {
 struct AboutView: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        VStack(spacing: 16) {
-            Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 96, height: 96)
-            Text("GHCPSpendTray").font(.largeTitle)
-            Text("macOS \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
-            Text(Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development")
-                .foregroundStyle(.secondary)
-            Text("An independent GitHub Copilot AI-credit consumption monitor.\nNot affiliated with or endorsed by GitHub.")
-                .multilineTextAlignment(.center)
-            Text("C# / .NET Native AOT shared engine. Native SwiftUI frontend.").font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("GitHub Releases") { model.openURL("https://github.com/DamianEdwards/ghcp-spend-tray/releases") }
-                Button("Privacy Policy") { model.openURL("https://github.com/DamianEdwards/ghcp-spend-tray/blob/main/PRIVACY.md") }
-                Button("Report an Issue") { model.openURL("https://github.com/DamianEdwards/ghcp-spend-tray/issues") }
-            }
-            Text("Updates are manual: quit the app, then replace it with a newer macOS release. Settings and history remain on this Mac.")
-                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Text("MIT License. Copyright (c) 2026 Damian Edwards.").font(.caption)
-        }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 96, height: 96)
+                Text("GHCPSpendTray").font(.largeTitle)
+                Text("macOS \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
+                Text(Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development")
+                    .foregroundStyle(.secondary)
+                Text("An independent GitHub Copilot AI-credit consumption monitor.\nNot affiliated with or endorsed by GitHub.")
+                    .multilineTextAlignment(.center)
+                Text("C# / .NET Native AOT shared engine. Native SwiftUI frontend.").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("GitHub Releases") { model.openURL("https://github.com/DamianEdwards/ghcp-spend-tray/releases") }
+                    Button("Privacy Policy") { model.openURL("https://github.com/DamianEdwards/ghcp-spend-tray/blob/main/PRIVACY.md") }
+                    Button("Report an Issue") { model.openURL("https://github.com/DamianEdwards/ghcp-spend-tray/issues") }
+                }
+                UpdatePreferences(updates: model.updates)
+                Text("MIT License. Copyright (c) 2026 Damian Edwards.").font(.caption)
+            }.padding(28).frame(maxWidth: .infinity)
+        }
     }
 }

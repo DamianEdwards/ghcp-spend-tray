@@ -17,6 +17,8 @@ missing = [name for name in required if not os.environ.get(name, "").strip()]
 if missing:
     raise SystemExit("Configure " + ", ".join(missing) + " in production. Unsigned releases are prohibited.")
 PY
+source tools/macos/sparkle.sh
+python3 tools/macos/updates.py keys
 app="$PWD/artifacts/macos/GHCPSpendTray.app"
 bash tools/macos/test-package.sh "$app" "$version"
 temporary="$(mktemp -d -t ghcp-signing)"
@@ -71,6 +73,8 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password
 stage "sign Native AOT library"
 codesign --force --sign "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" --options runtime --timestamp \
     "$app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib"
+stage "sign Sparkle framework and helpers"
+bash tools/macos/sign-sparkle.sh "$app" "$MACOS_SIGNING_IDENTITY" "$keychain"
 stage "sign application"
 codesign --force --sign "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" --options runtime --timestamp "$app"
 stage "verify application signature"
@@ -96,6 +100,8 @@ stage "staple and assess notarized disk image"
 xcrun stapler staple "$dmg"
 xcrun stapler validate "$dmg"
 spctl --assess --type open --context context:primary-signature "$dmg"
+stage "sign update archive and release appcast"
+python3 tools/macos/updates.py generate "$dmg" "$version"
 export GHCP_MAC_VERSION="$version"
 stage "write release metadata and checksums"
 python3 - <<'PY'

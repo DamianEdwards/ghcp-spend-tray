@@ -14,10 +14,13 @@ for name in GHCPSpendTray.Tests GHCPSpendTray.SharedTests; do
     "artifacts/tests/$rid/$name/$name" | tail -n 1
 done
 bash tools/macos/build.sh
+source tools/macos/sparkle.sh
 xcrun swiftc -swift-version 6 -warnings-as-errors -O \
     src/GHCPSpendTray.Mac/Models.swift src/GHCPSpendTray.Mac/Platform.swift \
     src/GHCPSpendTray.Mac/AppModel.swift src/GHCPSpendTray.Mac/TrayIconRenderer.swift \
     src/GHCPSpendTray.Mac/Notifications.swift src/GHCPSpendTray.Mac/PopupSmokeReadiness.swift \
+    src/GHCPSpendTray.Mac/Updates.swift src/GHCPSpendTray.Mac/UpdateViews.swift \
+    -F "$SPARKLE_ROOT" -framework Sparkle \
     src/GHCPSpendTray.Mac/Views.swift \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     tests/GHCPSpendTray.MacTests/*.swift \

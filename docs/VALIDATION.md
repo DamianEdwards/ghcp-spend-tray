@@ -63,6 +63,46 @@ harnesses passed. The instrumented Store x64 Native AOT app also passed both
 local packaged smoke scenarios, retained their final phase, and removed its
 isolated development registration. Hosted confirmation remains required.
 
+## macOS Sparkle updates (October 3, 2026)
+
+The native Swift frontend now embeds checksum-pinned Sparkle 2.10.0 without
+changing the `swiftc`/Native AOT build model. Every embedded Sparkle Mach-O
+file is thinned to arm64 before inside-out signing. Package inspection covers
+framework/helper presence, executable permissions, architecture, dependency
+paths, signed-feed/verification configuration and consent/profiling defaults.
+Public builds use a retained standard updater controller; development, demo
+and smoke modes do not instantiate it or read/write updater preferences.
+
+Local full `bash tools/macos/verify.sh` passes the existing 170 Core tests and
+81 shared controller/bridge assertions in managed and executed arm64 Native
+AOT, 16 CI-routing tests, 30 release-planning/workflow tests and 52 Mac tooling
+tests, plus native Swift fixtures and both populated/empty UI smoke runs.
+Updater fixtures cover isolation, duplicate startup, preference forwarding,
+disabled actions, update reminders, downloaded/install-on-quit relaunch
+availability, startup failure and explicit errors. The real Sparkle updater
+reads signed synthetic appcasts from a loopback-only fixture server and rejects
+tampered/unsigned feeds and incompatible OS requirements without downloading or
+installing an archive. Test preferences use unique synthetic defaults domains,
+and fixture servers/files are removed after each case.
+
+Real Sparkle signing tools also generate an appcast from a synthetic arm64 DMG.
+Fixtures verify the signature of the exact archive bytes, tampered-feed/archive
+rejection, private/public-key mismatch, immutable versioned download URLs,
+stable-only numeric ordering, preview/Windows/draft exclusion, metadata
+constraints, retention of older entries, missing-latest-feed failure, and feed
+retry orchestration after an already-published release. Only public test-vector
+or ephemeral synthetic keys are used.
+
+Production Apple signing/notarization with the new embedded helpers, GitHub
+Pages deployment, macOS 15 execution, and replacement/relaunch between two
+Developer ID signed/notarized versions remain release acceptance gates.
+Configure the dedicated production Sparkle key pair and Actions-based Pages
+site as described in [RELEASING.md](RELEASING.md) before publishing. Exercise
+manual and opt-in automatic updates, read-only/translocated installations,
+declined authorization, unavailable feeds, login startup, and preservation of
+synthetic history/settings/Keychain items. No production keys were generated
+or cloud configuration changed during local implementation.
+
 ## macOS per-account period estimates (October 3, 2026)
 
 Account preferences now include an off-by-default Show estimated period

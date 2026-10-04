@@ -56,6 +56,7 @@ final class AppModel: ObservableObject {
     @Published var notificationBusy = false
     let directory: URL
     let demo: Bool
+    let updates: AppUpdates
     var showSettings: (() -> Void)?
     var dashboardChanged: ((Dashboard) -> Void)?
     private var timer: Timer?
@@ -72,11 +73,12 @@ final class AppModel: ObservableObject {
     }
 
     init(directory: URL, demo: Bool, bridge: any ApplicationBridge = NativeApplicationBridge(),
-         notifications: any NotificationService = NativeNotifications()) {
+         notifications: any NotificationService = NativeNotifications(), updates: AppUpdates = AppUpdates()) {
         self.directory = directory
         self.demo = demo
         self.bridge = bridge
         self.notifications = notifications
+        self.updates = updates
     }
 
     func start(empty: Bool) {

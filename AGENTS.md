@@ -36,6 +36,14 @@ and tests that exact arm64 artifact on macOS 15/Apple silicon (`macos-15`)
 without rebuilding.
 Executable and Native AOT bridge slices must be exactly arm64; universal
 and Intel-only artifacts are rejected. Windows x64/ARM64 support is unchanged.
+Sparkle is a checksum-pinned binary dependency in `packaging/macos/sparkle.json`;
+the `swiftc` build embeds its framework and makes every helper arm64-only before
+inside-out signing. Keep updater state/preferences native to Swift and disabled
+in development/demo/smoke modes. Public builds require `SPARKLE_PUBLIC_ED_KEY`;
+release/feed signing additionally requires the protected private seed. Never
+commit or log production signing keys. `macos-updates.yml` rebuilds the signed,
+stable-only Pages appcast from immutable release assets and can be retried
+without rebuilding or republishing a release.
 Production Mac signing also requires Xcode's
 `notarytool` and configured Apple credentials.
 Mac versions live in `packaging/macos/version.txt` for development and

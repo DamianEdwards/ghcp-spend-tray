@@ -538,7 +538,8 @@ users need no .NET installation. macOS 15 is
 the minimum deployment target. Keychain, notifications, and login-item calls
 are implemented natively in Swift; the shared C# application controller handles
 auth, storage, scheduling, accounting, and alert decisions. There is no IPC
-server, web frontend, or helper process.
+server or web frontend. The app also embeds the checksum-pinned Sparkle framework
+and its native updater helpers; all bundled Mach-O files are arm64-only.
 
 `packaging/macos/version.txt` is only the local Mac development default.
 `bash tools/macos/build.sh 0.2.0 Preview` overrides version/channel locally.
@@ -571,6 +572,9 @@ is no Mac App Store app, entitlement, or submission workflow.
 | Secret `MACOS_NOTARY_KEY` | Contents of a team App Store Connect API `.p8` key authorized for notarization |
 | Secret `MACOS_NOTARY_KEY_ID` | API key ID |
 | Secret `MACOS_NOTARY_ISSUER` | API issuer ID |
+| Variable `SPARKLE_PUBLIC_ED_KEY` | Base64 Ed25519 public key embedded in public app bundles |
+| Secret `SPARKLE_PRIVATE_ED_KEY` | Matching base64 32-byte private seed exported by Sparkle |
+| Variable `MACOS_UPDATE_FEED_URL` | Optional override of `https://damianedwards.github.io/ghcp-spend-tray/appcast.xml`; must match this repository's Pages URL |
 
 These credentials cannot be generated from source or inferred from Windows
 signing configuration. Store them in environment secrets, not workflow files,
@@ -579,7 +583,8 @@ only for the notarization service, not App Store submission.
 
 The workflow imports the certificate into a temporary unlocked Keychain,
 signs the native library and app inside-out with hardened runtime and a secure
-timestamp, and notarizes/staples the app. No JIT or disabled library-validation
+timestamp, including Sparkle's XPC services, Autoupdate, updater app and framework,
+and notarizes/staples the app. No JIT or disabled library-validation
 entitlement is needed for Native AOT. It then creates, signs, notarizes and
 staples a DMG containing the app and an Applications link. Temporary signing
 credentials/Keychain are removed by the script's exit trap.
@@ -632,7 +637,11 @@ and system-default trust, never an **Always Trust** override.
    Gatekeeper acceptance and attestation before publishing.
 
 Mac release assets are `GHCPSpendTray-macOS-<version>.dmg`,
-`release-macos.json`, and `SHA256SUMS`. Metadata records platform, version,
+`release-macos.json`, `appcast.xml`, and `SHA256SUMS`. The one-release appcast
+and final, stapled DMG are Ed25519 signed after notarization, before checksums
+and draft upload. The feed references the exact immutable versioned download,
+declares macOS 15 and Apple silicon, and includes a link to the release notes.
+Metadata records platform, version,
 source commit, originating workflow run ID, bundle identifier, architectures,
 and notarization. Current metadata requires `architectures: ["arm64"]`;
 universal/Intel metadata is rejected before draft staging. Mac releases
@@ -654,13 +663,76 @@ Before production acceptance, complete the Mac checklist in
 [VALIDATION.md](VALIDATION.md), including clean install/update, login startup,
 Keychain prompts, notification permissions, and VoiceOver.
 
+### Set up Sparkle updates once
+
+1. In repository **Settings > Pages**, choose **GitHub Actions** as the source.
+   The update workflow deploys the site; do not enable branch-based publishing.
+   Keep the **github-pages** environment restricted to `main`.
+2. Restore the pinned tools with `source tools/macos/sparkle.sh` from the
+   repository root. Generate a dedicated signing key with
+   `"$SPARKLE_ROOT/bin/generate_keys" --account ghcpspendtray`.
+   This stores the private key in your login Keychain and prints the public key.
+   Add the public key as **production** variable `SPARKLE_PUBLIC_ED_KEY`.
+3. Export the seed with
+   `"$SPARKLE_ROOT/bin/generate_keys" --account ghcpspendtray -x /absolute/private/location/sparkle-seed`.
+   Use a private location outside the checkout. Set the file's contents as
+   **production** secret `SPARKLE_PRIVATE_ED_KEY`, keep a secure offline backup,
+   and remove the temporary exported file. Never paste it into issues, logs,
+   source, commands with literal keys, or app bundles.
+4. For a fork/custom Pages hostname, set `MACOS_UPDATE_FEED_URL` to the site's
+   HTTPS URL followed by `/appcast.xml` before the first public build. The feed
+   workflow verifies that this URL matches the configured Actions-based Pages
+   site. The address is embedded in installed apps; keep it stable.
+
+The signing tools require the modern 32-byte seed format, not Sparkle's legacy
+64-byte export. Private/public key mismatch stops signing before notarization.
+Existing Apple credentials remain necessary and are separate from Sparkle keys.
+Do not change both signing systems simultaneously. This publisher verifies
+historical appcasts with the configured Sparkle key; key rotation requires a
+deliberate migration of feed verification and already-installed clients, not
+simply replacing environment settings.
+
+After publishing a stable Mac release, **Release** calls **macOS Update Feed**.
+Generation uses the protected **production** environment, reads public releases
+with pagination, verifies their appcast signatures, and assembles a signed,
+numeric-version-ordered feed. Windows tags, drafts and previews are excluded;
+older compatible updates remain available. Legacy releases without Sparkle are
+ignored only after a newer signed update exists. A latest stable release
+missing its appcast blocks deployment rather than silently advertising an older
+version. GitHub Pages serves only the feed/site; DMGs stay in GitHub Releases.
+
+Feed publication is separate from immutable release publication. If Pages
+deployment fails after the DMG is public, **Re-run all jobs** retains the version
+plan, skips the published Mac build, and retries the feed. Alternatively dispatch
+**macOS Update Feed** from `main`: it rebuilds from current public assets without
+bumping versions, signing/notarizing apps, or changing releases. Feed runs are
+serialized through deployment so an older run cannot overwrite a newer feed.
+Preview-only and Windows-only releases do not publish the feed.
+
+The app retains Sparkle's permission prompt and daily schedule. Automatic
+downloads/install-on-quit are off by default and user-controlled; Sparkle stores
+these preferences in native defaults, separate from shared account settings.
+The popup and About page surface gentle reminders without stealing focus.
+Downloaded updates expose **Install and Relaunch...**, which opens Sparkle's
+standard installation UI. Updates preserve the existing bundle identity,
+external Application Support data and Keychain credential targets. Updating
+from a disk image or other non-writable/translocated installation may require
+moving the app to Applications first.
+
+Development/demo/smoke builds never start Sparkle, access its preferences, or
+contact the update feed. Linking and signing its embedded binaries remains part
+of ordinary local/CI verification. The first Sparkle-enabled release must be
+installed manually by existing users; earlier app versions cannot bootstrap
+an updater they do not contain.
+
 ## Updates
 
-A GitHub-hosted `.appinstaller` feed is possible: a stable HTTPS descriptor can
+A Windows GitHub-hosted `.appinstaller` feed is possible: a stable HTTPS descriptor can
 reference versioned release URLs for the bundle and request App Installer update
 checks. It adds feed publication, identity/version coordination, HTTP behavior and
 long-running-process update testing. It is deliberately not implemented now.
-GitHub releases are manually installed/upgraded; no updater or update prompt runs.
+Windows GitHub releases are manually installed/upgraded; no Windows updater or
+update prompt runs. macOS uses the Sparkle workflow described above.
 
 For Store publishing, the Store signs the submitted MSIX packages and manages
 updates; Azure signing remains for direct GitHub distribution. Store API access

@@ -8,7 +8,7 @@ import UserNotifications
 #endif
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate {
     private var model: AppModel?
     private var statusItems: [String: NSStatusItem] = [:]
     private let popover = NSPopover()
@@ -77,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 }
             }
             model.start(empty: empty)
+            model.updates.start(channel: Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development",
+                                isolated: demo)
             if smoke { Task { await runSmoke(model) } }
         } catch {
             if smoke { fputs("FAIL: macOS startup smoke test.\n", stderr); exit(1) }
@@ -100,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         mainMenu.addItem(applicationItem)
         let applicationMenu = NSMenu()
         applicationMenu.addItem(withTitle: "Settings...", action: #selector(settingsAction), keyEquivalent: ",").target = self
+        applicationMenu.addItem(withTitle: "Check for Updates...", action: #selector(updateAction), keyEquivalent: "").target = self
         applicationMenu.addItem(.separator())
         applicationMenu.addItem(withTitle: "Quit GHCPSpendTray", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         applicationItem.submenu = applicationMenu
@@ -153,6 +156,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             refresh.target = self
             refresh.isEnabled = model?.initialized == true && model?.busy == false
             menu.addItem(withTitle: "Settings...", action: #selector(settingsAction), keyEquivalent: ",").target = self
+            let update = menu.addItem(withTitle: model?.updates.actionTitle ?? "Check for Updates...",
+                                      action: #selector(updateAction), keyEquivalent: "")
+            update.target = self
+            update.isEnabled = model?.updates.enabled == true && model?.updates.state.canCheck == true
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit GHCPSpendTray", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             menu.autoenablesItems = false
@@ -184,6 +191,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     @objc private func showUsage() { model?.openSettings(.usage) }
     @objc private func settingsAction() { openSettings() }
     @objc private func refreshAction() { model?.perform("refresh") }
+    @objc private func updateAction() {
+        popover.performClose(nil)
+        model?.updates.checkForUpdates()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(updateAction) {
+            menuItem.title = model?.updates.actionTitle ?? "Check for Updates..."
+            return model?.updates.enabled == true && model?.updates.state.canCheck == true
+        }
+        return true
+    }
 
     private func openSettings() {
         guard let model else { return }
@@ -271,6 +290,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         do {
             progress("waiting for shared initialization")
             try await waitUntil { model.initialized && !model.busy }
+            guard !model.updates.enabled, model.updates.state.availableVersion == nil,
+                  model.updates.state.error == nil else {
+                throw AppError.message("Isolated smoke mode must not start the updater.")
+            }
             // Read-only native callback coverage: no permission prompt, alert, or account access.
             progress("reading native notification settings")
             _ = await NativeNotifications().status()

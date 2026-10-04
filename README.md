@@ -98,9 +98,18 @@ The monochrome template graphics adapt to macOS light/dark menu-bar appearance.
 Per-account icons open account settings. If macOS hides icons on a crowded
 menu bar, reopening GHCPSpendTray brings its settings window forward.
 
-Updates are manual: quit GHCPSpendTray, then replace the app in Applications
-with a newer macOS release. Its stable bundle identifier preserves access to
-local settings, history, and Keychain credentials. Windows (`v*`) and macOS
+Public builds use [Sparkle](https://sparkle-project.org/) for in-app updates.
+Choose **Check for Updates...** from the menu-bar context menu or **Settings >
+About**. Sparkle asks permission to check automatically; automatic downloads
+and installation on quit are optional. An available update appears in the
+popup, and a downloaded update offers **Install and Relaunch...** without
+waiting for you to quit the app. Stable releases are the only automatic update
+channel, including for preview builds. Development and demonstration builds
+never check for updates. Older releases without Sparkle need one final manual
+upgrade: quit the app and replace it in Applications.
+
+The stable bundle identifier preserves access to local settings, history,
+and Keychain credentials. Windows (`v*`) and macOS
 (`macos-v*`) releases have independent versions; neither platform upgrades or
 migrates the other's local data. The Mac app does not use the App Store.
 
