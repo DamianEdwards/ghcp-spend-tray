@@ -47,6 +47,17 @@ text, collapse from the far end of the heading, existing chevron activation,
 and account navigation from both the information area and explicit action.
 These fixtures send events only to their own synthetic test window.
 
+The first hosted run of the click fixtures failed the whitespace-collapse
+assertion after its fixed 250 ms animation wait. Interaction readiness now
+requires the expected layout/navigation state and stable fitting/bounds
+geometry for 300 ms within a five-second monotonic deadline, using the same
+readiness helper as popup smoke. Synthetic clicks use advancing uptime
+timestamps and event numbers, and deliver mouse-up exactly once whether
+AppKit consumes the queued event during tracking or requires explicit
+delivery. Timeout diagnostics retain the phase, first/latest sizes, bounds,
+window frame, sample count and OS. Five consecutive local native harness
+runs passed without retry-on-failure; hosted confirmation remains required.
+
 Menu-bar activation now makes the shown popover window key as well as
 activating the app, so controls receive normal active colors and keyboard
 focus without forcing a SwiftUI color environment. Real synthetic popup smoke
