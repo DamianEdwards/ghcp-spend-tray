@@ -406,7 +406,8 @@ introducing external Swift packages. Xcode and Apple SDK updates require
 manual changes to the shared `.github/actions/setup-macos` toolchain and
 macOS verification; Dependabot does not update these toolchain pins.
 
-Keep secret scanning and push protection enabled. Actions use read-only
+Keep secret scanning, push protection, and private vulnerability reporting
+enabled on this public repository. Actions use read-only
 default token permissions, require full-SHA action pins, and cannot approve
 pull requests. The main branch requires pull requests and the aggregate
 **Verification** check; the weekly/manual CodeQL scan is not a pre-merge gate.

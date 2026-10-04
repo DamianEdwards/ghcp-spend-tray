@@ -48,7 +48,7 @@ class CodeQLTests(unittest.TestCase):
 
     def test_only_codeql_builds_disable_apple_bridging_pch(self):
         build = (ROOT / "tools/macos/build.sh").read_text()
-        self.assertIn("swift_options=()", build)
+        self.assertIn("swift_options=(-swift-version 6 -warnings-as-errors -O -g)", build)
         options = build.split('if [[ -n "${CODEQL_EXTRACTOR_SWIFT_ROOT:-}" ]]; then\n', 1)[1].split("\nfi\n", 1)[0]
         self.assertIn("swift_options+=(-disable-bridging-pch)", options)
         self.assertIn('xcrun swiftc "${swift_options[@]}"', build)
