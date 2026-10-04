@@ -39,13 +39,28 @@ enum TrayIconRenderer {
                 if indicator.isOverAllocation { badge("+", at: 0, width: bounds.width) }
             }
             if unavailablePie || (indicator.percent != nil && indicator.isPartial) {
-                badge("!", at: bounds.width - 8, width: bounds.width)
+                warningBadge(at: bounds.width - 10)
             }
             return true
         }
         image.isTemplate = true
         image.accessibilityDescription = indicator.details
         return image
+    }
+
+    private static func warningBadge(at x: CGFloat) {
+        let circle = NSRect(x: x, y: 0, width: 10, height: 10)
+        let clearance = circle.insetBy(dx: -0.5, dy: -0.5)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(ovalIn: clearance).addClip()
+        clearance.fill(using: .clear)
+        NSGraphicsContext.restoreGraphicsState()
+        let border = NSBezierPath(ovalIn: circle.insetBy(dx: 0.75, dy: 0.75))
+        border.lineWidth = 1.5
+        border.stroke()
+        NSBezierPath(roundedRect: NSRect(x: x + 4.2, y: 4.6, width: 1.6, height: 3),
+                     xRadius: 0.3, yRadius: 0.3).fill()
+        NSBezierPath(ovalIn: NSRect(x: x + 4.2, y: 2, width: 1.6, height: 1.6)).fill()
     }
 
     private static func badge(_ text: String, at x: CGFloat, width: CGFloat) {

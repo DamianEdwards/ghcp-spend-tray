@@ -34,7 +34,7 @@ enum TrayIconRendererTests {
             let empty = try pixels(zero, scale: scale)
             let warning = try pixels(partialZero, scale: scale)
             let numeric = try pixels(question, scale: scale)
-            try check(missing == warning, "Unavailable pie is an empty outline with the existing ! warning badge, at \(scale)x.")
+            try check(missing == warning, "Unavailable pie is an empty outline with the circular ! warning badge, at \(scale)x.")
             try check(missing != empty, "Unavailable pie must be distinguishable from genuine 0% usage, at \(scale)x.")
             try check(missing == pixels(selectedUnavailable, scale: scale),
                       "Startup, empty selection and selected-but-unavailable accounts use the same warning pie, at \(scale)x.")
@@ -46,7 +46,7 @@ enum TrayIconRendererTests {
             let center = 11 * scale * 22 * scale + 11 * scale
             try check(missing[center] == 0 && empty[center] == 0 && filled[center] > 0,
                       "Unavailable and 0% pies are unfilled; 100% pies are filled, at \(scale)x.")
-            let badgeStart = 14 * scale
+            let badgeStart = 11 * scale
             let width = 22 * scale
             for y in 0..<(22 * scale) {
                 for x in 0..<badgeStart {
@@ -54,6 +54,13 @@ enum TrayIconRendererTests {
                               "Unavailable pie changes only the warning corner, at \(scale)x.")
                 }
             }
+            func alpha(_ x: Int, _ y: Int) -> UInt8 {
+                missing[(22 * scale - 1 - y * scale) * width + x * scale]
+            }
+            try check(alpha(17, 9) > 0 && alpha(13, 5) > 0 && alpha(21, 5) > 0,
+                      "Warning badge has a circular border, at \(scale)x.")
+            try check(alpha(17, 6) > 0 && alpha(17, 2) > 0 && alpha(15, 5) == 0,
+                      "Compact bold exclamation has a stem, dot and transparent interior, at \(scale)x.")
             for image in [unavailable, zero, question, full, overPie, overNumber, selectedUnavailable] {
                 let alpha = try pixels(image, scale: scale)
                 try check(image.isTemplate, "Menu-bar graphics adapt to light/dark native appearance.")
