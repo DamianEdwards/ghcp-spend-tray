@@ -20,8 +20,17 @@ rejects failures, cancellations, unexpected skips and missing job results.
 Default local/release verification remains sequential and complete. Build and
 publish commands must not run concurrently in the same checkout. Cache keys,
 change routing and PR/push/manual triggers are unchanged; no verification
-coverage is moved to a schedule. Hosted elapsed-time improvements and native
-macOS execution of the split lanes remain unverified until their workflow runs.
+coverage is moved to a schedule.
+
+The first full-matrix hosted PR
+[run 37264941553](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37264941553)
+passed every lane, including all managed/Native AOT harnesses, both Windows
+deployment modes, synthetic Mac Keychain CRUD, and populated/empty native UI
+smoke on macOS 26 and 15. Creation-to-Verification elapsed time was 5:48,
+versus the pre-change successful first-attempt PR median of 6:32 (five runs).
+The longest Windows packaging lane was 4:58 versus the old 6:09 median;
+Windows tests were 4:01 versus 4:53, and macOS 26 was 3:15 versus 3:40.
+This is an initial observation, not a long-term percentile or guaranteed SLA.
 
 ## Windows period-estimate parity (October 3, 2026)
 

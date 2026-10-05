@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -92,7 +93,8 @@ class VerifyWorkflowTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for script routing tests")
 class WindowsVerificationShardTests(unittest.TestCase):
-    def invoke(self, shard, failure=""):
+    @classmethod
+    def setUpClass(cls):
         with tempfile.TemporaryDirectory() as directory:
             tools = Path(directory) / "tools"
             tools.mkdir()
@@ -104,15 +106,44 @@ $ErrorActionPreference = 'Stop'
 $global:calls = [Collections.Generic.List[object]]::new()
 function global:dotnet {
     $global:calls.Add(@($args))
-    $global:LASTEXITCODE = if ($args[0] -eq '%FAILURE%') { 1 } else { 0 }
+    $global:LASTEXITCODE = if ($args[0] -eq $global:failure) { 1 } else { 0 }
 }
-& '%SCRIPT%' -TestShard '%SHARD%' | Out-Null
-ConvertTo-Json -InputObject @($global:calls) -Depth 3 -Compress
+$cases = @(
+    @{ shard = 'Application'; failure = '' },
+    @{ shard = 'CorePlatformShared'; failure = '' },
+    @{ shard = 'All'; failure = '' },
+    @{ shard = 'Unknown'; failure = '' },
+    @{ shard = 'Application'; failure = 'build' },
+    @{ shard = 'CorePlatformShared'; failure = 'run' }
+)
+$outcomes = foreach ($case in $cases) {
+    $global:calls = [Collections.Generic.List[object]]::new()
+    $global:failure = $case.failure
+    $message = ''
+    try { & '%SCRIPT%' -TestShard $case.shard | Out-Null }
+    catch { $message = $_.Exception.Message }
+    [pscustomobject]@{
+        shard = $case.shard; failure = $case.failure
+        calls = $global:calls.ToArray(); error = $message
+    }
+}
+ConvertTo-Json -InputObject @($outcomes) -Depth 4 -Compress
 """
-            command = command.replace("%FAILURE%", failure).replace("%SHARD%", shard)
             command = command.replace("%SCRIPT%", str(script).replace("'", "''"))
-            return subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
-                                  capture_output=True, text=True)
+            result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr)
+            cls.outcomes = {
+                (case["shard"], case["failure"]): SimpleNamespace(
+                    returncode=1 if case["error"] else 0,
+                    stdout=json.dumps(case["calls"]), stderr=case["error"],
+                )
+                for case in json.loads(result.stdout)
+            }
+
+    def invoke(self, shard, failure=""):
+        return self.outcomes[shard, failure]
 
     def test_default_and_partial_shards_cover_each_harness_once(self):
         harnesses = {
