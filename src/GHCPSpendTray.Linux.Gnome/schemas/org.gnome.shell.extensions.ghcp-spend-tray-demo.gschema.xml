@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.ghcp-spend-tray-demo" path="/org/gnome/shell/extensions/ghcp-spend-tray-demo/">
+    <key name="indicator-style" type="s">
+      <choices><choice value="Pie"/><choice value="Percentage"/></choices>
+      <default>'Pie'</default>
+      <summary>Panel indicator appearance</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -74,11 +74,21 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("needs: [changes, macos]", self.jobs["macos_runtime"])
         self.assertNotIn("macos_tests", self.jobs["macos_runtime"])
         self.assertIn(
-            "needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]",
+            "needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime, linux]",
             self.jobs["verify"],
         )
         self.assertIn("if: always()", self.jobs["verify"])
         self.assertNotIn("continue-on-error:", self.workflow)
+
+    def test_linux_prototype_has_an_independent_native_gate(self):
+        job = self.jobs["linux"]
+        self.assertIn("needs: changes", job)
+        self.assertIn("if: needs.changes.outputs.linux == 'true'", job)
+        self.assertIn("global-json-file: global.json", job)
+        self.assertIn("bash tools/linux/verify.sh", job)
+        self.assertIn("name: linux-demo", job)
+        gate = (ROOT / "tools/assert-verification.ps1").read_text()
+        self.assertIn("'linux'", gate)
 
     def test_caching_and_triggers_remain_unchanged(self):
         triggers = self.workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]

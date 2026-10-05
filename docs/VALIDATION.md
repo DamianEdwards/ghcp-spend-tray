@@ -1,5 +1,59 @@
 # GHCPSpendTray validation and release gates
 
+## Linux synthetic prototype (October 5, 2026)
+
+The experimental Linux frontends use a native GNOME Shell popup/preferences,
+a KDE Plasma applet, and a Waybar/Quickshell integration with a headless Native
+AOT helper reusing the shared demo controller. One per-user installer selects
+the desktop integration, with automatic session-D-Bus activation.
+Delivery now uses an AppImage containing graphical Qt Widgets setup and its
+Python/Qt runtime, with a stable per-user installed copy and removal action.
+Avalonia remains removed. It has no real authentication
+or persistent account data; only the native appearance preference is saved.
+See [prototype instructions and limitations](LINUX-PROTOTYPE.md).
+
+The Linux lane checks shared harnesses, executed Native AOT helper tests,
+versioned source-generated JSON, and actual installed-helper activation with
+the GJS client. Tests cover weighted percentages, over-allocation, unavailable
+versus zero, account additions, Changed signals, invalid input, single ownership,
+and native preference commands. Installer tests cover fresh install, upgrade,
+uninstall, ownership protection, and paths with spaces. Waybar tests cover
+comment-preserving JSONC edits, absolute includes, explicit multi-bar selection,
+updates, collision refusal, rollback, and reversal that preserves later edits.
+Qt Quick tests execute the packaged parser and usage component offscreen,
+including over-allocation, unavailable/empty states, and Details interactions.
+The installed Native AOT command adapter is tested for plain JSON output and
+automatic helper activation. AppImage smoke coverage opens the actual frozen
+setup chooser offscreen, checks its consent gate, installs/updates all frontend
+selections, deletes the original download, reinstalls from the stable copy,
+executes the bundled Waybar adapter, and removes the installed image. All installations and
+activation tests use temporary HOME/XDG paths and disposable buses, not the
+user's desktop. The aggregate Verification gate still includes Linux and runs
+for documentation-only changes.
+
+Normal AppImage/FUSE launch was also exercised locally with the graphical setup
+on an isolated offscreen display. This is distinct from the extract-and-run
+lifecycle checks; neither check enables a desktop extension or widget.
+
+The GNOME Shell 50 frontend is designed around PanelMenu's native one-click,
+anchored popup rather than an AppIndicator host's click policy. Live Shell
+acceptance of the revised popup and libadwaita preferences remains outstanding.
+The prior user's confirmation of the old hybrid flyout does not validate this
+replacement. The local isolated Shell harness previously failed before loading
+the extension, during GNOME/GJS initialization. Syntax and client tests are not
+a substitute for native visual/lifecycle acceptance.
+
+KDE/Hyprland frontend code is implemented, but neither has live-desktop
+acceptance. Plasma now has persistent native appearance configuration and bounded
+D-Bus requests; Hyprland has focused-monitor placement and compositor focus-grab
+dismissal. QML parsing and offscreen shared-component tests do not establish
+Plasma popup anchoring or Hyprland layer-shell focus/placement. Quickshell 0.2.1
+was extracted locally to check its CLI/type declarations; an isolated offscreen
+launch cannot load its PanelWindow backend, so it is not runtime acceptance.
+ARM64, older-distribution compatibility, real-account behavior, and production
+distribution are not validated. CI's Ubuntu 24.04 baseline does not apply to
+Fedora-local artifacts.
+
 ## Parallel PR/main verification (October 4, 2026)
 
 Windows verification uses two isolated test shards: application integration,

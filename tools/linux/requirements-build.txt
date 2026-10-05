@@ -1,0 +1,7 @@
+PyInstaller==6.16.0
+PySide6-Essentials==6.10.3
+shiboken6==6.10.3
+altgraph==0.17.5
+packaging==26.3
+pyinstaller-hooks-contrib==2026.8
+setuptools==84.0.0

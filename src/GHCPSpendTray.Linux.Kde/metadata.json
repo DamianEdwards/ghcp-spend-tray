@@ -1,0 +1,16 @@
+{
+  "KPlugin": {
+    "Id": "io.github.ghcpspendtray.demo",
+    "Name": "GHCPSpendTray Demo",
+    "Description": "Synthetic Copilot consumption from the shared Linux helper",
+    "Icon": "utilities-system-monitor",
+    "Version": "0.1.0",
+    "License": "MIT",
+    "Website": "https://github.com/DamianEdwards/ghcp-spend-tray",
+    "Category": "System Information"
+  },
+  "KPackageStructure": "Plasma/Applet",
+  "X-Plasma-API-Minimum-Version": "6.3",
+  "X-Plasma-NotificationArea": true,
+  "X-Plasma-NotificationAreaCategory": "ApplicationStatus"
+}

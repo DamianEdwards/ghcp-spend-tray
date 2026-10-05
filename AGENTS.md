@@ -14,6 +14,16 @@ packaging).
 - `src/GHCPSpendTray.MacBridge` exposes the shared controller through an
   in-process, source-generated JSON C ABI. `src/GHCPSpendTray.Mac` contains
   native SwiftUI/AppKit, Keychain, notifications, and login-item services.
+- `src/GHCPSpendTray.Linux` is a synthetic-only, headless .NET helper.
+  `src/GHCPSpendTray.Linux.Gnome` provides the native GNOME popup and preferences.
+  `.Linux.Kde` and `.Linux.Hyprland` provide Plasma and Waybar/Quickshell surfaces;
+  `.Linux.Qml` contains their shared usage view.
+  `tools/linux/package-native.py` packages these with bundled Qt/Python graphical
+  setup in one AppImage. Installation must remain per-user, consent-based, and
+  independent of the original download. Keep updates/removal ownership-checked.
+  Preserve users' Waybar JSONC and includes; keep integration reversible and
+  do not start or restart their bar during installation.
+  Do not reintroduce Avalonia or modify general tray extensions. See `docs/LINUX-PROTOTYPE.md`.
 - `tests` contains executable test harnesses; `tools` contains build,
   packaging, and smoke-test scripts.
 
@@ -45,8 +55,15 @@ and persists its version plan across retries. Test changes with
 `python3 -m unittest discover -s tools/release`.
 Keep `tools/ci/changes.py` and its tests current when adding platform paths.
 Markdown and images under `docs/images` do not trigger app builds; unknown
-paths still verify both platforms. Keep the aggregate Verification check
+paths still verify all platforms. Keep the aggregate Verification check
 running for documentation-only changes.
+
+Linux paths have a separate verification lane; shared and unknown paths verify
+all three platforms. Run `bash tools/linux/verify.sh` for shared tests,
+Native AOT, GJS interoperability, and isolated install/upgrade/activation/removal.
+It must not modify the user's desktop session or enable extensions there.
+Keep Linux out of the Windows solution and production release workflow while
+it remains a demo prototype.
 
 Preserve Native AOT compatibility and the component-only Windows App SDK
 dependency graph; avoid adding the umbrella `Microsoft.WindowsAppSDK` package.

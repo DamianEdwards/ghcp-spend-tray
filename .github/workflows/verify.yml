@@ -21,6 +21,7 @@ jobs:
     outputs:
       windows: ${{ steps.changes.outputs.windows }}
       macos: ${{ steps.changes.outputs.macos }}
+      linux: ${{ steps.changes.outputs.linux }}
       markdown: ${{ steps.changes.outputs.markdown }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -275,9 +276,46 @@ jobs:
           bash tools/macos/test-package.sh artifacts/macos-runtime/GHCPSpendTray.app "$(cat packaging/macos/version.txt)"
           python3 tools/macos/smoke-test.py artifacts/macos-runtime/GHCPSpendTray.app
 
+  linux:
+    name: Linux synthetic prototype
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Install Linux verification dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev dbus-daemon libglib2.0-bin gjs python3-venv \
+            qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtqml-workerscript \
+            qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+            qml6-module-qtquick-window
+      - name: Prepare bundled graphical setup runtime
+        run: |
+          python3 -m venv artifacts/linux/build-env
+          artifacts/linux/build-env/bin/python -m pip install -r tools/linux/requirements-build.txt
+          echo "$GITHUB_WORKSPACE/artifacts/linux/build-env/bin" >> "$GITHUB_PATH"
+      - name: Verify native frontends and graphical AppImage lifecycle
+        run: bash tools/linux/verify.sh
+      - name: Retain synthetic development prototype
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-demo
+          path: |
+            artifacts/linux/*.AppImage
+            artifacts/linux/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   verify:
     name: Verification
-    needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]
+    needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime, linux]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
