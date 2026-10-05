@@ -13,7 +13,7 @@ foreach ($platform in @('windows', 'macos', 'markdown')) {
     }
     $jobs = switch ($platform) {
         'windows' { @('tests', 'package') }
-        'macos' { @('macos', 'macos_runtime') }
+        'macos' { @('macos_tests', 'macos', 'macos_runtime') }
         default { @($platform) }
     }
     foreach ($job in $jobs) {

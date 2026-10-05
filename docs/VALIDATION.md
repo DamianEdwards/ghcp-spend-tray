@@ -1,5 +1,28 @@
 # GHCPSpendTray validation and release gates
 
+## Parallel PR/main verification (October 4, 2026)
+
+Windows verification uses two isolated test shards: application integration,
+and Core/platform/shared tests. Each runs its managed and executed x64 Native
+AOT harnesses; the latter also retains release-tooling checks and the full
+Release solution build. Self-contained and Store packaging run on separate
+runners, each publishing and validating both x64 and ARM64 and exercising
+populated/empty x64 packaged startup. The Store lane retains deployment-mode
+reset validation and synthetic Store identity/staging checks.
+
+macOS 26 shared managed/Native AOT tests run independently from the native
+bridge/app, Swift platform/Keychain and UI smoke lane. macOS 15 consumes the
+exact app artifact without rebuilding or waiting for shared tests. Verification
+requires both macOS 26 lanes and the runtime check; Windows matrix jobs use
+`fail-fast: false` so one failed shard does not cancel the others. The gate
+rejects failures, cancellations, unexpected skips and missing job results.
+
+Default local/release verification remains sequential and complete. Build and
+publish commands must not run concurrently in the same checkout. Cache keys,
+change routing and PR/push/manual triggers are unchanged; no verification
+coverage is moved to a schedule. Hosted elapsed-time improvements and native
+macOS execution of the split lanes remain unverified until their workflow runs.
+
 ## Windows period-estimate parity (October 3, 2026)
 
 Windows now consumes the shared calculation, result and per-account persistence

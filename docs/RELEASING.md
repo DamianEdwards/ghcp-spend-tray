@@ -272,7 +272,10 @@ and the release-source check continue to use the same **Verification** name.
    packaged UI smoke scenarios. Crashes, missing results, nonzero exit codes
    and timeouts fail verification; the registration is removed afterward.
    Developer Mode is enabled only on the disposable hosted runner, and the
-   `packaged-smoke-diagnostics` artifact retains the transcript.
+   `packaged-smoke-diagnostics-self-contained` and
+   `packaged-smoke-diagnostics-store` artifacts retain the transcripts from
+   the independent deployment-mode jobs. Both jobs publish and validate x64
+   and ARM64; both run populated and empty x64 packaged startup smoke.
 2. Run **Actions > Release > Run workflow** from `main`. Choose the Windows
    bump and set macOS to **no release** for a Windows-only release. Choose
    whether the selected releases are previews. The planning job calculates

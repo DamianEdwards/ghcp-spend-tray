@@ -298,7 +298,12 @@ Set-Location ghcp-spend-tray
 
 `verify.ps1 -NativeTests` also runs the test suites under executed x64 Native
 AOT. Run build and publish commands sequentially because they share
-intermediates. Local `package.ps1` output is an **unsigned development bundle**,
+intermediates. CI runs `-TestShard Application` and `-TestShard CorePlatformShared`
+on separate runners; together they retain all four harnesses and the full
+solution build. Omitting `-TestShard` still runs all checks locally.
+Self-contained and Store packaging also run independently, each publishing
+and validating both architectures and exercising populated/empty packaged x64
+startup. Local `package.ps1` output is an **unsigned development bundle**,
 not the signed public release. For isolated synthetic UI checks, see
 [`VALIDATION.md`](docs/VALIDATION.md); for release and signing details, see
 [`RELEASING.md`](docs/RELEASING.md).
@@ -325,8 +330,11 @@ named synthetic item; it never reads account credentials or enables login
 startup. The resulting app is ad-hoc signed for local development only.
 `bash tools/macos/build.sh` builds without running tests. If using a preview
 toolchain, select a stable SDK with `SDKROOT`; see [release documentation](docs/RELEASING.md).
-CI builds once on macOS 26 / Apple silicon, then tests that exact artifact
-on macOS 15 / Apple silicon without rebuilding.
+CI runs `verify.sh --shared-tests` and `verify.sh --app` on separate macOS 26 /
+Apple silicon runners. The app lane builds once and exercises native platform/UI
+tests; macOS 15 tests that exact artifact without rebuilding or waiting for the
+independent shared-test lane. Both lanes and the runtime check are required.
+Omitting the flag still runs complete local verification sequentially.
 
 To run an empty, isolated preview alongside an installed release:
 
