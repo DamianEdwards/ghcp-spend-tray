@@ -277,7 +277,7 @@ jobs:
           python3 tools/macos/smoke-test.py artifacts/macos-runtime/GHCPSpendTray.app
 
   linux:
-    name: Linux synthetic prototype
+    name: Linux development build
     needs: changes
     if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-24.04
@@ -292,7 +292,8 @@ jobs:
       - name: Install Linux verification dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang zlib1g-dev dbus-daemon libglib2.0-bin gjs python3-venv \
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev dbus-daemon libglib2.0-bin gjs python3-venv libsecret-1-0 gnome-keyring gnupg \
+            gir1.2-adw-1 adwaita-icon-theme xvfb xauth \
             qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtqml-workerscript \
             qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-templates \
             qml6-module-qtquick-window
@@ -303,15 +304,75 @@ jobs:
           echo "$GITHUB_WORKSPACE/artifacts/linux/build-env/bin" >> "$GITHUB_PATH"
       - name: Verify native frontends and graphical AppImage lifecycle
         run: bash tools/linux/verify.sh
-      - name: Retain synthetic development prototype
+      - name: Retain synthetic GNOME preferences screenshots
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linux-demo
+          name: linux-preferences-layout
+          path: artifacts/linux/preferences/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Retain Linux development build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-devel
           path: |
             artifacts/linux/*.AppImage
             artifacts/linux/*.sha256
           if-no-files-found: error
           retention-days: 7
+
+  linux_sign:
+    name: Sign Linux main-branch build
+    needs: [verify, linux]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.verify.result == 'success' && needs.linux.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: linux-devel
+          path: artifacts/linux-unsigned
+      - name: Sign and verify the exact tested AppImage
+        env:
+          LINUX_SIGNING_KEY_BASE64: ${{ secrets.LINUX_SIGNING_KEY_BASE64 }}
+          LINUX_SIGNING_KEY_PASSPHRASE: ${{ secrets.LINUX_SIGNING_KEY_PASSPHRASE }}
+          LINUX_SIGNING_FINGERPRINT: ${{ vars.LINUX_SIGNING_FINGERPRINT }}
+        run: |
+          python3 tools/linux/sign_appimage.py sign \
+            artifacts/linux-unsigned/GHCPSpendTray-linux-devel-x86_64.AppImage \
+            --fingerprint "$LINUX_SIGNING_FINGERPRINT" --output artifacts/linux-signed
+      - name: Attest signed Linux AppImage
+        id: attest_linux
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: artifacts/linux-signed/*.AppImage
+      - name: Verify provenance and retain offline bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.attest_linux.outputs.bundle-path }}
+        run: |
+          gh attestation verify artifacts/linux-signed/GHCPSpendTray-linux-devel-x86_64.AppImage \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/verify.yml" \
+            --source-ref refs/heads/main --source-digest "$GITHUB_SHA"
+          cp "$BUNDLE_PATH" artifacts/linux-signed/provenance.jsonl
+      - name: Upload verified signed Linux build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-signed
+          path: artifacts/linux-signed/*
+          if-no-files-found: error
+          retention-days: 30
 
   verify:
     name: Verification

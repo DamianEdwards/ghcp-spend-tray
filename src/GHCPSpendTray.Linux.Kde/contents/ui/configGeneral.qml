@@ -3,13 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ColumnLayout {
-    property alias cfg_showConsumption: consumption.checked
-    CheckBox {
-        id: consumption
-        text: "Show consumption amount instead of percentage in the panel"
-    }
     Label {
-        text: "Synthetic demo only. Real GitHub accounts and authentication are disabled."
+        text: "Open the widget's Settings. Accounts provides sign-in, reconnect, estimates and removal; General controls polling, notifications, login startup and shared pie/percentage, roll-up/per-account indicators with draft preview. Credentials use Secret Service."
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }

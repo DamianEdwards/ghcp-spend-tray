@@ -1,9 +1,9 @@
 {
   "uuid": "ghcp-spend-tray-demo@ghcpspendtray",
-  "name": "GHCPSpendTray (Demo)",
-  "description": "Synthetic Copilot consumption in a native panel popup. Requires the helper included in the GHCPSpendTray Linux installer. No real sign-in.",
+  "name": "GHCPSpendTray",
+  "description": "Copilot consumption in a native panel popup. Requires the shared helper and a Secret Service keyring.",
   "shell-version": ["50"],
-  "version": 4,
+  "version": 5,
   "settings-schema": "org.gnome.shell.extensions.ghcp-spend-tray-demo",
   "url": "https://github.com/DamianEdwards/ghcp-spend-tray"
 }

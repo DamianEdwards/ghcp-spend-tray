@@ -85,7 +85,7 @@ def main():
     if platform.system() != "Linux" or rid is None:
         raise RuntimeError("Native packaging requires x86-64 or ARM64 Linux.")
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    filename = f"GHCPSpendTray-linux-demo-{architecture}.AppImage"
+    filename = f"GHCPSpendTray-linux-devel-{architecture}.AppImage"
     with tempfile.TemporaryDirectory(prefix="native-package-", dir=OUTPUT) as directory:
         work = Path(directory)
         appdir = work / "GHCPSpendTray.AppDir"
@@ -98,6 +98,8 @@ def main():
         for path in list(helper.glob("*.pdb")) + list(helper.glob("*.dbg")):
             path.unlink()
         shutil.copyfile(ROOT / "LICENSE", helper / "LICENSE")
+        logo = ROOT / "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.svg"
+        shutil.copyfile(logo, helper / "ghcp-spend-tray.svg")
         stage_extension(payload / "extension")
         stage_qml(payload / "kde", "Kde")
         stage_qml(payload / "hyprland", "Hyprland")
@@ -114,7 +116,7 @@ def main():
         shutil.copyfile(ROOT / "packaging/linux/AppRun", appdir / "AppRun")
         (appdir / "AppRun").chmod(0o755)
         shutil.copyfile(ROOT / "packaging/linux/ghcp-spend-tray.desktop", appdir / "ghcp-spend-tray.desktop")
-        shutil.copyfile(ROOT / "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.svg", appdir / "ghcp-spend-tray.svg")
+        shutil.copyfile(logo, appdir / "ghcp-spend-tray.svg")
         shutil.copyfile(ROOT / "LICENSE", appdir / "LICENSE")
         tool = download_tool("appimagetool", architecture)
         runtime = download_tool("runtime", architecture)

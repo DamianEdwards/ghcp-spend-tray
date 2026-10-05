@@ -1,11 +1,12 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {DemoClient} from './client.js';
-import {formatPercent, updatedText} from './snapshot.js';
+import {formatPercent, updatedText, diagnosticsText, estimateText} from './snapshot.js';
 
 function column(styleClass = '') {
     return new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: styleClass});
@@ -25,15 +26,10 @@ export default class GHCPSpendTrayExtension extends Extension {
     enable() {
         this._expanded = new Set();
         this._snapshot = null;
-        this._settings = this.getSettings();
-        this._button = new PanelMenu.Button(0.5, 'GHCPSpendTray demo');
-        const indicator = new St.BoxLayout();
-        this._pie = new St.DrawingArea({width: 22, height: 22, y_align: Clutter.ActorAlign.CENTER});
-        this._pie.connect('repaint', area => this._paintPie(area));
-        this._number = label('?', 'ghcp-demo-indicator');
-        indicator.add_child(this._pie);
-        indicator.add_child(this._number);
-        this._button.add_child(indicator);
+        this._selectedKey = '';
+        this._button = new PanelMenu.Button(0.5, 'GHCPSpendTray');
+        this._indicators = new St.BoxLayout();
+        this._button.add_child(this._indicators);
         const content = column('ghcp-demo-popup');
         const header = new St.BoxLayout({style_class: 'ghcp-demo-header'});
         header.add_child(new St.Icon({
@@ -49,6 +45,7 @@ export default class GHCPSpendTrayExtension extends Extension {
         });
         settings.connect('clicked', () => {
             this._button.menu.close();
+            this.getSettings().set_string('selected-account', '');
             this.openPreferences();
         });
         header.add_child(settings);
@@ -75,46 +72,51 @@ export default class GHCPSpendTrayExtension extends Extension {
         this._updated.x_expand = true;
         footer.add_child(this._updated);
         footer.add_child(action('Refresh', () => this._client.call('Refresh', null, () => this._client.refresh())));
+        footer.add_child(action('Quit', () => this._client.call('Quit')));
         content.add_child(footer);
         content.add_child(label('AI-credit consumption value, not an invoice.', 'ghcp-demo-caption'));
-        content.add_child(label('DEMO - synthetic accounts only', 'ghcp-demo-caption'));
+        this._demoLabel = label('DEMO - synthetic accounts only', 'ghcp-demo-caption');
+        this._demoLabel.visible = false;
+        content.add_child(this._demoLabel);
         this._button.menu.box.add_child(content);
         Main.panel.addToStatusArea(this.uuid, this._button);
-        this._client = new DemoClient(snapshot => this._render(snapshot), message => this._showError(message),
-            this._settings.get_string('indicator-style'));
-        this._settingsChanged = this._settings.connect('changed::indicator-style', () =>
-            this._client.setStyle(this._settings.get_string('indicator-style')));
+        this._client = new DemoClient(snapshot => this._render(snapshot), message => this._showError(message));
         this._updateIndicator();
-    }
-
-    _paintPie(area) {
-        const context = area.get_context();
-        const [width, height] = area.get_surface_size();
-        const radius = Math.min(width, height) / 2 - 2;
-        const color = area.get_theme_node().get_foreground_color();
-        context.setSourceRGBA(color.red / 255, color.green / 255, color.blue / 255, 1);
-        context.setLineWidth(1.5);
-        context.arc(width / 2, height / 2, radius, 0, Math.PI * 2);
-        context.stroke();
-        const fraction = Math.min(1, Math.max(0, (this._snapshot?.percent ?? 0) / 100));
-        if (fraction > 0) {
-            context.moveTo(width / 2, height / 2);
-            context.arc(width / 2, height / 2, radius - 2, -Math.PI / 2, fraction * Math.PI * 2 - Math.PI / 2);
-            context.closePath();
-            context.fill();
-        }
-        context.$dispose();
     }
 
     _updateIndicator() {
         const snapshot = this._snapshot;
-        const pie = snapshot !== null && snapshot.percent !== null &&
-            this._settings.get_string('indicator-style') === 'Pie';
-        this._pie.visible = pie;
-        this._number.visible = !pie;
-        this._number.text = snapshot?.indicator ?? '?';
-        this._button.accessible_name = `GHCPSpendTray demo: ${snapshot?.consumption ?? 'Unavailable'}, ${formatPercent(snapshot?.percent ?? null)}`;
-        this._pie.queue_repaint();
+        const signature = JSON.stringify(snapshot?.icons ?? []);
+        if (signature === this._indicatorSignature) return;
+        this._indicatorSignature = signature;
+        this._indicators.destroy_all_children();
+        if (!snapshot) this._indicators.add_child(label('?', 'ghcp-demo-indicator'));
+        for (const icon of snapshot?.icons ?? []) {
+            const button = new St.Button({can_focus: true, accessible_name: icon.tooltip,
+                child: new St.Icon({icon_size: 22, gicon: new Gio.BytesIcon({
+                    bytes: new GLib.Bytes(GLib.base64_decode(icon.imageUri.split(',')[1])),
+                })})});
+            button.connect('button-press-event', () => {
+                this._activateIcon(icon);
+                return Clutter.EVENT_STOP;
+            });
+            button.connect('key-press-event', (_actor, event) => {
+                if (![Clutter.KEY_Return, Clutter.KEY_space].includes(event.get_key_symbol()))
+                    return Clutter.EVENT_PROPAGATE;
+                this._activateIcon(icon);
+                return Clutter.EVENT_STOP;
+            });
+            this._indicators.add_child(button);
+        }
+        this._button.accessible_name = `GHCPSpendTray: ${snapshot?.consumption ?? 'Unavailable'}, ${formatPercent(snapshot?.percent ?? null)}`;
+    }
+
+    _activateIcon(icon) {
+        const open = !this._button.menu.isOpen || this._selectedKey !== (icon.key ?? '');
+        this._selectedKey = icon.key ?? '';
+        this._render(this._snapshot);
+        if (open) this._button.menu.open();
+        else this._button.menu.close();
     }
 
     _showError(message) {
@@ -130,16 +132,28 @@ export default class GHCPSpendTrayExtension extends Extension {
 
     _render(snapshot) {
         this._snapshot = snapshot;
+        if (this._selectedKey && !snapshot.accounts.some(account => account.key === this._selectedKey))
+            this._selectedKey = '';
+        this._demoLabel.visible = snapshot.demo;
         this._errorLabel.visible = false;
         this._total.text = snapshot.consumption;
-        this._count.text = `${snapshot.accounts.length} connected account(s) - ${formatPercent(snapshot.percent)}`;
+        this._count.text = `${snapshot.accounts.length} connected account(s)` +
+            (snapshot.isComplete ? '' : snapshot.isLastKnown ? ' - Last-known / partial total' : ' - Partial total');
         this._updated.text = updatedText(snapshot.updatedAt);
         this._accounts.destroy_all_children();
+        const summary = label(snapshot.status + '\n' + snapshot.tray.rollUp.details, 'ghcp-demo-caption');
+        summary.clutter_text.line_wrap = true;
+        this._accounts.add_child(summary);
+        if (this._selectedKey)
+            this._accounts.add_child(action('All accounts', () => { this._selectedKey = ''; this._render(this._snapshot); }));
         if (snapshot.accounts.length === 0) {
             this._accounts.add_child(label('No accounts yet.', 'ghcp-demo-caption'));
-            this._accounts.add_child(action('Add demo account', () => this._client.call('AddDemoAccount')));
+            this._accounts.add_child(action('Sign in', () => {
+                this._button.menu.close();
+                this.openPreferences();
+            }));
         }
-        for (const account of snapshot.accounts)
+        for (const account of snapshot.accounts.filter(account => !this._selectedKey || account.key === this._selectedKey))
             this._accounts.add_child(this._accountCard(account));
         this._updateIndicator();
     }
@@ -147,7 +161,10 @@ export default class GHCPSpendTrayExtension extends Extension {
     _accountCard(account) {
         const card = column('ghcp-demo-card');
         const heading = new St.BoxLayout({style_class: 'ghcp-demo-header'});
-        heading.add_child(label(account.login.slice(0, 1).toUpperCase(), 'ghcp-demo-avatar'));
+        if (account.avatarUri && Gio.File.new_for_uri(account.avatarUri).query_exists(null))
+            heading.add_child(new St.Icon({gicon: new Gio.FileIcon({file: Gio.File.new_for_uri(account.avatarUri)}), icon_size: 32}));
+        else
+            heading.add_child(label(account.login.slice(0, 1).toUpperCase(), 'ghcp-demo-avatar'));
         const identity = column();
         identity.x_expand = true;
         identity.add_child(label(account.name, 'ghcp-demo-account-name'));
@@ -164,6 +181,11 @@ export default class GHCPSpendTrayExtension extends Extension {
         }
         card.add_child(label(account.percent === null ? 'Allocation percentage not available' :
             `${formatPercent(account.percent)} of ${account.allocation} allocation`, 'ghcp-demo-caption'));
+        if (account.periodEstimate) {
+            const estimate = label(estimateText(account.periodEstimate), 'ghcp-demo-caption');
+            estimate.clutter_text.line_wrap = true;
+            card.add_child(estimate);
+        }
         const status = new St.BoxLayout();
         const freshness = label(account.percent > 100 ? `${account.freshness} - Over allocation` : account.freshness,
             account.percent > 100 ? 'ghcp-demo-warning' : 'ghcp-demo-caption');
@@ -173,6 +195,14 @@ export default class GHCPSpendTrayExtension extends Extension {
         details.add_child(label(`${account.login} @ ${account.host}`, 'ghcp-demo-caption'));
         details.add_child(label(account.updatedAt ? `Updated ${new Date(account.updatedAt).toLocaleString()}` :
             'No observations yet', 'ghcp-demo-caption'));
+        const diagnostic = label(diagnosticsText(account), 'ghcp-demo-caption');
+        diagnostic.clutter_text.line_wrap = true;
+        details.add_child(diagnostic);
+        details.add_child(action('Manage account', () => {
+            this._button.menu.close();
+            this.getSettings().set_string('selected-account', account.key);
+            this.openPreferences();
+        }));
         details.visible = this._expanded.has(account.key);
         const toggle = action(details.visible ? 'Hide details' : 'Details', () => {
             details.visible = !details.visible;
@@ -191,16 +221,12 @@ export default class GHCPSpendTrayExtension extends Extension {
     disable() {
         this._client?.destroy();
         this._client = null;
-        if (this._settingsChanged)
-            this._settings.disconnect(this._settingsChanged);
-        this._settingsChanged = null;
-        this._settings = null;
         this._button?.destroy();
         this._button = null;
         this._snapshot = null;
         this._expanded = null;
-        this._pie = null;
-        this._number = null;
+        this._indicators = null;
+        this._indicatorSignature = null;
         this._total = null;
         this._count = null;
         this._updated = null;

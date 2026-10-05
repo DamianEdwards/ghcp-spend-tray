@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export GIO_USE_VFS=local
-for tool in dotnet dbus-run-session gdbus python3 gjs glib-compile-schemas gsettings node; do
+for tool in dotnet dbus-run-session gdbus python3 gjs glib-compile-schemas gsettings node gnome-keyring-daemon gpg gpgconf xvfb-run xauth; do
     command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 case "$(uname -m)" in
@@ -13,6 +13,7 @@ esac
 python3 -m unittest discover -s tools/ci
 python3 -m unittest discover -s tools/linux
 python3 tools/linux/test-qml.py
+python3 tools/linux/test-prefs.py
 for source in src/GHCPSpendTray.Linux.Gnome/*.js; do
     node --input-type=module --check < "$source"
 done
@@ -20,8 +21,13 @@ glib-compile-schemas --strict --dry-run src/GHCPSpendTray.Linux.Gnome/schemas
 dotnet run --project tests/GHCPSpendTray.Tests -c Release
 dotnet run --project tests/GHCPSpendTray.SharedTests -c Release
 dbus-run-session --config-file=tools/linux/session-bus.conf -- dotnet run --project tests/GHCPSpendTray.LinuxTests -c Release
+python3 tools/linux/test-tray.py src/GHCPSpendTray.Linux/bin/Release/net10.0/GHCPSpendTray.Linux
+python3 tools/linux/test-credentials.py dotnet tests/GHCPSpendTray.LinuxTests/bin/Release/net10.0/GHCPSpendTray.LinuxTests.dll
 dotnet publish tests/GHCPSpendTray.LinuxTests -c Release -r "$rid" \
     -p:PublishAot=true -p:IlcTreatWarningsAsErrors=true -o artifacts/linux/native-tests --nologo
 dbus-run-session --config-file=tools/linux/session-bus.conf -- artifacts/linux/native-tests/GHCPSpendTray.LinuxTests
+python3 tools/linux/test-credentials.py "$PWD/artifacts/linux/native-tests/GHCPSpendTray.LinuxTests"
 python3 tools/linux/package-native.py
-python3 tools/linux/smoke-test.py "artifacts/linux/GHCPSpendTray-linux-demo-$(uname -m).AppImage"
+PYTHONPATH=tools/linux GHCP_SIGNING_TEST_IMAGE="artifacts/linux/GHCPSpendTray-linux-devel-$(uname -m).AppImage" \
+    python3 -m unittest test_signing.SigningTests.test_actual_appimage_signature
+python3 tools/linux/smoke-test.py "artifacts/linux/GHCPSpendTray-linux-devel-$(uname -m).AppImage"

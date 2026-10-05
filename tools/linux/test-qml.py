@@ -34,8 +34,7 @@ def main():
         root = Path(directory)
         package.stage_qml(root / "hyprland", "Hyprland")
         package.stage_qml(root / "kde", "Kde")
-        for source in (*sorted((root / "kde").rglob("*.qml")), root / "hyprland/shell.qml",
-                       root / "hyprland/components/UsageView.qml"):
+        for source in (*sorted((root / "kde").rglob("*.qml")), *sorted((root / "hyprland").rglob("*.qml"))):
             subprocess.run([tool("qmlformat"), str(source)], check=True, stdout=subprocess.DEVNULL)
         shutil.copyfile(ROOT / "tools/linux/tst_usage.qml", root / "hyprland/tst_usage.qml")
         runtime = root / "runtime"

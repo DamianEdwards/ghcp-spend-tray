@@ -15,6 +15,13 @@ spec.loader.exec_module(setup)
 
 
 class AppImageSetupTests(unittest.TestCase):
+    def setUp(self):
+        config = tempfile.TemporaryDirectory(prefix="ghcp-test-config-")
+        self.addCleanup(config.cleanup)
+        environment = patch.dict(os.environ, XDG_CONFIG_HOME=config.name)
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def fixture(self, root):
         appdir = root / "AppDir"
         (appdir / "usr").mkdir(parents=True)
@@ -23,6 +30,8 @@ class AppImageSetupTests(unittest.TestCase):
         for name in ("helper", "extension", "kde", "hyprland"):
             (payload / name).mkdir(parents=True)
         (payload / "helper/GHCPSpendTray.Linux").write_text("synthetic helper")
+        (payload / "helper/ghcp-spend-tray.svg").write_bytes(
+            (ROOT / "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.svg").read_bytes())
         image = root / "download.AppImage"
         image.write_bytes(b"synthetic image")
         return appdir, image
@@ -32,6 +41,16 @@ class AppImageSetupTests(unittest.TestCase):
                                 ("Hyprland", "hyprland"), ("sway", None)):
             with self.subTest(value=value), patch.dict(os.environ, XDG_CURRENT_DESKTOP=value):
                 self.assertEqual(setup.detected_desktop(), expected)
+
+    def test_completion_requires_desktop_reload_instead_of_claiming_the_panel_is_ready(self):
+        for desktop in ("gnome", "kde"):
+            with self.subTest(desktop=desktop):
+                message = setup.COMPLETION_GUIDANCE[desktop]
+                self.assertIn("Log out of your desktop and back in", message)
+                self.assertNotIn("if needed", message)
+                self.assertNotIn("Demo", message)
+        self.assertIn("Your saved accounts are unchanged", setup.COMPLETION_GUIDANCE["gnome"])
+        self.assertNotIn("Log out", setup.COMPLETION_GUIDANCE["hyprland"])
 
     def test_bundled_runtime_stable_copy_and_launcher_are_owned(self):
         with tempfile.TemporaryDirectory(prefix="ghcp appimage ") as directory:
@@ -43,15 +62,30 @@ class AppImageSetupTests(unittest.TestCase):
             self.assertEqual((runtime / "GHCPSpendTray.AppImage").read_bytes(), image.read_bytes())
             self.assertEqual((runtime / installer.MARKER).read_text(), installer.PACKAGE)
             module = json.loads((data / "ghcp-spend-tray-hyprland/waybar-module.json").read_text())
-            self.assertNotIn("python3", module["custom/ghcp-spend-tray"]["exec"])
-            self.assertIn("--panel", module["custom/ghcp-spend-tray"]["exec"])
+            self.assertEqual(module, {"modules-right": ["tray"]})
+            self.assertIn("--panel", (data / "applications/ghcp-spend-tray-hyprland.desktop").read_text())
             launcher = (data / "applications/ghcp-spend-tray.desktop").read_text()
             self.assertIn("--appimage-extract-and-run", launcher)
             self.assertNotIn(str(image), launcher)
+            icon = data / "ghcp-spend-tray-demo/ghcp-spend-tray.svg"
+            for filename in ("ghcp-spend-tray.desktop", "ghcp-spend-tray-hyprland.desktop"):
+                self.assertIn(f"Icon={installer.desktop_value(icon)}\n", (data / "applications" / filename).read_text())
+            self.assertEqual(icon.read_bytes(), (appdir / "payload/helper/ghcp-spend-tray.svg").read_bytes())
             image.unlink()
+            self.assertTrue(icon.is_file())
             installer.uninstall(data, True)
             self.assertFalse(runtime.exists())
             self.assertFalse((data / "applications/ghcp-spend-tray.desktop").exists())
+            self.assertFalse(icon.exists())
+
+    def test_missing_icon_fails_before_installing_any_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            appdir, image = self.fixture(root)
+            (appdir / "payload/helper/ghcp-spend-tray.svg").unlink()
+            with self.assertRaisesRegex(RuntimeError, "missing its application icon"):
+                installer.install(appdir / "payload", root / "data", True, appdir=appdir, appimage=image)
+            self.assertFalse((root / "data").exists())
 
     def test_failed_runtime_replacement_restores_old_image_and_helper(self):
         with tempfile.TemporaryDirectory() as directory:

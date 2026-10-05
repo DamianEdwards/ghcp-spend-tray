@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,28 @@ spec.loader.exec_module(installer)
 
 
 class InstallerTests(unittest.TestCase):
+    def setUp(self):
+        config = tempfile.TemporaryDirectory(prefix="ghcp-test-config-")
+        self.addCleanup(config.cleanup)
+        environment = patch.dict(os.environ, XDG_CONFIG_HOME=config.name)
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_startup_removal_requires_exact_ownership(self):
+        data = Path(os.environ["XDG_CONFIG_HOME"]) / "data"
+        startup = Path(os.environ["XDG_CONFIG_HOME"]) / "autostart/ghcp-spend-tray.desktop"
+        startup.parent.mkdir()
+        content = ("# GHCPSpendTray startup v1\n[Desktop Entry]\nType=Application\nName=GHCPSpendTray\nExec=" +
+                   installer.desktop_quote(data / "ghcp-spend-tray-demo/GHCPSpendTray.Linux") +
+                   " --status-notifier\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
+        startup.write_text(content + "# user edit\n")
+        with self.assertRaisesRegex(RuntimeError, "unowned or modified"):
+            installer.uninstall(data, True)
+        self.assertTrue(startup.exists())
+        startup.write_text(content)
+        installer.uninstall(data, True)
+        self.assertFalse(startup.exists())
+
     def test_desktop_payloads_and_launcher_are_owned_and_removed(self):
         with tempfile.TemporaryDirectory(prefix="ghcp multi ") as directory:
             root = Path(directory)
@@ -21,6 +44,7 @@ class InstallerTests(unittest.TestCase):
             for part in ("helper", "kde", "hyprland"):
                 (payload / part).mkdir(parents=True)
             (payload / "helper/GHCPSpendTray.Linux").write_text("synthetic")
+            (payload / "helper/ghcp-spend-tray.svg").write_text("<svg/>")
             (payload / "kde/metadata.json").write_text("{}")
             (payload / "hyprland/shell.qml").write_text("Scope {}")
             data = root / "data"
@@ -30,7 +54,8 @@ class InstallerTests(unittest.TestCase):
             import json
             config = json.loads((data / "ghcp-spend-tray-hyprland/waybar-module.json").read_text())
             self.assertNotIn("exclusive", config)
-            self.assertIn("panel.py", config["custom/ghcp-spend-tray"]["on-click"])
+            self.assertEqual(config, {"modules-right": ["tray"]})
+            self.assertIn("panel.py", (data / "applications/ghcp-spend-tray-hyprland.desktop").read_text())
             self.assertTrue((data / "applications/ghcp-spend-tray-hyprland.desktop").exists())
             installer.uninstall(data, True)
             self.assertFalse((data / "ghcp-spend-tray-hyprland").exists())
@@ -43,6 +68,7 @@ class InstallerTests(unittest.TestCase):
             payload = root / "payload"
             (payload / "helper").mkdir(parents=True)
             (payload / "helper/GHCPSpendTray.Linux").write_text("#!/bin/sh\nexit 0\n")
+            (payload / "helper/ghcp-spend-tray.svg").write_text("<svg/>")
             (payload / "extension").mkdir()
             (payload / "extension/metadata.json").write_text("{}")
             installer.install(payload, data, True)
@@ -78,6 +104,7 @@ class InstallerTests(unittest.TestCase):
             payload = root / "payload"
             (payload / "helper").mkdir(parents=True)
             (payload / "helper/GHCPSpendTray.Linux").write_text("old helper")
+            (payload / "helper/ghcp-spend-tray.svg").write_text("<svg/>")
             (payload / "extension").mkdir()
             (payload / "extension/metadata.json").write_text("old metadata")
             data = root / "data"

@@ -39,7 +39,7 @@ for (const json of ['null', '{}', '{"version":1,"demo":true}', '{"version":2,"de
     } catch {
         rejected = true;
     }
-    check(rejected, 'GJS rejects incompatible or non-demo snapshots');
+    check(rejected, 'GJS rejects incompatible snapshots');
 }
 
 timeout = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15, () => {

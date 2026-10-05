@@ -16,6 +16,16 @@ spec.loader.exec_module(panel)
 
 
 class PanelTests(unittest.TestCase):
+    def test_native_activation_opens_selected_account_without_toggling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, XDG_RUNTIME_DIR=directory), \
+                    patch.object(panel.sys, "argv", ["panel.py", "open", "--account", "github.com:1", "--settings"]), \
+                    patch.object(panel.subprocess, "Popen"), \
+                    patch.object(panel.subprocess, "run", return_value=Mock(returncode=0)) as run:
+                panel.main()
+            self.assertEqual(run.call_args.args[0][-3:], ["open", "github.com:1", "true"])
+            self.assertEqual(run.call_args_list[0].args[0][-1], "ready")
+
     def test_status_rejects_invalid_data_and_reports_unavailable(self):
         for value in ({}, [], {"version": 2, "demo": True, "indicator": 0, "consumption": "$0"}):
             with patch.object(panel.subprocess, "run", return_value=Mock(stdout=json.dumps(value))):

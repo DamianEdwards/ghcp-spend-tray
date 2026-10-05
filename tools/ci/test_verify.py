@@ -86,7 +86,10 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("if: needs.changes.outputs.linux == 'true'", job)
         self.assertIn("global-json-file: global.json", job)
         self.assertIn("bash tools/linux/verify.sh", job)
-        self.assertIn("name: linux-demo", job)
+        self.assertIn("name: linux-devel", job)
+        self.assertIn("libsecret-1-0 gnome-keyring", job)
+        self.assertIn("gir1.2-adw-1 adwaita-icon-theme xvfb xauth", job)
+        self.assertIn("python3 tools/linux/test-prefs.py", (ROOT / "tools/linux/verify.sh").read_text())
         gate = (ROOT / "tools/assert-verification.ps1").read_text()
         self.assertIn("'linux'", gate)
 
@@ -99,6 +102,28 @@ class VerifyWorkflowTests(unittest.TestCase):
             self.assertIn(f"-{suffix}-${{{{ hashFiles('global.json', '**/*.csproj',",
                           self.jobs[job])
             self.assertIn("global-json-file: global.json", self.jobs[job])
+
+    def test_linux_signing_requires_verified_main_and_protected_credentials(self):
+        job = self.jobs["linux_sign"]
+        self.assertIn("needs: [verify, linux]", job)
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", job)
+        self.assertIn("needs.verify.result == 'success' && needs.linux.result == 'success'", job)
+        self.assertIn("environment: production", job)
+        self.assertIn("ref: ${{ github.sha }}", job)
+        self.assertIn("persist-credentials: false", job)
+        self.assertIn("name: linux-devel", job)
+        self.assertIn("sign_appimage.py sign", job)
+        self.assertIn("secrets.LINUX_SIGNING_KEY_BASE64", job)
+        self.assertIn("secrets.LINUX_SIGNING_KEY_PASSPHRASE", job)
+        self.assertIn("vars.LINUX_SIGNING_FINGERPRINT", job)
+        self.assertIn("actions/attest@", job)
+        self.assertIn("artifact-metadata: write", job)
+        self.assertIn("gh attestation verify", job)
+        self.assertIn("name: linux-signed", job)
+        self.assertLess(job.index("sign_appimage.py"), job.index("actions/attest@"))
+        self.assertLess(job.index("gh attestation verify"), job.index("name: linux-signed"))
+        self.assertNotIn("always()", job)
+        self.assertNotIn("LINUX_SIGNING_KEY", self.jobs["linux"])
 
 
 @unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for script routing tests")

@@ -14,7 +14,10 @@ packaging).
 - `src/GHCPSpendTray.MacBridge` exposes the shared controller through an
   in-process, source-generated JSON C ABI. `src/GHCPSpendTray.Mac` contains
   native SwiftUI/AppKit, Keychain, notifications, and login-item services.
-- `src/GHCPSpendTray.Linux` is a synthetic-only, headless .NET helper.
+- `src/GHCPSpendTray.Linux` is a headless .NET helper using the shared controller.
+  Its libsecret adapter stores credentials in Secret Service, never plaintext.
+  Keep device prompts out of broadcast snapshots and all credentials out of
+  frontend IPC, command arguments, JSON files, and logs. Demo mode is opt-in.
   `src/GHCPSpendTray.Linux.Gnome` provides the native GNOME popup and preferences.
   `.Linux.Kde` and `.Linux.Hyprland` provide Plasma and Waybar/Quickshell surfaces;
   `.Linux.Qml` contains their shared usage view.
@@ -63,7 +66,7 @@ all three platforms. Run `bash tools/linux/verify.sh` for shared tests,
 Native AOT, GJS interoperability, and isolated install/upgrade/activation/removal.
 It must not modify the user's desktop session or enable extensions there.
 Keep Linux out of the Windows solution and production release workflow while
-it remains a demo prototype.
+it remains an unsigned development build.
 
 Preserve Native AOT compatibility and the component-only Windows App SDK
 dependency graph; avoid adding the umbrella `Microsoft.WindowsAppSDK` package.

@@ -662,6 +662,89 @@ Before production acceptance, complete the Mac checklist in
 [VALIDATION.md](VALIDATION.md), including clean install/update, login startup,
 Keychain prompts, notification permissions, and VoiceOver.
 
+## Linux main-branch signing
+
+Linux development signing is automatic after a relevant `main` push passes the
+entire Verify gate. It is separate from the manual Windows/macOS Release workflow
+and does not create a release tag or GitHub Release. The Linux lane currently
+produces x86-64 artifacts; signing does not establish ARM64 acceptance.
+
+Before merging, configure the existing **production** GitHub environment:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Environment secret | `LINUX_SIGNING_KEY_BASE64` | Base64-encoded export of a dedicated, passphrase-protected OpenPGP signing private key/subkey |
+| Environment secret | `LINUX_SIGNING_KEY_PASSPHRASE` | Its nonempty, single-line passphrase |
+| Environment variable | `LINUX_SIGNING_FINGERPRINT` | Full fingerprint of the exact signing key/subkey, not a short ID or a different primary key |
+
+Restrict environment deployment branches to `main`, retain required reviewers
+where appropriate, and protect changes to the workflow/signing scripts. Existing
+environment approvals still apply: automatic scheduling does not bypass them.
+Never give signing secrets to PR jobs. Do not reuse an everyday personal key or
+commit private material. Keep an offline backup/revocation plan and rotate the
+key before expiry. Azure Authenticode and Apple Developer ID credentials are not
+Linux OpenPGP signing keys.
+
+Create or select the dedicated signing key outside the checkout, then upload it
+directly without writing a secret export into the repository. For example, after
+setting `SIGNING_FINGERPRINT` to the full signing-key fingerprint:
+
+```bash
+gpg --armor --export-secret-subkeys "$SIGNING_FINGERPRINT" |
+  base64 -w 0 |
+  gh secret set LINUX_SIGNING_KEY_BASE64 --env production --repo DamianEdwards/ghcp-spend-tray
+gh secret set LINUX_SIGNING_KEY_PASSPHRASE --env production --repo DamianEdwards/ghcp-spend-tray
+gh variable set LINUX_SIGNING_FINGERPRINT --env production \
+  --repo DamianEdwards/ghcp-spend-tray --body "$SIGNING_FINGERPRINT"
+```
+
+Use `--export-secret-keys` instead of `--export-secret-subkeys` only when the
+dedicated signing key is itself the primary key. The passphrase command prompts
+for the secret; do not put it on the command line. Publish the corresponding
+public key and exact fingerprint through a trusted project channel.
+
+The `linux_sign` job downloads the unsigned artifact from the **same** successful
+run and checks its build checksum. It signs the existing AppImage, without
+executing or repacking it, using the standard `.sha256_sig` and `.sig_key`
+sections. GnuPG performs signing and verification in disposable isolated
+keyrings. The verifier pins the configured fingerprint and rejects expired,
+revoked, invalid or mismatched signatures. All other bytes, including the
+runtime and compressed payload, must remain unchanged.
+
+Only after embedded and detached signature verification, GitHub attestation
+creation, and provenance verification against this workflow's main-branch source
+commit does the job upload **linux-signed** (30-day retention). It contains the
+AppImage, detached `.asc` signature, post-signing `.sha256`, public key,
+`SIGNING.txt` and `provenance.jsonl`. Missing credentials fail the job: there is
+no unsigned fallback for this artifact. `linux-devel` remains a clearly separate
+unsigned CI/build input. Local builds, PR runs, feature-branch pushes and manual
+Verify runs do not produce publisher-signed artifacts.
+
+Before executing a downloaded image, verify GitHub provenance:
+
+```bash
+gh attestation verify GHCPSpendTray-linux-devel-x86_64.AppImage \
+  --repo DamianEdwards/ghcp-spend-tray \
+  --signer-workflow DamianEdwards/ghcp-spend-tray/.github/workflows/verify.yml \
+  --source-ref refs/heads/main
+```
+
+Then verify the embedded signature using this repository's verifier and the
+independently trusted fingerprint:
+
+```bash
+python3 tools/linux/sign_appimage.py verify GHCPSpendTray-linux-devel-x86_64.AppImage \
+  --fingerprint "$SIGNING_FINGERPRINT"
+```
+
+Alternatively, import the trusted public key into your chosen verification
+keyring and use `gpg --verify IMAGE.AppImage.asc IMAGE.AppImage`. A bundled
+public key alone is not proof of publisher identity. A SHA-256 checksum is not a
+signature, and `--appimage-signature` only displays one. AppImage signatures are
+not enforced automatically by the desktop and do not remove FUSE/executable
+permission requirements. Signed development artifacts are not yet versioned
+production Linux releases or an automatic update channel.
+
 ## Updates
 
 A GitHub-hosted `.appinstaller` feed is possible: a stable HTTPS descriptor can

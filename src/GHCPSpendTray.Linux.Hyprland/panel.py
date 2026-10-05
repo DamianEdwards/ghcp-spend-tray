@@ -28,8 +28,8 @@ def snapshot(helper):
     result = subprocess.run([str(helper), "--command", "GetSnapshot"], capture_output=True,
                             text=True, check=True, timeout=15)
     value = json.loads(result.stdout)
-    if (len(result.stdout) > 256 * 1024 or not isinstance(value, dict) or
-            value.get("version") != 2 or value.get("demo") is not True or
+    if (len(result.stdout) > 1024 * 1024 or not isinstance(value, dict) or
+            value.get("version") != 4 or not isinstance(value.get("demo"), bool) or
             any(not isinstance(value.get(key), str) or len(value[key]) > 1024
                 for key in ("indicator", "consumption"))):
         raise RuntimeError("Unsupported helper snapshot.")
@@ -38,7 +38,9 @@ def snapshot(helper):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["start", "stop", "toggle", "status"])
+    parser.add_argument("action", choices=["start", "stop", "toggle", "open", "status"])
+    parser.add_argument("--account", default="")
+    parser.add_argument("--settings", action="store_true")
     args = parser.parse_args()
     root, helper = paths()
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -69,13 +71,13 @@ def main():
     if args.action == "status":
         try:
             value = snapshot(helper)
-            print(json.dumps({"text": value["indicator"], "tooltip": "GHCPSpendTray DEMO - " + value["consumption"],
-                              "class": "demo"}))
+            print(json.dumps({"text": value["indicator"], "tooltip": "GHCPSpendTray - " + value["consumption"],
+                              "class": "demo" if value["demo"] else "usage"}))
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             print(f"GHCPSpendTray panel: {error}", file=sys.stderr)
             print(json.dumps({"text": "?", "tooltip": "GHCPSpendTray unavailable", "class": "error"}))
         return
-    if args.action == "toggle":
+    if args.action in ("toggle", "open"):
         if not runtime.is_absolute() or not runtime.is_dir() or runtime.stat().st_uid != os.getuid():
             raise RuntimeError("A user-owned absolute XDG_RUNTIME_DIR is required.")
         log_path = runtime / "ghcp-spend-tray-demo-panel.log"
@@ -98,7 +100,8 @@ def main():
                 starter.terminate()
                 starter.wait(timeout=10)
             raise
-        subprocess.run(["quickshell", "ipc", "-p", str(root / "shell.qml"), "call", "usage", "toggle"],
+        action = ["open", args.account, str(args.settings).lower()] if args.action == "open" else ["toggle"]
+        subprocess.run(["quickshell", "ipc", "-p", str(root / "shell.qml"), "call", "usage", *action],
                        check=True, timeout=10)
         return
     if not os.environ.get("WAYLAND_DISPLAY"):

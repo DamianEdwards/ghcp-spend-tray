@@ -4,9 +4,10 @@ import {parseSnapshot} from './snapshot.js';
 
 export const BUS_NAME = 'io.github.ghcpspendtray.LinuxDemo';
 export const BUS_PATH = '/io/github/ghcpspendtray/LinuxDemo';
-export const BUS_INTERFACE = `${BUS_NAME}2`;
+export const BUS_INTERFACE = `${BUS_NAME}4`;
 
 export class DemoClient {
+    get running() { return Boolean(this._proxy?.g_name_owner); }
     constructor(onSnapshot, onError, style = null) {
         this._onSnapshot = onSnapshot;
         this._onError = onError;
@@ -22,8 +23,8 @@ export class DemoClient {
     _error(error) {
         if (this._disposed)
             return;
-        console.error(`GHCPSpendTray demo: ${error.message}`);
-        this._onError(`Usage unavailable. Check the helper installation. ${error.message}`);
+        console.error('GHCPSpendTray desktop request failed.');
+        this._onError(error.message);
     }
 
     _connect() {
@@ -75,7 +76,7 @@ export class DemoClient {
             this._connect();
             return;
         }
-        this._proxy.call(method, parameters, Gio.DBusCallFlags.NONE, 10000, this._cancellable,
+        this._proxy.call(method, parameters, Gio.DBusCallFlags.NONE, 130000, this._cancellable,
             (proxy, result) => {
                 if (this._disposed)
                     return;

@@ -128,6 +128,17 @@ def effective(bar, path, seen=()):
 def remove(source, state):
     if source == state["installed"]:
         return state["original"]
+    if state.get("kind") == "tray":
+        if not state["added"]:
+            return source
+        index = state["bar"]
+        values = Document(source).bar(index)["value"].get("modules-right")
+        if not isinstance(values, list) or values.count("tray") > 1:
+            raise ValueError("The installed tray placement changed ambiguously; restore it before removal.")
+        remaining = [value for value in values if value != "tray"]
+        if not state["had_modules_right"] and remaining == state["previous_modules"]:
+            return remove_field(source, index, "modules-right")
+        return set_field(source, index, "modules-right", remaining)
     index = state["bar"]
     bar = Document(source).bar(index)["value"]
     if MODULE in bar and bar[MODULE] != state["module"]:
@@ -166,3 +177,26 @@ def prepare(path, index, module, previous=None):
     Document(installed)
     return {"path": str(path), "bar": index, "original": source, "installed": installed,
             "module": module, "had_modules_right": "modules-right" in bar, "previous_modules": modules}
+
+
+def prepare_tray(path, index, previous=None):
+    path = path.absolute()
+    if path.is_symlink():
+        raise ValueError(f"Waybar config is a symlink; pass its actual file path: {path.resolve()}")
+    source = path.read_text()
+    if previous:
+        if previous["path"] != str(path) or previous["bar"] != index:
+            raise ValueError("Uninstall the old Waybar integration before selecting a different config/bar.")
+        source = remove(source, previous)
+    bar = Document(source).bar(index)["value"]
+    merged = effective(bar, path.resolve())
+    lists = [merged.get(key, []) for key in ("modules-left", "modules-center", "modules-right")]
+    if any(not isinstance(values, list) or not all(isinstance(value, str) for value in values) for values in lists):
+        raise ValueError("Waybar module lists must contain module names.")
+    if MODULE in merged or any(MODULE in values for values in lists):
+        raise ValueError("An unowned GHCPSpendTray custom module already exists; remove it before native tray integration.")
+    added = not any(value == "tray" or value.startswith("tray#") for values in lists for value in values)
+    modules = merged.get("modules-right", [])
+    installed = set_field(source, index, "modules-right", [*modules, "tray"]) if added else source
+    return {"kind": "tray", "path": str(path), "bar": index, "original": source, "installed": installed,
+            "added": added, "had_modules_right": "modules-right" in bar, "previous_modules": modules}

@@ -3,6 +3,7 @@
 
 import argparse
 import contextlib
+import ctypes.util
 import fcntl
 import io
 import os
@@ -21,10 +22,19 @@ GUIDANCE = {
              "the extension. GNOME may require a logout/login to discover it; updates require one "
              "to reload its code. No general tray extension will be changed.",
     "kde": "The native Plasma widget will be installed. After setup, right-click your panel, choose "
-           "Add Widgets, and add GHCPSpendTray Demo. Log out/in after updates to reload its code.",
-    "hyprland": "Setup will add an indicator to your existing Waybar configuration, preserving comments "
-                "and included files. No second bar will be started. Reload Waybar using your usual "
-                "session controls afterward; click the indicator to open the Quickshell popup.",
+           "Add Widgets, and add GHCPSpendTray. Log out/in after updates to reload its code.",
+    "hyprland": "Setup will reuse Waybar's tray, or add it to your selected bar with your consent, preserving "
+                "comments and includes. Owned legacy custom indicators are migrated. Monitoring starts now; "
+                "login startup is opt-in in General settings. Reload Waybar yourself, then click a native "
+                "icon for the Quickshell popup. Setup never starts or restarts Waybar.",
+}
+COMPLETION_GUIDANCE = {
+    "gnome": "Log out of your desktop and back in to load the installed GNOME panel. "
+             "Re-enabling the extension does not reload its code. Your saved accounts are unchanged. "
+             "Then enable GHCPSpendTray in Extensions if it is not already enabled.",
+    "kde": "Log out of your desktop and back in to load the installed widget code. "
+           "Then add GHCPSpendTray from your panel's Add Widgets menu if it is not already present.",
+    "hyprland": "Reload Waybar, then click your new indicator.",
 }
 
 
@@ -54,7 +64,10 @@ def data_home():
 def missing_dependencies(desktop):
     required = {"gnome": ["gdbus", "gnome-extensions"], "kde": ["gdbus", "plasmashell"],
                 "hyprland": ["gdbus", "waybar", "quickshell"]}
-    return [command for command in required[desktop] if shutil.which(command) is None]
+    missing = [command for command in required[desktop] if shutil.which(command) is None]
+    if ctypes.util.find_library("secret-1") is None:
+        missing.append("libsecret-1")
+    return missing
 
 
 def perform(action, desktop, config=None, bar=None, files_only=False):
@@ -232,7 +245,9 @@ def gui():
             self.consent = QCheckBox("Allow installation and the desktop changes described above")
             self.consent.setObjectName("consent")
             layout.addWidget(self.consent)
-            preview = QLabel("Preview uses synthetic accounts. Real account sign-in is not available yet.")
+            preview = QLabel("Sign in from the native controls after installation. Credentials require an unlocked "
+                             "Secret Service provider: GNOME Keyring or KWallet with Secret Service enabled. "
+                             "Removing the integration retains account data; remove accounts in native controls first.")
             preview.setObjectName("notice")
             preview.setWordWrap(True)
             layout.addWidget(preview)
@@ -367,11 +382,7 @@ def gui():
             self.refresh()
             if success:
                 summary = ("Integration removed. Your other settings are unchanged." if self.operation == "remove" else
-                           "Files installed. " + {
-                               "gnome": "Log out and back in if needed, then enable GHCPSpendTray in Extensions.",
-                               "kde": "Add GHCPSpendTray Demo from your panel’s Add Widgets menu.",
-                               "hyprland": "Reload Waybar, then click your new indicator.",
-                           }[self.desktop.currentData()])
+                           "Files installed. " + COMPLETION_GUIDANCE[self.desktop.currentData()])
             else:
                 summary = "Setup couldn’t finish. " + (text.strip().splitlines()[-1] if text.strip() else "See details below.")
             self.show_result(summary, text)
@@ -410,7 +421,8 @@ def gui():
     if "--smoke-ui" in sys.argv:
         # Exercise the actual frozen GUI without accepting installation or touching the desktop.
         def smoke():
-            if window.consent.isChecked() or window.install_button.isEnabled():
+            if (window.consent.isChecked() or window.install_button.isEnabled() or
+                    window.windowIcon().isNull() or window.windowIcon().pixmap(36, 36).isNull()):
                 application.exit(1)
                 return
             for index in range(1, window.desktop.count()):
@@ -428,6 +440,13 @@ def gui():
                 application.exit(1)
                 return
             window.options_button.setChecked(False)
+            window.desktop.setCurrentIndex(window.desktop.findData("gnome"))
+            window.operation = "install"
+            window.completed(True, "Synthetic installation result.")
+            if ("Log out of your desktop and back in" not in window.result_label.text() or
+                    "if needed" in window.result_label.text()):
+                application.exit(1)
+                return
             window.show_result("Synthetic failure preview", "Synthetic diagnostic details.")
             if not window.result_label.isVisible() or window.status.isVisible():
                 application.exit(1)

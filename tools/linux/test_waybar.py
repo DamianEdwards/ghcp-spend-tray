@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,38 @@ waybar = installer.waybar
 
 
 class WaybarTests(unittest.TestCase):
+    def setUp(self):
+        config = tempfile.TemporaryDirectory(prefix="ghcp-test-config-")
+        self.addCleanup(config.cleanup)
+        environment = patch.dict(os.environ, XDG_CONFIG_HOME=config.name)
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_native_tray_reuse_migration_and_reversible_edits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base"
+            base.write_text('{"modules-left":["tray"],"tray":{"icon-size":20}}')
+            config = root / "config"
+            original = '{/*keep*/"include":' + json.dumps(str(base)) + '}'
+            config.write_text(original)
+            state = waybar.prepare_tray(config, None)
+            self.assertFalse(state["added"])
+            self.assertEqual(state["installed"], original)
+            self.assertEqual(waybar.remove(state["installed"], state), original)
+            config.write_text('{/*keep*/"modules-right":["clock"]}')
+            original = config.read_text()
+            legacy = waybar.prepare(config, None, {"exec": "old"})
+            config.write_text(legacy["installed"])
+            state = waybar.prepare_tray(config, None, legacy)
+            self.assertTrue(state["added"])
+            self.assertNotIn(waybar.MODULE, state["installed"])
+            self.assertEqual(waybar.remove(state["installed"], state), original)
+            edited = waybar.set_field(state["installed"], None, "height", 48)
+            restored = waybar.Document(waybar.remove(edited, state)).root["value"]
+            self.assertEqual(restored, {"height": 48, "modules-right": ["clock"]})
+            self.assertEqual(base.read_text(), '{"modules-left":["tray"],"tray":{"icon-size":20}}')
+
     def test_jsonc_comments_includes_update_and_exact_restoration(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -93,6 +126,7 @@ class WaybarTests(unittest.TestCase):
             payload = root / "payload"
             (payload / "helper").mkdir(parents=True)
             (payload / "helper/GHCPSpendTray.Linux").write_text("synthetic")
+            (payload / "helper/ghcp-spend-tray.svg").write_text("<svg/>")
             (payload / "hyprland").mkdir()
             (payload / "hyprland/panel.py").write_text("# synthetic test fixture")
             data = root / "data"
@@ -105,7 +139,7 @@ class WaybarTests(unittest.TestCase):
                 state_path = data / "ghcp-spend-tray-hyprland/waybar-integration.json"
                 self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
                 modules = waybar.Document(config.read_text()).root["value"]["modules-right"]
-                self.assertEqual(modules.count(waybar.MODULE), 1)
+                self.assertEqual(modules.count("tray"), 1)
                 with self.assertRaisesRegex(RuntimeError, "desktop-aware"):
                     installer.uninstall(data, True)
                 installer.uninstall(data, False)
@@ -117,6 +151,7 @@ class WaybarTests(unittest.TestCase):
             payload = root / "payload"
             (payload / "helper").mkdir(parents=True)
             (payload / "helper/GHCPSpendTray.Linux").write_text("synthetic")
+            (payload / "helper/ghcp-spend-tray.svg").write_text("<svg/>")
             (payload / "hyprland").mkdir()
             data = root / "data"
             config = root / "config"

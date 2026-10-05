@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.ghcp-spend-tray-demo" path="/org/gnome/shell/extensions/ghcp-spend-tray-demo/">
+    <key name="selected-account" type="s">
+      <default>''</default>
+      <summary>Account selected when opening native preferences</summary>
+    </key>
     <key name="indicator-style" type="s">
       <choices><choice value="Pie"/><choice value="Percentage"/></choices>
       <default>'Pie'</default>
