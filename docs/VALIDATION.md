@@ -32,6 +32,22 @@ The longest Windows packaging lane was 4:58 versus the old 6:09 median;
 Windows tests were 4:01 versus 4:53, and macOS 26 was 3:15 versus 3:40.
 This is an initial observation, not a long-term percentile or guaranteed SLA.
 
+The follow-up full-matrix
+[run 37265434274](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37265434274)
+passed every check in 4:16, 35% below the historical PR median and 33% below
+the historical main median. Windows packaging lanes both took 3:48; test
+shards took 3:50 and 2:52; macOS 26 app/UI and shared tests took 1:43 and 1:53,
+with macOS 15 runtime at 0:31. Summed runner time was 18:47 versus the old
+mixed-platform median of 15:31: elapsed time improves at the cost of more
+parallel runner time.
+
+Native AOT size changes landed in #65 during this work. A newer successful
+pre-split [run 37263530902](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37263530902)
+used identical application source trees, including those size settings,
+and took 7:06 with Windows packaging at 6:49. This provides a same-application
+comparison in addition to the historical baseline; neither comparison removes
+hosted-runner/cache variability or establishes post-merge main timing.
+
 ## Windows period-estimate parity (October 3, 2026)
 
 Windows now consumes the shared calculation, result and per-account persistence

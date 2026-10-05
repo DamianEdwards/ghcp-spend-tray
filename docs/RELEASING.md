@@ -328,6 +328,11 @@ App SDK graph and Native AOT PRI/XBF resource handling without introducing the
 umbrella SDK solely for Visual Studio single-project packaging.
 The app remains full-trust and Native AOT in both deployment modes.
 
+The Windows app project sets `OptimizationPreference` to `Size` for x64 and
+ARM64 in both deployment modes. This favors smaller executables and enables
+Native AOT data dehydration on Windows, with potential startup, throughput,
+and memory tradeoffs.
+
 Use `.\tools\package.ps1 -Store` for a framework-dependent Store build, with
 the assigned Partner Center identity arguments for submission. The conditional
 `Microsoft.WindowsAppSDK.Runtime` reference does not add the umbrella SDK.
