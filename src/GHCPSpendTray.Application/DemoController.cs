@@ -12,7 +12,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public string DataDirectory => directory;
     public bool Portable => true;
     public event Action<DashboardView>? Changed;
-    public SettingsView Settings { get; private set; } = new(60, "50, 80, 100", true, false);
+    public SettingsView Settings { get; private set; } = new(10, "50, 80, 100", true, false);
     public Task InitializeAsync() => RefreshAsync();
     public Task RefreshAsync(string? accountKey = null)
     {

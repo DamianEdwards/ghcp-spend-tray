@@ -28,7 +28,7 @@ try
     app.Changed += next => Volatile.Write(ref view, next);
     app.SetNotificationHandler(_ => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
     await app.InitializeAsync();
-    Check(app.Settings.PollMinutes == 60, "exact one-hour default");
+    Check(app.Settings.PollMinutes == 10, "exact ten-minute default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
     Check(app.Settings.TrayStyle == TrayIconStyle.Pie && app.Settings.TrayMode == TrayDisplayMode.RollUp &&
         app.Settings.ExcludedTrayAccounts!.Length == 0, "initial tray is an all-account roll-up pie");

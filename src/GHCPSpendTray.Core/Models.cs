@@ -69,7 +69,7 @@ public sealed record AppSettings
     // Setters preserve omitted-field defaults with .NET 10's generated JSON reader.
     // MonitorService takes detached copies at its settings boundary.
     [JsonRequired] public int Version { get; set; } = 1;
-    public int PollIntervalMinutes { get; set; } = 60;
+    public int PollIntervalMinutes { get; set; } = 10;
     public bool NotificationsEnabled { get; set; } = true;
     public decimal[] AlertThresholds { get; set; } = [50m, 80m, 100m];
     public decimal? SpendIncrementUsd { get; set; }
