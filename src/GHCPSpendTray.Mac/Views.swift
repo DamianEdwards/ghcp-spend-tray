@@ -451,7 +451,7 @@ struct AccountEditor: View {
 struct PreferencesView: View {
     @ObservedObject var model: AppModel
     let notifications: Bool
-    @State private var minutes = "60"
+    @State private var minutes = "10"
     @State private var thresholds = "50, 80, 100"
     @State private var increment = ""
     @State private var enabled = true
@@ -500,7 +500,7 @@ struct PreferencesView: View {
                 Section("General") {
                     TextField("Refresh interval (minutes)", text: $minutes)
                         .textFieldStyle(.roundedBorder)
-                    Text("From 5 to 1440 minutes; default 60.").font(.caption).foregroundStyle(.secondary)
+                    Text("From 5 to 1440 minutes; default 10.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Launch at login", isOn: $startup).disabled(model.settings?.canChangeStartup != true || model.demo)
                     Text(model.settings?.startupDescription ?? "").font(.caption).foregroundStyle(.secondary)
                     Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() }.disabled(model.demo)

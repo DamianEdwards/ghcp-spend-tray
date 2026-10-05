@@ -29,7 +29,7 @@ try
         });
         await controller.InitializeAsync();
         Check(dashboard?.ConsumptionUsd is null, "Empty consumption is unavailable, not zero.");
-        Check(controller.Settings.PollMinutes == 60 && controller.Settings.CanChangeStartup, "Shared defaults and startup adapter.");
+        Check(controller.Settings.PollMinutes == 10 && controller.Settings.CanChangeStartup, "Shared defaults and startup adapter.");
         await controller.SaveSettingsAsync(new(15, "100, 50, 80", true, true, 10m));
         Check(startup.Enabled && controller.Settings.Thresholds == "50, 80, 100", "Startup and global settings saved.");
         await Reject<AppOperationException>(() => controller.SaveSettingsAsync(new(4, "50", true, false)));
@@ -139,7 +139,7 @@ try
         Check(JsonSerializer.Deserialize(encoded, BridgeJsonContext.Default.Command) == init, "Source-generated command round-trip.");
         Check(bridge.Send(init).Error is null, "Bridge accepts initialization.");
         var initialized = await Complete(bridge, "init", ObserveEstimate);
-        Check(initialized.Error is null && initialized.Settings?.PollMinutes == 60, "Bridge reports asynchronous initialization.");
+        Check(initialized.Error is null && initialized.Settings?.PollMinutes == 10, "Bridge reports asynchronous initialization.");
         Check(estimateDashboard!.Accounts.All(a => a.PeriodEstimate is null), "Demo also defaults estimates off.");
         bridge.Send(new() { Id = "estimate-default", Method = "account.preferences", Key = "github.com:1" });
         Check((await Complete(bridge, "estimate-default")).Preferences?.ShowPeriodEstimate == false,
