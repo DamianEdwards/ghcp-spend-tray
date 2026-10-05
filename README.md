@@ -172,7 +172,7 @@ simple **Add account** prompt without empty totals, diagnostics, or refresh cont
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
-is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
+is 10 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
 
 In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
