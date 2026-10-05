@@ -341,3 +341,5 @@ finally {
     foreach ($file in [IO.Directory]::EnumerateFiles($directory)) { [IO.File]::Delete($file) }
     [IO.Directory]::Delete($directory)
 }
+# Exit-code preservation tests leave synthetic failures behind; clear them only after a successful run.
+$global:LASTEXITCODE = 0

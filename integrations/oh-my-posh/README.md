@@ -208,3 +208,7 @@ glyph output. `-Measure` reports cached update timings without imposing
 machine-dependent pass/fail thresholds. The lightweight CI job runs the offline
 tests for integration changes; documentation-only changes retain Markdown and
 the aggregate Verification check.
+
+The harness clears the synthetic exit codes used by its preservation assertions
+only after successful completion, so the GitHub Actions PowerShell wrapper also
+reports success. Assertion failures still terminate the test run.
