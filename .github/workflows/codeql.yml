@@ -53,15 +53,29 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+      - name: Build Native AOT bridge before Swift tracing
+        if: matrix.language == 'swift'
+        run: bash tools/macos/build.sh --bridge-only
       - name: Initialize CodeQL
         uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-      - name: Build Swift frontend and Native AOT bridge
+      - name: Build Swift frontend under tracing
         if: matrix.language == 'swift'
-        run: bash tools/macos/build.sh
+        run: bash tools/macos/build.sh --frontend-only
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: /language:${{ matrix.language }}
+      - name: Retain failed Swift extraction diagnostics
+        if: failure() && matrix.language == 'swift'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: swift-codeql-diagnostics
+          path: |
+            ${{ runner.temp }}/codeql_databases/swift/log/
+            ${{ runner.temp }}/codeql_databases/swift/diagnostic/
+            ${{ runner.temp }}/codeql_databases/log/build-tracer.log
+          if-no-files-found: error
+          retention-days: 7
