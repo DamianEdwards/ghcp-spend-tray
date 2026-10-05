@@ -103,25 +103,6 @@ class VerifyWorkflowTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for script routing tests")
-class CopilotPromptExitStatusTests(unittest.TestCase):
-    def test_actions_wrapper_exits_successfully_after_offline_assertions(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
-            env = dict(os.environ, TEMP=directory, TMP=directory, TMPDIR=directory)
-            script = ROOT / "integrations/oh-my-posh/Test-CopilotPrompt.ps1"
-            script_path = str(script).replace("'", "''")
-            command = (
-                f". '{script_path}'; "
-                "if (Test-Path variable:LASTEXITCODE) { exit $LASTEXITCODE }"
-            )
-            result = subprocess.run(
-                ["pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
-                cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"PASS: \d+ offline Copilot prompt assertions\.")
-
-
-@unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for script routing tests")
 class WindowsVerificationShardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

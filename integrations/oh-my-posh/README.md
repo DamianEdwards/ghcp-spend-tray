@@ -212,3 +212,5 @@ the aggregate Verification check.
 The harness clears the synthetic exit codes used by its preservation assertions
 only after successful completion, so the GitHub Actions PowerShell wrapper also
 reports success. Assertion failures still terminate the test run.
+The Windows harness also launches an isolated child through that wrapper to
+regression-test its exit status without requiring the integration on other OSes.

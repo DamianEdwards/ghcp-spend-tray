@@ -1,5 +1,9 @@
 #Requires -Version 7.2
-param([switch]$Render, [switch]$Measure)
+param(
+    [switch]$Render,
+    [switch]$Measure,
+    [Parameter(DontShow)][switch]$ExitStatusChild
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $global:LASTEXITCODE = 0
@@ -331,7 +335,6 @@ function Invoke-CopilotRefresh {
         $samples = @(1..200 | ForEach-Object { (Measure-Command { Update-CopilotPrompt -Now $now }).TotalMilliseconds }) | Sort-Object
         'Cached update: median {0:N3} ms; p95 {1:N3} ms (rendering excluded).' -f $samples[99], $samples[189]
     }
-    "PASS: $script:Checks offline Copilot prompt assertions."
 }
 finally {
     if (Get-Variable CopilotPromptState -Scope Script -ErrorAction SilentlyContinue) {
@@ -343,3 +346,11 @@ finally {
 }
 # Exit-code preservation tests leave synthetic failures behind; clear them only after a successful run.
 $global:LASTEXITCODE = 0
+if (!$ExitStatusChild) {
+    $testPath = (Join-Path $PSScriptRoot 'Test-CopilotPrompt.ps1').Replace("'", "''")
+    $command = ". '$testPath' -ExitStatusChild; if (Test-Path variable:LASTEXITCODE) { exit `$LASTEXITCODE }"
+    $childOutput = & $options.GhExecutable -NoProfile -NonInteractive -Command $command
+    Assert-Equal $LASTEXITCODE 0 'Actions wrapper reports successful assertions'
+    Assert-Equal (($childOutput -join "`n") -match 'PASS: \d+ offline Copilot prompt assertions\.') $true 'Actions wrapper runs the offline harness'
+}
+"PASS: $script:Checks offline Copilot prompt assertions."
