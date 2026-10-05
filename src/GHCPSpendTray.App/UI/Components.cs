@@ -331,7 +331,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         Button("Open Windows startup settings", () => Session.OpenLink("ms-settings:startupapps", owner))
             .IsEnabled(!Session.Controller.Portable),
         Card(VStack(10, TextBlock("Refresh interval").SemiBold(),
-            UI.Copy("Check each account every 5 to 1440 minutes. The default is one hour."),
+            UI.Copy("Check each account every 5 to 1440 minutes. The default is 10 minutes."),
             TextBox(Session.PollMinutes, value => Session.PollMinutes = value).Width(180)
                 .HAlign(HorizontalAlignment.Left).AutomationName("Refresh interval in minutes"))),
         Card(VStack(12,
