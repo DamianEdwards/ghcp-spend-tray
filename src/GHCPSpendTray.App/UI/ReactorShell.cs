@@ -18,6 +18,8 @@ internal sealed class ReactorShell : IDisposable
     private readonly TrayHost _tray;
     private readonly AppSession _session;
     private ReactorWindow? _flyout, _settings;
+    private FlyoutComponent? _flyoutComponent;
+    private SettingsComponent? _settingsComponent;
     private bool _exiting;
     private long _flyoutPresentation;
     internal AppSession Session => _session;
@@ -25,6 +27,8 @@ internal sealed class ReactorShell : IDisposable
     internal ReactorWindow? SettingsWindow => _settings;
     internal nint TrayHandle => _tray.Handle;
     internal IReadOnlyCollection<TrayIcon> TrayIcons => _tray.Icons;
+    internal int FlyoutRenderedRevision => _flyoutComponent?.RenderedRevision ?? -1;
+    internal int SettingsRenderedRevision => _settingsComponent?.RenderedRevision ?? -1;
 
     internal ReactorShell(IApplicationController controller)
     {
@@ -89,6 +93,7 @@ internal sealed class ReactorShell : IDisposable
         _flyoutPresentation++;
         if (_flyout is null)
         {
+            _flyoutComponent = new FlyoutComponent(_session);
             _flyout = ReactorApp.OpenWindow(new WindowSpec
             {
                 Title = "GHCPSpendTray", Width = 400, Height = 590, Style = WindowStyle.None,
@@ -96,7 +101,7 @@ internal sealed class ReactorShell : IDisposable
                 CornerStyle = WindowCornerStyle.Rounded, ActivateOnOpen = false,
                 Backdrop = BackdropChoice.Of(BackdropKind.DesktopAcrylic),
                 Icon = WindowIcon.FromPath(Path.Combine(AppContext.BaseDirectory, "Assets", "GHCPSpendTray.ico"))
-            }, () => new FlyoutComponent(_session));
+            }, () => _flyoutComponent);
             _flyout.Deactivated += (_, _) => DismissAfterDeactivation();
             _flyout.Closing += (_, e) =>
             {
@@ -148,6 +153,7 @@ internal sealed class ReactorShell : IDisposable
         if (_session.Page != page) _session.Navigate(page);
         if (_settings is null)
         {
+            _settingsComponent = new SettingsComponent(_session);
             _settings = ReactorApp.OpenWindow(new WindowSpec
             {
                 Title = "GHCPSpendTray Settings", Width = 980, Height = 740, MinWidth = 640, MinHeight = 540,
@@ -155,7 +161,7 @@ internal sealed class ReactorShell : IDisposable
                 Backdrop = BackdropChoice.Of(BackdropKind.Mica),
                 CornerStyle = WindowCornerStyle.Rounded,
                 Icon = WindowIcon.FromPath(Path.Combine(AppContext.BaseDirectory, "Assets", "GHCPSpendTray.ico"))
-            }, () => new SettingsComponent(_session));
+            }, () => _settingsComponent);
             if (_settings.NativeWindow.Content is UIElement root)
             {
                 // Window-wide shortcuts must not generate a tooltip over every child control.
@@ -174,7 +180,7 @@ internal sealed class ReactorShell : IDisposable
                         e.Handled = true;
                 };
             }
-            _settings.Closed += (_, _) => { _settings = null; _session.CloseSettings(); };
+            _settings.Closed += (_, _) => { _settings = null; _settingsComponent = null; _session.CloseSettings(); };
             _settings.NativeWindow.Activated += (_, e) =>
             {
                 if (e.WindowActivationState != WindowActivationState.Deactivated && !_session.Busy)

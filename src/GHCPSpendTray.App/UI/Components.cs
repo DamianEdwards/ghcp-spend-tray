@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using GHCPSpendTray.App.Native;
 using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
@@ -148,6 +149,7 @@ internal static class UI
 internal abstract class SessionComponent(AppSession session) : Component
 {
     protected AppSession Session { get; } = session;
+    internal int RenderedRevision { get; private set; } = -1;
     protected void UseSession()
     {
         var (_, setRevision) = UseState(Session.Revision);
@@ -157,6 +159,10 @@ internal abstract class SessionComponent(AppSession session) : Component
             Session.Changed += Changed;
             return () => Session.Changed -= Changed;
         }, Session);
+        int revision = Session.Revision;
+        // Reactor flushes effects before reconciling children. Publish the marker on
+        // the next dispatcher turn, after that reconciliation has committed.
+        UseEffect(() => Session.Post(() => RenderedRevision = revision), revision);
     }
 }
 
@@ -368,6 +374,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     private Element TrayPreview()
     {
         var preview = Session.PreviewTray();
+        string background = $"#{TrayIconRenderer.SystemPalette().Background:X8}";
         return VStack(8,
             TextBlock("Live preview").SemiBold(),
             UI.Copy("Draft choices using current usage. Icons are shown at tray size; apply with Save changes.").FontSize(12),
@@ -380,6 +387,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         .Width(16).Height(16)
                         .AutomationId("TrayPreviewIcon-" + (icon.AccountKey ?? "rollup"))
                         .AutomationName($"{label}: {icon.Details}").ToolTip(icon.Details))
+                        .Background(background)
                         .Padding(2).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0).Grid(column: 0),
                     TextBlock($"{label} - {icon.ValueText}" +
                         (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over allocation)" : ""))

@@ -5,7 +5,6 @@ using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor.Wrappers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace GHCPSpendTray.App.UI;
@@ -64,10 +63,6 @@ internal sealed class TrayPreviewImage
             uint dpi = (uint)Math.Round(96 * (_image.XamlRoot?.RasterizationScale ?? 1));
             int size = TrayIconRenderer.SizeForDpi(dpi);
             var palette = TrayIconRenderer.SystemPalette();
-            // A taskbar-colored swatch keeps transparent icons readable when app and taskbar themes differ.
-            if (_image.Parent is Border frame)
-                frame.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255,
-                    (byte)(palette.Background >> 16), (byte)(palette.Background >> 8), (byte)palette.Background));
             var next = (_indicator, _style, size, palette);
             if (_rendered == next)
             {

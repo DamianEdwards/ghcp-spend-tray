@@ -160,8 +160,10 @@ unavailable data rather than treating it as zero. See
 
 ## Use and notifications
 
-On Windows, left-click the tray icon to toggle the flyout or double-click it to open
-**Settings > Usage**; right-click it for **Open**,
+On Windows, left-click the tray icon to toggle the flyout immediately. Open
+**Settings > Usage** with the flyout's gear or the right-click **Settings** action.
+There is no double-click shortcut; rapid clicks remain ordinary selections.
+Right-click the icon for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,
 and a manual refresh action. With no accounts connected, Usage instead shows a

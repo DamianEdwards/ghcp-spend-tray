@@ -1,5 +1,55 @@
 # GHCPSpendTray validation and release gates
 
+## Windows tray selection and smoke readiness (October 5, 2026)
+
+Windows tray selection no longer waits for the system double-click interval.
+The version-four Shell callback handles `NIN_SELECT` and `NIN_KEYSELECT` once,
+ignoring raw mouse down/up/double-click messages. Rapid selections remain
+ordinary popup toggles (or account navigation for per-account icons), not a
+settings shortcut. Settings remains available from the popup gear and the
+right-click menu. Notification routing, retired callback filtering, taskbar
+recovery and icon ownership are unchanged.
+
+The previous timer arbitration could reopen the popup after double-clicking:
+synchronous cold settings-window creation could exceed the double-click
+interval before the trailing selection arrived. Removing that arbitration
+eliminates the clock-dependent path rather than lengthening its timeout.
+Native HWND regression tests send full raw/semantic callback sequences,
+including the old trailing timer, and assert immediate dispatch, no
+double-click settings action, host-specific routing and retired-ID rejection.
+
+Synthetic UI smoke waits for the accessible button's actual `Click` event,
+controller completion, the current committed Reactor revision, loaded
+descendants and layout. Probes run at low dispatcher priority after ordinary
+UI work. Correctness assertions then execute once; missing controls, incorrect
+values and accessibility/layout regressions still fail. Readiness waits use a
+five-second bound and record named checkpoints plus model/render revisions,
+navigation state, window visibility and foreground information on timeout.
+The portable/package process limits remain 30/45 seconds, respectively.
+
+The preview's taskbar-colored background is declarative, so Reactor cannot
+clear a parent swatch after the child image updates. Smoke retains exact pixel,
+background, accessibility, draft/save isolation and unmount-buffer assertions.
+All existing onboarding Back, disclosure, estimate, focus, notification and
+synthetic Credential Manager checks remain.
+
+Local sequential verification passed all four managed/executed x64 Native AOT
+harnesses (170 Core, 14 platform, 924 Windows integration and 81 shared/bridge
+assertions), plus release-tooling and 32 CI/28 release Python regressions.
+The x64 Native AOT app passed three consecutive populated/empty portable
+observations. Launcher fixtures also pass in PowerShell 7 and 5.1 and reject
+assertion failures, timeouts, missing results and nonzero exits without retries.
+
+Each hosted Windows packaging lane runs three populated/empty x64 observations
+against its exact extracted development MSIX, including fresh process startup.
+The synthetic child alone runs at below-normal priority on one permitted
+logical processor. Each iteration keeps separate diagnostics, and the first
+failure stops the lane; these are repeated observations, not retries until
+green. Self-contained/Store x64 and ARM64 packaging, Windows test shards and
+macOS coverage remain unchanged. No Developer Mode or other OS preference is
+changed on the developer machine. Finite green observations cannot establish
+a literal 100% guarantee for future Explorer, focus, load or runtime behavior.
+
 ## Parallel PR/main verification (October 4, 2026)
 
 Windows verification uses two isolated test shards: application integration,
@@ -696,7 +746,8 @@ populated/empty native UI smoke paths. It removes its registration in `finally`.
 It does not change Developer Mode, certificate trust, or login startup preferences.
 
 The portable smoke path checks hidden startup, tray mouse/keyboard callbacks,
-duplicate activation, focus transitions, accessible settings/onboarding actions,
+raw callback deduplication, rapid ordinary selection, focus transitions,
+accessible settings/onboarding actions,
 detail disclosures, synthetic notification submission and a uniquely named
 synthetic Credential Manager write/read/delete. Shell accepting a notification
 does not prove visual delivery. Synthetic callbacks do not reproduce all Explorer
