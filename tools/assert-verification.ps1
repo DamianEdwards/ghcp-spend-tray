@@ -5,7 +5,7 @@ $needs = $NeedsJson | ConvertFrom-Json
 if ($needs.changes.result -cne 'success') {
     throw "Change detection did not succeed: $($needs.changes.result)"
 }
-foreach ($platform in @('windows', 'macos', 'markdown')) {
+foreach ($platform in @('windows', 'macos', 'markdown', 'prompt')) {
     $expected = switch -CaseSensitive ($needs.changes.outputs.$platform) {
         'true' { 'success' }
         'false' { 'skipped' }

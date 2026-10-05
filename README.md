@@ -282,6 +282,14 @@ error, your organization's policy, and the app's bounded `logs` directory in
 the data folder. Do not post tokens, device codes, unredacted configuration or
 history, or private consumption details in public issues.
 
+## Oh My Posh integration
+
+You can display Copilot spend and a colored period forecast directly in a
+PowerShell prompt, without installing or running the tray app. The
+[Oh My Posh integration](integrations/oh-my-posh/README.md) includes a reusable
+segment, cached background refresh using your existing `gh` authentication,
+an isolated demo, and offline tests.
+
 ## Build and contribute
 
 ### Windows development

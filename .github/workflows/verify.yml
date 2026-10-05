@@ -22,6 +22,7 @@ jobs:
       windows: ${{ steps.changes.outputs.windows }}
       macos: ${{ steps.changes.outputs.macos }}
       markdown: ${{ steps.changes.outputs.markdown }}
+      prompt: ${{ steps.changes.outputs.prompt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -51,6 +52,20 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: "**/*.{md,markdown}"
+
+  prompt:
+    name: Standalone Copilot prompt
+    needs: changes
+    if: needs.changes.outputs.prompt == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - name: Verify offline PowerShell integration
+        shell: pwsh
+        run: .\integrations\oh-my-posh\Test-CopilotPrompt.ps1
 
   tests:
     name: Windows managed and Native AOT tests (${{ matrix.shard }})
@@ -277,7 +292,7 @@ jobs:
 
   verify:
     name: Verification
-    needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]
+    needs: [changes, markdown, prompt, tests, package, macos_tests, macos, macos_runtime]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -1,0 +1,6 @@
+{
+  "type": "text",
+  "style": "plain",
+  "foreground": "#CDD6F4",
+  "template": "{{ if eq .Env.COPILOT_CONNECTION_STATE \"in_progress\" }}\uEC4C{{ else if eq .Env.COPILOT_CONNECTION_STATE \"connected\" }}\uEC1E{{ else }}\uEC3E{{ end }} {{ .Env.COPILOT_SPEND }} {{ if eq .Env.COPILOT_FORECAST_STATE \"green\" }}<#A6E3A1>\uDB85\uDDB6</>{{ else if eq .Env.COPILOT_FORECAST_STATE \"yellow\" }}<#F9E2AF>\uDB85\uDDB6</>{{ else if eq .Env.COPILOT_FORECAST_STATE \"red\" }}<#F38BA8>\uDB85\uDDB6</>{{ else }}<#BAC2DE>\uDB85\uDDB6</>{{ end }} {{ .Env.COPILOT_FORECAST }} "
+}

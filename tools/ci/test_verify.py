@@ -74,11 +74,22 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("needs: [changes, macos]", self.jobs["macos_runtime"])
         self.assertNotIn("macos_tests", self.jobs["macos_runtime"])
         self.assertIn(
-            "needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]",
+            "needs: [changes, markdown, prompt, tests, package, macos_tests, macos, macos_runtime]",
             self.jobs["verify"],
         )
         self.assertIn("if: always()", self.jobs["verify"])
         self.assertNotIn("continue-on-error:", self.workflow)
+
+    def test_prompt_lane_is_offline_and_does_not_build_apps(self):
+        prompt = self.jobs["prompt"]
+        self.assertIn("needs: changes", prompt)
+        self.assertIn("if: needs.changes.outputs.prompt == 'true'", prompt)
+        self.assertIn("runs-on: windows-2025", prompt)
+        self.assertIn(r"run: .\integrations\oh-my-posh\Test-CopilotPrompt.ps1", prompt)
+        self.assertNotIn("setup-dotnet", prompt)
+        self.assertNotIn("-Render", prompt)
+        self.assertNotIn("gh auth", prompt)
+        self.assertIn("prompt: ${{ steps.changes.outputs.prompt }}", self.jobs["changes"])
 
     def test_caching_and_triggers_remain_unchanged(self):
         triggers = self.workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]

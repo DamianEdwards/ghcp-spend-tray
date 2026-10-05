@@ -33,33 +33,36 @@ $results = @('success', 'failure', 'cancelled', 'skipped')
 foreach ($windows in @('true', 'false')) {
     foreach ($macos in @('true', 'false')) {
         foreach ($markdown in @('true', 'false')) {
-            $needs = @{
-                changes = @{ result = 'success'; outputs = @{ windows = $windows; macos = $macos; markdown = $markdown } }
-                tests = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
-                package = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
-                macos_tests = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
-                macos = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
-                macos_runtime = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
-                markdown = @{ result = $(if ($markdown -eq 'true') { 'success' } else { 'skipped' }) }
-            }
-            foreach ($job in @('changes', 'tests', 'package', 'macos_tests', 'macos', 'macos_runtime', 'markdown')) {
-                $original = $needs[$job].result
-                foreach ($result in $results) {
-                    $needs[$job].result = $result
-                    $accepted = $true
-                    try { & $gate -NeedsJson ($needs | ConvertTo-Json -Depth 3) | Out-Null }
-                    catch { $accepted = $false }
-                    if ($accepted -ne ($result -eq $original)) {
-                        throw "Incorrect verification gate: windows=$windows macos=$macos markdown=$markdown job=$job result=$result"
-                    }
+            foreach ($prompt in @('true', 'false')) {
+                $needs = @{
+                    changes = @{ result = 'success'; outputs = @{ windows = $windows; macos = $macos; markdown = $markdown; prompt = $prompt } }
+                    tests = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
+                    package = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
+                    macos_tests = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                    macos = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                    macos_runtime = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                    markdown = @{ result = $(if ($markdown -eq 'true') { 'success' } else { 'skipped' }) }
+                    prompt = @{ result = $(if ($prompt -eq 'true') { 'success' } else { 'skipped' }) }
                 }
-                $needs[$job].result = $original
-                $missing = $needs.Clone()
-                $missing.Remove($job)
-                $rejected = $false
-                try { & $gate -NeedsJson ($missing | ConvertTo-Json -Depth 3) | Out-Null }
-                catch { $rejected = $true }
-                if (-not $rejected) { throw "Missing verification job was accepted: $job" }
+                foreach ($job in @('changes', 'tests', 'package', 'macos_tests', 'macos', 'macos_runtime', 'markdown', 'prompt')) {
+                    $original = $needs[$job].result
+                    foreach ($result in $results) {
+                        $needs[$job].result = $result
+                        $accepted = $true
+                        try { & $gate -NeedsJson ($needs | ConvertTo-Json -Depth 3) | Out-Null }
+                        catch { $accepted = $false }
+                        if ($accepted -ne ($result -eq $original)) {
+                            throw "Incorrect verification gate: windows=$windows macos=$macos markdown=$markdown prompt=$prompt job=$job result=$result"
+                        }
+                    }
+                    $needs[$job].result = $original
+                    $missing = $needs.Clone()
+                    $missing.Remove($job)
+                    $rejected = $false
+                    try { & $gate -NeedsJson ($missing | ConvertTo-Json -Depth 3) | Out-Null }
+                    catch { $rejected = $true }
+                    if (-not $rejected) { throw "Missing verification job was accepted: $job" }
+                }
             }
         }
     }
@@ -67,7 +70,8 @@ foreach ($windows in @('true', 'false')) {
 foreach ($needs in @('invalid', '{}',
     '{"changes":{"result":"success","outputs":{"windows":"true","macos":"true","markdown":"true"}}}',
     '{"changes":{"result":"success","outputs":{"windows":"false","macos":"false","markdown":"false"}}}',
-    '{"changes":{"result":"success","outputs":{"windows":"","macos":"false","markdown":"false"}},"tests":{"result":"skipped"},"package":{"result":"skipped"},"macos":{"result":"skipped"},"markdown":{"result":"skipped"}}',
+    '{"changes":{"result":"success","outputs":{"windows":"","macos":"false","markdown":"false","prompt":"false"}},"tests":{"result":"skipped"},"package":{"result":"skipped"},"macos":{"result":"skipped"},"markdown":{"result":"skipped"},"prompt":{"result":"skipped"}}',
+    '{"changes":{"result":"success","outputs":{"windows":"false","macos":"false","markdown":"false","prompt":""}},"tests":{"result":"skipped"},"package":{"result":"skipped"},"macos_tests":{"result":"skipped"},"macos":{"result":"skipped"},"macos_runtime":{"result":"skipped"},"markdown":{"result":"skipped"},"prompt":{"result":"skipped"}}',
     '{"changes":{"result":"success","outputs":{}},"tests":{"result":"success"},"package":{"result":"success"}}')) {
     $rejected = $false
     try { & $gate -NeedsJson $needs | Out-Null }
