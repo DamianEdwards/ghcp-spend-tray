@@ -22,6 +22,10 @@ def classify(paths):
             "integrations/oh-my-posh/copilot.segment.json",
             "integrations/oh-my-posh/demo.ps1",
             "integrations/oh-my-posh/Test-CopilotPrompt.ps1",
+            "integrations/oh-my-posh/CopilotPrompt.bash",
+            "integrations/oh-my-posh/copilot-prompt.jq",
+            "integrations/oh-my-posh/demo.bash",
+            "integrations/oh-my-posh/Test-CopilotPrompt.bash",
         }:
             result["prompt"] = True
         elif path in {

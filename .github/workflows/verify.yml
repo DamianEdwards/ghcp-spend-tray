@@ -54,18 +54,27 @@ jobs:
           globs: "**/*.{md,markdown}"
 
   prompt:
-    name: Standalone Copilot prompt
+    name: Standalone Copilot prompt (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.prompt == 'true'
-    runs-on: windows-2025
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
       - name: Verify offline PowerShell integration
+        if: runner.os == 'Windows'
         shell: pwsh
         run: .\integrations\oh-my-posh\Test-CopilotPrompt.ps1
+      - name: Verify offline Bash integration
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash integrations/oh-my-posh/Test-CopilotPrompt.bash
 
   tests:
     name: Windows managed and Native AOT tests (${{ matrix.shard }})

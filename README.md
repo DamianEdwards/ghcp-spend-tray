@@ -285,7 +285,7 @@ history, or private consumption details in public issues.
 ## Oh My Posh integration
 
 You can display Copilot spend and a colored period forecast directly in a
-PowerShell prompt, without installing or running the tray app. The
+PowerShell or Linux/WSL Bash prompt, without installing or running the tray app. The
 [Oh My Posh integration](integrations/oh-my-posh/README.md) includes a reusable
 segment, cached background refresh using your existing `gh` authentication,
 an isolated demo, and offline tests.

@@ -84,7 +84,12 @@ class VerifyWorkflowTests(unittest.TestCase):
         prompt = self.jobs["prompt"]
         self.assertIn("needs: changes", prompt)
         self.assertIn("if: needs.changes.outputs.prompt == 'true'", prompt)
-        self.assertIn("runs-on: windows-2025", prompt)
+        self.assertIn("runs-on: ${{ matrix.os }}", prompt)
+        self.assertIn("os: [windows-2025, ubuntu-24.04]", prompt)
+        self.assertIn("fail-fast: false", prompt)
+        self.assertIn("if: runner.os == 'Windows'", prompt)
+        self.assertIn("if: runner.os == 'Linux'", prompt)
+        self.assertIn("run: bash integrations/oh-my-posh/Test-CopilotPrompt.bash", prompt)
         self.assertIn(r"run: .\integrations\oh-my-posh\Test-CopilotPrompt.ps1", prompt)
         self.assertNotIn("setup-dotnet", prompt)
         self.assertNotIn("-Render", prompt)

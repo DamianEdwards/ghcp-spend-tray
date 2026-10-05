@@ -1,6 +1,6 @@
 # Copilot spend in Oh My Posh
 
-A standalone PowerShell integration that adds GitHub Copilot consumption and a
+A standalone PowerShell/Bash integration that adds GitHub Copilot consumption and a
 period-spend forecast to an existing Oh My Posh theme. No tray app, custom
 executable, .NET SDK, or custom Oh My Posh segment is required.
 
@@ -29,15 +29,18 @@ The projection separator is `nf-md-chart_timeline_variant_shimmer`.
 
 ## Requirements
 
-- Windows with PowerShell **7.2 or newer**, not Windows PowerShell 5.1.
+- Windows with PowerShell **7.2 or newer**, not Windows PowerShell 5.1; or Linux
+  (including WSL) with Bash **4.4 or newer**, jq **1.6 or newer**, GNU coreutils
+  (`date`, `stat`, `sha256sum`, `timeout`, `mktemp`), and util-linux `flock`.
 - [GitHub CLI](https://cli.github.com/), already authenticated to the desired host.
 - [Oh My Posh](https://ohmyposh.dev/) with an existing theme.
 - A recent [Nerd Font](https://www.nerdfonts.com/) containing the Copilot and chart
   glyphs, configured in your terminal. Missing glyphs generally indicate an old
   font, not a failed API request.
 
-Windows is the currently verified platform. macOS/Linux shell integration is
-not claimed as supported.
+Windows PowerShell and Linux Bash are verified separately. WSL uses native Linux
+tools and credentials, not Windows PowerShell or Windows `gh` interop. macOS
+shell integration is not claimed as supported.
 
 ## Try it without changing your profile
 
@@ -65,6 +68,8 @@ demonstration. Remove that
 specific directory after exiting if you no longer need its local observations.
 
 ## Add it to your profile and theme
+
+### PowerShell
 
 Copy `CopilotPrompt.ps1` and `copilot.segment.json` into a stable local directory,
 or keep a checkout and use absolute paths to those files. Do not depend on your
@@ -118,6 +123,49 @@ and restores the previous alias/hook if this integration still owns it. It
 does not delete observations, change your theme, log out, or revoke credentials.
 Remove the two profile lines and the segment to uninstall permanently.
 
+### Bash / WSL
+
+Copy `CopilotPrompt.bash`, `copilot-prompt.jq`, and `copilot.segment.json` together
+into a stable local directory. After your existing Oh My Posh initialization in
+`.bashrc`, add:
+
+```bash
+source "$HOME/.config/copilot-prompt/CopilotPrompt.bash"
+initialize_copilot_prompt --install-hook
+```
+
+Add the same `copilot.segment.json` object to your theme. Bash exports the same
+four variables and composes an existing `set_poshcontext` function, preserving
+the previous command's status. It does not replace `PROMPT_COMMAND` or `PS1`.
+`disable_copilot_prompt` removes its hook and variables without logging out or
+deleting observations. Reload Oh My Posh before reinstalling the hook if you
+reinitialize your theme.
+
+The Bash options are `--hostname`, `--cache-dir`, `--refresh-minutes`,
+`--request-timeout`, and `--gh-executable`, matching the PowerShell settings.
+Cache directories must be absolute, dedicated, and user-owned.
+
+```bash
+initialize_copilot_prompt --hostname your-enterprise.ghe.com --refresh-minutes 60 --install-hook
+```
+
+For native, isolated demonstrations from the repository root:
+
+```bash
+bash integrations/oh-my-posh/demo.bash
+bash integrations/oh-my-posh/demo.bash --live
+```
+
+The first prints five synthetic states without `gh` calls. The second opens a
+clean interactive Bash shell without modifying `.bashrc`; it needs native Linux
+Oh My Posh and working Linux `gh` authentication. Exit returns to the original
+shell. Its unique theme/cache directory is printed and retained for inspection.
+
+WSL does not automatically share Windows Credential Manager credentials.
+Validate `gh api --hostname github.com copilot_internal/user --silent` inside
+WSL itself. If it returns 401, resolve your native Linux `gh` authentication
+normally; the integration does not log in or change tokens/scopes.
+
 ## Authentication and troubleshooting
 
 The worker uses `gh api --hostname <host>` and `gh`'s normal credential
@@ -148,7 +196,8 @@ does not modify credentials.
 
 ## Caching, privacy, and performance
 
-The default cache is `%LOCALAPPDATA%\GHCPSpendPrompt`, independent of the tray
+The default cache is `%LOCALAPPDATA%\GHCPSpendPrompt` for PowerShell and
+`${XDG_CACHE_HOME:-$HOME/.cache}/GHCPSpendPrompt` for Bash, independent of the tray
 app. Each credential context has a small JSON observation, a lock file, and a
 short-lived refresh marker. An opaque SHA-256 fingerprint partitions hosts,
 executables, refresh intervals, environment credentials, and `gh` configuration metadata. The
@@ -162,11 +211,19 @@ worker rejects results if its credential context changes during the request.
 
 The prompt path reuses memory between disk checks. It never launches `gh` or
 waits for a network request. Once due, a PowerShell background job performs
-the refresh; two prompts/terminals cannot hold the same refresh lock. Other
+the refresh (a background Bash process for Bash); two prompts/terminals cannot hold the same refresh lock. Other
 terminals see a lease marker while the fetch is running. Abandoned markers
 expire, and writes use atomic replacement so readers cannot see partial JSON.
 The first background-job launch and periodic disk checks cost more than the
 steady-state memory-only path; timings depend on the machine.
+
+Bash uses jq and GNU date only in initialization/background processing; regular
+cached prompt updates do not start jq, date, or `gh`. It periodically checks
+configuration metadata with `stat`. Its derived tab-delimited view is read as
+data with Bash builtins, never sourced or evaluated as shell code. JSON and view
+files are published atomically and an interrupted view publication is repaired
+without refetching a fresh observation. Files are private to the user. Windows
+and Bash cache encodings are independent and should not be shared explicitly.
 
 Successful observations expire after the configured interval or billing reset.
 Stale, expired, failed, and unsupported observations are **unavailable, not
@@ -214,3 +271,15 @@ only after successful completion, so the GitHub Actions PowerShell wrapper also
 reports success. Assertion failures still terminate the test run.
 The Windows harness also launches an isolated child through that wrapper to
 regression-test its exit status without requiring the integration on other OSes.
+
+Run the native Linux/Bash harness in Linux or WSL:
+
+```bash
+bash integrations/oh-my-posh/Test-CopilotPrompt.bash
+```
+
+It uses a synthetic `gh` executable and fixtures, requires neither credentials
+nor network access, checks the hooks/cache/lease/retry behavior, and reports
+cached update timing. With native Oh My Posh installed, add `--render` to validate
+actual ANSI colors and all glyph states. CI runs PowerShell on Windows and Bash on Ubuntu as two
+independent shards of the standalone prompt check.

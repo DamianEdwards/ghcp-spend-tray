@@ -33,7 +33,8 @@ class ChangesTests(unittest.TestCase):
         self.assertEqual(classify(["README.md", "tools/macos/build.sh"]), dict(windows=False, macos=True, markdown=True, prompt=False))
 
     def test_prompt_integration_does_not_build_apps(self):
-        for name in ("CopilotPrompt.ps1", "copilot.segment.json", "demo.ps1", "Test-CopilotPrompt.ps1"):
+        for name in ("CopilotPrompt.ps1", "copilot.segment.json", "demo.ps1", "Test-CopilotPrompt.ps1",
+                     "CopilotPrompt.bash", "copilot-prompt.jq", "demo.bash", "Test-CopilotPrompt.bash"):
             path = f"integrations/oh-my-posh/{name}"
             self.assertEqual(classify([path]), dict(windows=False, macos=False, markdown=False, prompt=True), path)
         self.assertEqual(classify(["integrations/oh-my-posh/README.md"]),
