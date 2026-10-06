@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=GHCPSpendTray Setup
+Comment=Set up native Linux panels for Copilot consumption monitoring
+Exec=ghcp-spend-tray-setup
+Icon=ghcp-spend-tray
+Terminal=false
+Categories=Utility;

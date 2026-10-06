@@ -1,10 +1,11 @@
 # GHCPSpendTray privacy policy
 
-Last updated: September 28, 2026.
+Last updated: October 5, 2026.
 
 GHCPSpendTray is an independent Windows and macOS desktop application maintained by
 Damian Edwards. It displays GitHub Copilot AI-credit consumption for accounts you
 choose to connect. It is not affiliated with or endorsed by GitHub.
+The experimental Linux frontends use the same shared backend.
 
 ## Information the app uses
 
@@ -29,6 +30,8 @@ the Windows package's local application data folder. You can open it from
 **Settings > General > Open data folder**.
 On macOS it is `~/Library/Application Support/GHCPSpendTray`, with
 owner-only directory permissions.
+On Linux it is `$XDG_STATE_HOME/ghcp-spend-tray` (default
+`~/.local/state/ghcp-spend-tray`), also with owner-only directory permissions.
 
 Access and refresh tokens are stored in Windows Credential Manager or the macOS
 login Keychain, not in the
@@ -38,6 +41,12 @@ account, device security and any disk encryption you use.
 Mac credentials are device-local, non-synchronizing Keychain items. The native
 Mac UI and C# engine communicate within the same process, without a localhost
 server or a background credential service.
+Linux tokens use libsecret and a desktop Secret Service provider such as GNOME
+Keyring or KWallet. There is no plaintext credential fallback. The provider
+controls keyring encryption, unlocking, and any backup/synchronization behavior.
+Linux frontends receive account presentation data over the same-user session
+D-Bus. Temporary device user codes are returned only to sign-in queries, not
+broadcast; access and refresh tokens are never sent to these frontends.
 
 History retention defaults to 90 days and is maintained while the app runs.
 Recovery copies and files retained after storage errors may remain longer.
@@ -99,6 +108,13 @@ previews and Focus/Do Not Disturb.
   `~/Library/Application Support/GHCPSpendTray`. If needed, use Keychain Access
   to remove only items for the `com.damianedwards.GHCPSpendTray` service.
   Backups or recovery copies outside the data directory may remain.
+- On Linux, remove accounts in native preferences/settings before removing the
+  desktop integration. Uninstall preserves account state and keyring items.
+  An unchanged app-owned XDG login startup entry is removed; modified or unowned
+  startup entries require reconciliation instead of being deleted.
+  Remaining local files are in the state directory above; credential items use
+  the schema `io.github.ghcpspendtray.Credentials.v1` in your Secret Service
+  keyring. Remove only entries belonging to this app.
 - Deleting a local credential or uninstalling the app does not revoke its OAuth
   authorization at GitHub. Use **Manage OAuth grants** in account details, or the
   connected host's application settings, to revoke access.

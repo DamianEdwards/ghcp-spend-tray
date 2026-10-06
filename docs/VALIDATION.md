@@ -1,5 +1,114 @@
 # GHCPSpendTray validation and release gates
 
+## Linux main-branch signing (October 6, 2026)
+
+The Verify workflow has a separate production-environment signing job gated on
+successful aggregate verification and the Linux build, only for `push` events
+on `refs/heads/main`. PRs, feature branches and manual Verify runs cannot enter
+that signing job. Missing keys or failed signature/provenance checks prevent
+the `linux-signed` upload; the separate `linux-devel` artifact remains unsigned.
+
+Synthetic GPG tests cover embedded and detached signatures, exact preservation
+of all bytes outside AppImage's reserved signature/key regions, trusted-fingerprint
+pinning, tampered runtime/payload rejection, malformed ELF metadata, input
+checksums, wrong credentials and no-output failure paths. The verifier accepts
+a fixture signed by the SHA-pinned official appimagetool. A packaged AppImage
+is also signed with a disposable test key and exercised through the real runtime
+signature reader and isolated offscreen setup. No production private key is used,
+and no local development image is replaced with a test-signed build.
+
+Production credential provisioning, protected-environment configuration and a
+successful GitHub signing/attestation run remain required. Local fixture success
+does not establish publisher identity or production readiness.
+
+## Linux development backend (October 5, 2026)
+
+The experimental Linux frontends use a native GNOME Shell popup/preferences,
+a KDE Plasma applet, and a Waybar/Quickshell integration with a headless Native
+AOT helper using the real shared application controller by default. One per-user installer selects
+the desktop integration, with automatic session-D-Bus activation.
+Delivery now uses an AppImage containing graphical Qt Widgets setup and its
+Python/Qt runtime, with a stable per-user installed copy and removal action.
+Avalonia remains removed. Account state persists in an owner-only XDG state
+directory; credentials use libsecret/Secret Service without a plaintext fallback.
+GNOME preferences and the shared KDE/Hyprland account manager expose device
+authorization, cancellation, reconnect, refresh, editing, and confirmed removal.
+Demo mode is explicit and isolated.
+The parity surfaces now include shared global settings, login startup,
+notification testing, account period estimates, full diagnostics, avatars,
+copy-code and OAuth/support links, tray modes/inclusion with backend-rendered
+draft previews, and quit controls. Hyprland uses native StatusNotifierItem
+icons rather than the old Waybar custom text module. Existing trays are reused;
+new tray placements and legacy migration remain consent-based and reversible.
+See [prototype instructions and limitations](LINUX-PROTOTYPE.md).
+
+The Linux lane checks shared harnesses, executed Native AOT helper tests,
+versioned source-generated JSON, and actual installed-helper activation with
+the GJS client. Tests cover weighted percentages, over-allocation, unavailable
+versus zero, account additions, Changed signals, invalid input, single ownership,
+and native preference commands. Installer tests cover fresh install, upgrade,
+uninstall, ownership protection, and paths with spaces. Waybar tests cover
+comment-preserving JSONC edits, absolute includes, explicit multi-bar selection,
+updates, collision refusal, rollback, and reversal that preserves later edits.
+Cached v2/v3 desktop requests receive explicit desktop-reload guidance instead
+of an opaque unknown-method error. They cannot read current accounts or mutate
+state; signature-checked shutdown remains available for upgrades and removal.
+Qt Quick tests execute the packaged parser and usage component offscreen,
+including over-allocation, unavailable/empty states, and Details interactions.
+GNOME preferences render under an isolated Xvfb display with synthetic IPC at
+360px and 620px widths, using normal and enlarged text. Checks cover active
+device-code containment, action-button wrapping, copy-code, expiry/cancellation,
+account editing, and general settings. Screenshots are written to
+`artifacts/linux/preferences/`; no real codes, accounts, or desktop clipboard
+are used. These layout checks do not replace live GNOME Shell acceptance.
+The installed Native AOT command adapter is tested for plain JSON output and
+automatic helper activation. AppImage smoke coverage opens the actual frozen
+setup chooser offscreen, checks its consent gate, installs/updates all frontend
+selections, deletes the original download, reinstalls from the stable copy,
+executes the bundled Waybar adapter, and removes the installed image. All installations and
+activation tests use temporary HOME/XDG paths and disposable buses, not the
+user's desktop. The aggregate Verification gate still includes Linux and runs
+for documentation-only changes. Backend fixtures use the real shared controller
+with synthetic HTTP and credentials, covering verified identity, wrong-account
+reconnect, cancellation, persistence, failed deletion, and token-free snapshots.
+Private GNOME Keyring instances exercise libsecret CRUD, host/client isolation,
+corrupt payload rejection, missing/locked-provider failures, and preservation
+across keyring restart. QML tests exercise sign-in requests and account editing.
+Device prompts are direct replies only, never broadcast in dashboard snapshots.
+The v4 contract carries settings, tray presentations/images, diagnostics and
+estimates. Private fake tray-host checks cover registration, watcher restart,
+per-account activation, exact PNG-to-ARGB pixel agreement, and excluded-account
+reconciliation. Temporary startup tests cover opt-in/idempotence, permissions,
+modified-file/symlink refusal and owned removal; fake login1 signals exercise
+shared resume refresh. Settings tests cover draft isolation, persistence,
+estimates, and notification submission failure. These are protocol/control
+checks, not evidence of acceptance inside the real compositors.
+Live GitHub OAuth, KWallet compatibility, and native keyring prompts remain
+manual acceptance items; these fixtures never use real accounts.
+
+Normal AppImage/FUSE launch was also exercised locally with the graphical setup
+on an isolated offscreen display. This is distinct from the extract-and-run
+lifecycle checks; neither check enables a desktop extension or widget.
+
+The GNOME Shell 50 frontend is designed around PanelMenu's native one-click,
+anchored popup rather than an AppIndicator host's click policy. Live Shell
+acceptance of the revised popup and libadwaita preferences remains outstanding.
+The prior user's confirmation of the old hybrid flyout does not validate this
+replacement. The local isolated Shell harness previously failed before loading
+the extension, during GNOME/GJS initialization. Syntax and client tests are not
+a substitute for native visual/lifecycle acceptance.
+
+KDE/Hyprland frontend code is implemented, but neither has live-desktop
+acceptance. Plasma now exposes shared appearance settings and bounded
+D-Bus requests; Hyprland has focused-monitor placement and compositor focus-grab
+dismissal. QML parsing and offscreen shared-component tests do not establish
+Plasma popup anchoring or Hyprland layer-shell focus/placement. Quickshell 0.2.1
+was extracted locally to check its CLI/type declarations; an isolated offscreen
+launch cannot load its PanelWindow backend, so it is not runtime acceptance.
+ARM64, older-distribution compatibility, real-account behavior, and production
+distribution are not validated. CI's Ubuntu 24.04 baseline does not apply to
+Fedora-local artifacts.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.
