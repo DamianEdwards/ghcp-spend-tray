@@ -285,9 +285,9 @@ history, or private consumption details in public issues.
 ## Oh My Posh integration
 
 You can display Copilot spend and a colored period forecast directly in a
-PowerShell or Linux/WSL Bash prompt, without installing or running the tray app. The
+PowerShell, Bash, or zsh prompt, without installing or running the tray app. The
 [Oh My Posh integration](integrations/oh-my-posh/README.md) includes a reusable
-segment, cached background refresh using your existing `gh` authentication,
+segment and standalone Native AOT helper, cached background refresh using your existing `gh` authentication,
 an isolated demo, and offline tests.
 
 ## Build and contribute
@@ -307,7 +307,7 @@ Set-Location ghcp-spend-tray
 `verify.ps1 -NativeTests` also runs the test suites under executed x64 Native
 AOT. Run build and publish commands sequentially because they share
 intermediates. CI runs `-TestShard Application` and `-TestShard CorePlatformShared`
-on separate runners; together they retain all four harnesses and the full
+on separate runners; together they retain all harnesses and the full
 solution build. Omitting `-TestShard` still runs all checks locally.
 Self-contained and Store packaging also run independently, each publishing
 and validating both architectures and exercising populated/empty packaged x64

@@ -34,11 +34,14 @@ class ChangesTests(unittest.TestCase):
 
     def test_prompt_integration_does_not_build_apps(self):
         for name in ("CopilotPrompt.ps1", "copilot.segment.json", "demo.ps1", "Test-CopilotPrompt.ps1",
-                     "CopilotPrompt.bash", "copilot-prompt.jq", "demo.bash", "Test-CopilotPrompt.bash"):
+                     "CopilotPrompt.bash", "demo.bash", "Test-CopilotPrompt.bash", "CopilotPrompt.zsh", "Test-CopilotPrompt.zsh"):
             path = f"integrations/oh-my-posh/{name}"
             self.assertEqual(classify([path]), dict(windows=False, macos=False, markdown=False, prompt=True), path)
         self.assertEqual(classify(["integrations/oh-my-posh/README.md"]),
                          dict(windows=False, macos=False, markdown=True, prompt=False))
+        for path in ("src/GHCPSpendTray.Prompt/Program.cs", "tests/GHCPSpendTray.PromptTests/Program.cs",
+                     "tools/prompt/publish.ps1", "tools/prompt/publish.sh"):
+            self.assertEqual(classify([path]), dict(windows=False, macos=False, markdown=False, prompt=True), path)
         self.assertEqual(classify(["integrations/oh-my-posh/CopilotPrompt.ps1", "README.md"]),
                          dict(windows=False, macos=False, markdown=True, prompt=True))
         self.assertEqual(classify(["integrations/oh-my-posh/new-file"]),

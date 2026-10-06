@@ -17,15 +17,18 @@ def classify(paths):
             ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
         }:
             continue
+        elif path.startswith(("src/GHCPSpendTray.Prompt/", "tests/GHCPSpendTray.PromptTests/", "tools/prompt/")):
+            result["prompt"] = True
         elif path in {
             "integrations/oh-my-posh/CopilotPrompt.ps1",
             "integrations/oh-my-posh/copilot.segment.json",
             "integrations/oh-my-posh/demo.ps1",
             "integrations/oh-my-posh/Test-CopilotPrompt.ps1",
             "integrations/oh-my-posh/CopilotPrompt.bash",
-            "integrations/oh-my-posh/copilot-prompt.jq",
             "integrations/oh-my-posh/demo.bash",
             "integrations/oh-my-posh/Test-CopilotPrompt.bash",
+            "integrations/oh-my-posh/CopilotPrompt.zsh",
+            "integrations/oh-my-posh/Test-CopilotPrompt.zsh",
         }:
             result["prompt"] = True
         elif path in {

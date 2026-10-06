@@ -1,285 +1,262 @@
 # Copilot spend in Oh My Posh
 
-A standalone PowerShell/Bash integration that adds GitHub Copilot consumption and a
-period-spend forecast to an existing Oh My Posh theme. No tray app, custom
-executable, .NET SDK, or custom Oh My Posh segment is required.
-
-The compact layout is:
+One standalone **.NET Native AOT helper** owns quota validation, forecasts,
+credentials, HTTP, caching, locking, and background refresh. Thin PowerShell,
+Bash, and zsh adapters put its output into a standard Oh My Posh text segment.
+The tray app and an installed .NET runtime are **not** required.
 
 ```text
 [Copilot icon] $247 (~8%) [colored chart icon] $3.3K
 ```
 
-These are synthetic example values. Current dollars are first, followed by the
-approximate allocation percentage and projected period dollars. Whole dollars
-and percentages are rounded; amounts of $1,000 or more use `K` with at most one
-decimal (for example, `$10K / $4.4K`). Color is based on the unrounded forecast:
+These are synthetic values. Current consumption comes first, followed by the
+approximate allocation percentage and projected period dollars. Dollars and
+percentages are rounded; thousands use `K` with at most one decimal.
 
-| Forecast relative to allocation | Chart color |
+| Unrounded projection versus allocation | Chart color |
 |---|---|
 | At most 80% | Green |
 | Above 80%, through 100% | Yellow |
 | Above 100% | Red |
-| Unavailable | Neutral, with `?` instead of a forecast |
+| Unavailable | Neutral, with `?` |
 
-The leading glyph is `nf-cod-copilot` normally,
-`nf-cod-copilot_in_progress` during background refreshes, and
-`nf-cod-copilot_not_connected` after authentication, API, or local read failures.
-The projection separator is `nf-md-chart_timeline_variant_shimmer`.
+The leading glyph is `nf-cod-copilot`, `nf-cod-copilot_in_progress` while a refresh
+is running, or `nf-cod-copilot_not_connected` after a failure. The separator is
+`nf-md-chart_timeline_variant_shimmer`. A recent Nerd Font is required in your
+terminal. Ghostty needs no special integration beyond normal shell setup.
 
-## Requirements
+## Platforms and prerequisites
 
-- Windows with PowerShell **7.2 or newer**, not Windows PowerShell 5.1; or Linux
-  (including WSL) with Bash **4.4 or newer**, jq **1.6 or newer**, GNU coreutils
-  (`date`, `stat`, `sha256sum`, `timeout`, `mktemp`), and util-linux `flock`.
-- [GitHub CLI](https://cli.github.com/), already authenticated to the desired host.
-- [Oh My Posh](https://ohmyposh.dev/) with an existing theme.
-- A recent [Nerd Font](https://www.nerdfonts.com/) containing the Copilot and chart
-  glyphs, configured in your terminal. Missing glyphs generally indicate an old
-  font, not a failed API request.
+| Platform | Native bundle | Adapter |
+|---|---|---|
+| Windows x64 | `win-x64` | PowerShell 7.2+ |
+| Windows ARM64 | `win-arm64` | PowerShell 7.2+ |
+| Apple-silicon macOS 15/26 | `osx-arm64` | System Bash 3.2 or zsh 5.9 |
+| x64 glibc Linux / WSL | `linux-x64` | Bash |
 
-Windows PowerShell and Linux Bash are verified separately. WSL uses native Linux
-tools and credentials, not Windows PowerShell or Windows `gh` interop. macOS
-shell integration is not claimed as supported.
+Mac Intel/universal and Linux ARM64/musl are not distributed. The Linux artifact
+is built on Ubuntu 24.04; do not assume compatibility with older glibc or every
+Linux distribution. Native .NET HTTP uses the OS TLS facilities: Linux needs
+OpenSSL 3 and normal CA certificates. Native AOT does not mean a static libc or
+TLS implementation.
 
-## Try it without changing your profile
+Install [Oh My Posh](https://ohmyposh.dev/) and [GitHub CLI](https://cli.github.com/).
+`gh` must already have a usable credential for the selected host. No jq, GNU
+date/stat, flock, timeout, Homebrew Bash, Python, tray app, or .NET runtime is
+needed to **use** the integration.
 
-From the repository root, display all five synthetic forecast/connection states:
+## Get the standalone bundle
 
-```powershell
-pwsh -NoProfile -File .\integrations\oh-my-posh\demo.ps1
-```
-
-This requires Oh My Posh but does not invoke `gh`, read credentials, or call an
-API. It does not replace your prompt.
-
-For an isolated interactive shell using your current `gh` credentials:
+The **Standalone Copilot prompt** CI job retains development bundles named
+`copilot-prompt-<OS>-<architecture>`. Download the appropriate RID directory from
+the PR/workflow artifact, or publish from this checkout:
 
 ```powershell
-pwsh -NoLogo -NoProfile -NoExit -File .\integrations\oh-my-posh\demo.ps1 -Live
+.\tools\prompt\publish.ps1 -RuntimeIdentifier win-x64
+.\tools\prompt\publish.ps1 -RuntimeIdentifier win-arm64
 ```
 
-The first prompt starts a background fetch. Press Enter after a few seconds to
-display the result. `Show-CopilotPromptExamples` displays synthetic states.
-An enterprise host can be selected with `-Hostname your-enterprise.ghe.com`.
-The demo prints its unique, user-owned theme/cache directory under
-`%LOCALAPPDATA%\GHCPSpendPrompt`; it retains that directory after the interactive
-demonstration. Remove that
-specific directory after exiting if you no longer need its local observations.
+```bash
+bash tools/prompt/publish.sh
+```
 
-## Add it to your profile and theme
+Publishing uses the SDK pinned by `global.json`. Windows builds need Visual
+Studio C++ tools and the Windows SDK (including ARM64 cross tools for ARM64).
+Linux builds need clang and zlib development headers; macOS builds need the
+repository's stable Xcode/SDK toolchain and native Apple silicon. Build/publish
+commands must run sequentially because their intermediates are shared.
+
+Output is `artifacts/prompt/<RID>`. Copy the helper, adapter(s),
+`copilot.segment.json`, and README into a dedicated, stable user-owned directory.
+Keep them together and either add that directory to PATH or pass the helper's
+absolute path. No administrator installation is necessary.
+
+CI/local bundles are development artifacts, not signed/notarized public
+releases. Do not bypass Windows/macOS trust or organization-policy warnings.
+The helper is distributed independently of the Windows/macOS tray apps and
+does not change their versioning or packages.
+
+## Configure Oh My Posh
+
+Insert the object in `copilot.segment.json` into the desired prompt block's
+`segments` array. It is a segment fragment, not a complete theme. Keep your
+other segments and adapt the colors to your palette.
+
+Install the adapter **after** Oh My Posh initialization. Do not add a long
+Oh My Posh segment cache: the helper already manages data freshness.
 
 ### PowerShell
 
-Copy `CopilotPrompt.ps1` and `copilot.segment.json` into a stable local directory,
-or keep a checkout and use absolute paths to those files. Do not depend on your
-shell's current directory.
-
-After your existing Oh My Posh initialization in `$PROFILE`, add:
+In `$PROFILE`:
 
 ```powershell
-# Keep your existing Oh My Posh theme and initialization above these lines.
-. 'C:\Users\YOUR_USER\prompt\CopilotPrompt.ps1'
-Initialize-CopilotPrompt -InstallHook
+oh-my-posh init pwsh --config 'C:\Users\YOUR_USER\theme.omp.json' | Invoke-Expression
+. 'C:\Users\YOUR_USER\copilot-prompt\CopilotPrompt.ps1'
+Initialize-CopilotPrompt -HelperExecutable 'C:\Users\YOUR_USER\copilot-prompt\ghcp-spend-prompt.exe' -InstallHook
 ```
 
-Loading the script only defines functions. Initialization installs the hook
-only when `-InstallHook` is specified. It composes an existing `Set-PoshContext`
-hook rather than discarding it, and preserves the previous command's exit code.
-Reinitialization stops only this integration's worker and avoids duplicate hooks.
+### macOS zsh
 
-Insert the object from `copilot.segment.json` into the desired prompt block's
-`segments` array in your theme. It is a **segment fragment**, not a full theme.
-Keep your other segments and adapt its foreground/projection colors to your
-terminal palette. Reinitialize Oh My Posh after changing your theme.
+In `.zshrc`:
 
-Do not add an hour-long Oh My Posh segment cache: it would delay showing newly
-refreshed data, failures, and billing rollover. This integration owns the API
-cache.
-
-For a different host or refresh interval:
-
-```powershell
-Initialize-CopilotPrompt -Hostname your-enterprise.ghe.com -RefreshMinutes 60 -InstallHook
+```zsh
+eval "$(oh-my-posh init zsh --config "$HOME/theme.omp.json")"
+source "$HOME/.local/share/copilot-prompt/CopilotPrompt.zsh"
+initialize_copilot_prompt --helper-executable "$HOME/.local/share/copilot-prompt/ghcp-spend-prompt" --install-hook
 ```
 
-Optional parameters are `-CacheDirectory`, `-RequestTimeoutSeconds` (default 15,
-per request), and `-GhExecutable` (default `gh`, resolved once at initialization).
-Refresh intervals may be 1-1440 minutes. Use a dedicated, user-owned cache
-directory, not the repository or a shared/public directory.
+### Bash, including macOS system Bash and WSL
 
-If you manage your own hook, omit `-InstallHook` and call `Update-CopilotPrompt`
-before rendering the prompt. It sets these process-local variables:
-
-| Variable | Value |
-|---|---|
-| `COPILOT_SPEND` | Current formatted USD and percentage, or `unavailable` |
-| `COPILOT_FORECAST` | Compact projected USD, or `?` |
-| `COPILOT_FORECAST_STATE` | `green`, `yellow`, `red`, or `unknown` |
-| `COPILOT_CONNECTION_STATE` | `connected`, `in_progress`, or `not_connected` |
-
-`Disable-CopilotPrompt` stops this integration's job, removes its variables,
-and restores the previous alias/hook if this integration still owns it. It
-does not delete observations, change your theme, log out, or revoke credentials.
-Remove the two profile lines and the segment to uninstall permanently.
-
-### Bash / WSL
-
-Copy `CopilotPrompt.bash`, `copilot-prompt.jq`, and `copilot.segment.json` together
-into a stable local directory. After your existing Oh My Posh initialization in
-`.bashrc`, add:
+In `.bashrc`:
 
 ```bash
-source "$HOME/.config/copilot-prompt/CopilotPrompt.bash"
-initialize_copilot_prompt --install-hook
+eval "$(oh-my-posh init bash --config "$HOME/theme.omp.json")"
+source "$HOME/.local/share/copilot-prompt/CopilotPrompt.bash"
+initialize_copilot_prompt --helper-executable "$HOME/.local/share/copilot-prompt/ghcp-spend-prompt" --install-hook
 ```
 
-Add the same `copilot.segment.json` object to your theme. Bash exports the same
-four variables and composes an existing `set_poshcontext` function, preserving
-the previous command's status. It does not replace `PROMPT_COMMAND` or `PS1`.
-`disable_copilot_prompt` removes its hook and variables without logging out or
-deleting observations. Reload Oh My Posh before reinstalling the hook if you
-reinitialize your theme.
-
-The Bash options are `--hostname`, `--cache-dir`, `--refresh-minutes`,
-`--request-timeout`, and `--gh-executable`, matching the PowerShell settings.
-Cache directories must be absolute, dedicated, and user-owned.
+macOS terminals commonly start Bash as a login shell. Source `.bashrc` from
+`.bash_profile` if your setup does not already do so:
 
 ```bash
-initialize_copilot_prompt --hostname your-enterprise.ghe.com --refresh-minutes 60 --install-hook
+[[ -f "$HOME/.bashrc" ]] && source "$HOME/.bashrc"
 ```
 
-For native, isolated demonstrations from the repository root:
+Adapters preserve existing `Set-PoshContext`/`set_poshcontext` hooks and command
+exit status. Initialization is repeatable; disabling restores only a hook that
+the adapter still owns. They do not replace unrelated `PS1`, `PROMPT_COMMAND`,
+zsh hooks, profiles, or themes. Helper output is parsed as data, never evaluated.
 
-```bash
-bash integrations/oh-my-posh/demo.bash
-bash integrations/oh-my-posh/demo.bash --live
+## Options and protocol
+
+The helper's prompt operation is:
+
+```text
+ghcp-spend-prompt prompt --hostname github.com --refresh-minutes 60 --request-timeout 15 --gh-executable gh
 ```
 
-The first prints five synthetic states without `gh` calls. The second opens a
-clean interactive Bash shell without modifying `.bashrc`; it needs native Linux
-Oh My Posh and working Linux `gh` authentication. Exit returns to the original
-shell. Its unique theme/cache directory is printed and retained for inspection.
+`--cache-dir` overrides the dedicated cache directory. Intervals are 1-1440
+minutes and per-request timeouts 1-60 seconds. PowerShell exposes matching
+`-Hostname`, `-RefreshMinutes`, `-RequestTimeoutSeconds`, `-GhExecutable`, and
+`-CacheDirectory` parameters; Bash/zsh accept the native option spellings.
 
-WSL does not automatically share Windows Credential Manager credentials.
-Validate `gh api --hostname github.com copilot_internal/user --silent` inside
-WSL itself. If it returns 401, resolve your native Linux `gh` authentication
-normally; the integration does not log in or change tokens/scopes.
+Stdout is exactly one line with five nonempty tab-separated fields:
 
-## Authentication and troubleshooting
+```text
+GHCP-SPEND/1<TAB>spend<TAB>forecast<TAB>forecast-state<TAB>connection-state
+```
 
-The worker uses `gh api --hostname <host>` and `gh`'s normal credential
-resolution. It never runs `gh auth login`, requests scopes, rotates credentials,
-or copies a token into its cache. `GH_TOKEN`/`GITHUB_TOKEN` take precedence over
-stored credentials on github.com and ghe.com hosts; GitHub Enterprise Server
-uses the corresponding enterprise environment variables.
+The adapters export `COPILOT_SPEND`, `COPILOT_FORECAST`,
+`COPILOT_FORECAST_STATE` (`green/yellow/red/unknown`), and
+`COPILOT_CONNECTION_STATE` (`connected/in_progress/not_connected`).
+Safe diagnostics go to stderr, never into this data stream. The internal
+`refresh` operation is for workers, not profile configuration.
 
-Check access in the **same terminal** where you use the integration:
+## Cache, credentials, and background work
 
-```powershell
+The foreground helper only reads local context metadata and validated cached
+data, then launches a separate bounded worker if due. It never waits for
+credential discovery or HTTP. There is no persistent daemon.
+
+The worker uses host-appropriate environment-token precedence or captured,
+timed-out `gh auth token --hostname <host>` output. It never logs in, requests
+scopes, rotates tokens, or creates another credential store. Identity and quota
+requests use shared Core .NET HTTP clients with redirect refusal, size limits,
+validation, and rate-limit handling, not shell `gh api` parsing.
+
+Windows defaults to `%LOCALAPPDATA%\GHCPSpendPrompt\native-v1`; Unix defaults to
+`${XDG_CACHE_HOME:-$HOME/.cache}/GHCPSpendPrompt/native-v1`. Prompt caches are
+independent of the tray app. An opaque fingerprint isolates host, executable
+selection, interval, environment credentials, and `gh` configuration metadata.
+No token or configuration-file contents are persisted. Keyring changes that
+do not update configuration metadata need a new dedicated cache directory.
+
+Cross-process exclusion uses BCL exclusive file sharing; no external locking
+utility is needed. The native tests exercise competing processes and forced
+worker termination on every CI OS. Refresh leases expire after a bounded
+lifetime; a dead worker's OS file lock is released. Atomic private-file
+replacement prevents partial JSON reads. Failure cooldowns (at least five
+minutes) and server retry deadlines prevent network requests on every prompt.
+
+Cached observations contain an account ID and consumption values: private local
+data. Do not share or commit them. Unknown/unlimited allocations do not invent a
+percentage or colored forecast. Stale/expired, failed, invalid and unsupported
+observations are unavailable, never invented zero usage.
+
+## Forecast and authentication limitations
+
+Token-based credits are converted using the shared Core policy of 100 credits
+per USD. This is consumption value, **not an invoice** or all GitHub spending.
+Request-count billing is unsupported.
+
+The shared forecast extrapolates average observed usage across a UTC calendar
+month. It requires at least 24 hours of the period, a valid current observation,
+a fresh source timestamp, and a reset matching the next UTC month boundary
+when supplied. The first three days remain particularly uncertain.
+
+An existing `gh` login is not proof that its token/application/account can read
+the internal Copilot endpoint. There is no universal scope recipe. Check the
+same shell/host explicitly:
+
+```text
 gh api --hostname github.com copilot_internal/user --silent
 ```
 
-No quota body is printed. A successful request exits with code 0. Do not assume
-a generic `read:org` warning from `gh auth status` explains a Copilot failure.
-There is no verified universal scope recipe for this internal endpoint. Access
-can depend on token/application type, account entitlement, host support,
-enterprise approval, or SSO policy. A token working on github.com is not proof
-that it works on another host.
+WSL credentials are separate from Windows Credential Manager. An explicitly
+opt-in, bounded check performs the real background flow without printing
+consumption values:
 
-The worker verifies numeric account identity with `GET /user`, then reads
-`GET /copilot_internal/user`. Safe diagnostics include the failed operation and
-HTTP status, not raw API responses. Failures have a five-minute cooldown;
-`Retry-After` and exhausted rate-limit reset deadlines can extend it. Resolve
-access using your own normal `gh` authentication process; the integration
-does not modify credentials.
+```text
+ghcp-spend-prompt live-check --hostname github.com
+```
 
-## Caching, privacy, and performance
+It uses the dedicated native cache, not the repository. The demos and test
+suites use synthetic accounts and quota fixtures; live evidence is separate.
 
-The default cache is `%LOCALAPPDATA%\GHCPSpendPrompt` for PowerShell and
-`${XDG_CACHE_HOME:-$HOME/.cache}/GHCPSpendPrompt` for Bash, independent of the tray
-app. Each credential context has a small JSON observation, a lock file, and a
-short-lived refresh marker. An opaque SHA-256 fingerprint partitions hosts,
-executables, refresh intervals, environment credentials, and `gh` configuration metadata. The
-configuration file's contents are never read by this script.
-
-Changes to environment credentials or `gh` account-selection metadata are
-detected on the next disk check, normally within one second. Keyring changes
-that do not update that metadata require reinitialization with a new dedicated
-`-CacheDirectory`, or deletion of the old observations. A currently running
-worker rejects results if its credential context changes during the request.
-
-The prompt path reuses memory between disk checks. It never launches `gh` or
-waits for a network request. Once due, a PowerShell background job performs
-the refresh (a background Bash process for Bash); two prompts/terminals cannot hold the same refresh lock. Other
-terminals see a lease marker while the fetch is running. Abandoned markers
-expire, and writes use atomic replacement so readers cannot see partial JSON.
-The first background-job launch and periodic disk checks cost more than the
-steady-state memory-only path; timings depend on the machine.
-
-Bash uses jq and GNU date only in initialization/background processing; regular
-cached prompt updates do not start jq, date, or `gh`. It periodically checks
-configuration metadata with `stat`. Its derived tab-delimited view is read as
-data with Bash builtins, never sourced or evaluated as shell code. JSON and view
-files are published atomically and an interrupted view publication is repaired
-without refetching a fresh observation. Files are private to the user. Windows
-and Bash cache encodings are independent and should not be shared explicitly.
-
-Successful observations expire after the configured interval or billing reset.
-Stale, expired, failed, and unsupported observations are **unavailable, not
-zero**. Unknown, zero, and unlimited allocations can show valid consumption
-dollars, but do not invent a percentage or colored forecast. Warnings appear
-when the diagnostic changes rather than on every prompt.
-
-Cache files contain verified account IDs and consumption values, which are
-private local data. They do not contain tokens, logins, raw HTTP payloads, or
-invoice information. The script sends requests only to the GitHub host through
-`gh`; there is no additional hosted service. Do not share cache files or commit
-them. To clear local history, exit shells using the integration and delete
-only its dedicated cache directory.
-
-## Forecast limitations
-
-USD consumption is GitHub's token-based `credits_used / 100`, **not an invoice**
-or total GitHub spend. Premium-request billing is unsupported.
-
-The forecast extrapolates average observed consumption over the current UTC
-calendar month, using the source timestamp when supplied. It assumes that pace
-continues. It requires at least 24 hours of the period; the first three days
-remain particularly uncertain. A supplied reset must match the next first of
-the month at midnight UTC. A stale/invalid observation, non-calendar reset, or
-unknown allocation produces a neutral forecast instead of a misleading color.
-
-## Offline verification
-
-These tests use synthetic accounts, fixtures, time, and transport. They require
-neither `gh` nor credentials, do not make network requests, and do not build the
-tray apps:
+## Demos, tests, and measurements
 
 ```powershell
-pwsh -NoProfile -File .\integrations\oh-my-posh\Test-CopilotPrompt.ps1
+pwsh -NoProfile -File .\integrations\oh-my-posh\demo.ps1 -HelperExecutable .\artifacts\prompt\win-x64\ghcp-spend-prompt.exe
 ```
-
-When Oh My Posh is installed, add `-Render` to check actual ANSI colors and
-glyph output. `-Measure` reports cached update timings without imposing
-machine-dependent pass/fail thresholds. The lightweight CI job runs the offline
-tests for integration changes; documentation-only changes retain Markdown and
-the aggregate Verification check.
-
-The harness clears the synthetic exit codes used by its preservation assertions
-only after successful completion, so the GitHub Actions PowerShell wrapper also
-reports success. Assertion failures still terminate the test run.
-The Windows harness also launches an isolated child through that wrapper to
-regression-test its exit status without requiring the integration on other OSes.
-
-Run the native Linux/Bash harness in Linux or WSL:
 
 ```bash
-bash integrations/oh-my-posh/Test-CopilotPrompt.bash
+bash integrations/oh-my-posh/demo.bash "$PWD/artifacts/prompt/linux-x64/ghcp-spend-prompt"
+# Opt-in live isolated Bash or zsh, without editing profiles:
+bash integrations/oh-my-posh/demo.bash /absolute/path/ghcp-spend-prompt --live
+bash integrations/oh-my-posh/demo.bash /absolute/path/ghcp-spend-prompt --live-zsh
 ```
 
-It uses a synthetic `gh` executable and fixtures, requires neither credentials
-nor network access, checks the hooks/cache/lease/retry behavior, and reports
-cached update timing. With native Oh My Posh installed, add `--render` to validate
-actual ANSI colors and all glyph states. CI runs PowerShell on Windows and Bash on Ubuntu as two
-independent shards of the standalone prompt check.
+The helper generates synthetic presentations and the minimal theme from the
+canonical segment. Add `-Live` to the PowerShell demo for an isolated live
+session. Exit the demo shell to return to your normal shell.
+
+Publish with `-Tests` (Windows) or `--tests` (Unix), then run the published harness
+with `--helper <absolute-helper-path>`. It exercises domain rules, HTTP fixtures,
+private/invalid/expired caches, identity/context isolation, exclusion, abandoned
+workers, timeouts, cooldowns, rate limits and atomic writes. Adapter harnesses
+take the helper and fixture-harness paths and optionally `-Render`/`--render`.
+CI covers Windows x64/ARM64 publishing, Linux x64, and macOS arm64 with system
+Bash 3.2/zsh; renderer binaries are version/digest pinned.
+
+Representative development measurements (separate from Oh My Posh rendering):
+Windows x64 first reads varied from 84-92 ms, warm medians were 30-51 ms and p95
+varied from 48-67 ms; WSL Linux x64 first reads varied from 4-45 ms, warm medians
+were 5-10 ms and p95 varied
+from 6-43 ms, over 30 native processes per run. These are observations, not hardware-independent thresholds or
+claims about a cold OS filesystem cache. macOS timings need its native CI/host
+run. Native AOT process startup is intentionally measured before considering a
+daemon.
+
+## Upgrade and uninstall
+
+This replaces the earlier shell-owned cache/backend. Install the helper and new
+thin adapters together, update the helper path, and start a fresh shell rather
+than mixing old/new function definitions. The shared segment and four variable
+names are unchanged. `native-v1` does not import the legacy JSON/jq/TSV caches;
+there is one fresh native observation per context.
+
+Use `Disable-CopilotPrompt` or `disable_copilot_prompt` to remove this adapter's
+hook and variables. Remove its profile lines and segment to uninstall. It does
+not log out, revoke credentials or remove unrelated theme content. After
+exiting shells, remove only the dedicated installation/cache directories if
+you no longer want their private observations.
