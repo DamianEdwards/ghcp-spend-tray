@@ -129,6 +129,76 @@ internal static class TrayTests
         }
         var selected = Presentation(Indicator(25, "github.com:1"), Indicator(null, "example.ghe.com:2"));
         var rollUp = Presentation(Indicator(25, partial: true));
+        var callbackShell = new FakeShell();
+        using (var host = new TrayHost(root, callbackShell.Call))
+        {
+            List<string?> opened = [];
+            int settings = 0, notifications = 0;
+            string? notificationAccount = null;
+            host.OpenRequested += opened.Add;
+            host.SettingsRequested += () => settings++;
+            host.NotificationClicked += key => { notifications++; notificationAccount = key; };
+            void Send(int action, uint id = 1) =>
+                Win32.SendMessage(host.Handle, Win32.WM_TRAY, 0, (nint)((id << 16) | (uint)action));
+
+            Send(0x201);
+            Send(Win32.NIN_SELECT);
+            check(opened.SequenceEqual(new string?[] { null }), "mouse selection is delivered immediately without a timer");
+            Send(0x202);
+            check(opened.Count == 1, "raw button-down/up callbacks do not double-handle one physical selection");
+            Send(Win32.NIN_KEYSELECT);
+            check(opened.Count == 2, "keyboard activation uses the same immediate selection path");
+            opened.Clear();
+            Send(Win32.NIN_SELECT);
+            Send(0x203);
+            Send(Win32.NIN_SELECT);
+            Win32.SendMessage(host.Handle, 0x113, 1, 0);
+            check(opened.Count == 2 && settings == 0,
+                "double-click sequence produces ordinary selections, never settings or a deferred timer selection");
+            opened.Clear();
+            Send(Win32.NIN_SELECT);
+            Send(Win32.NIN_SELECT);
+            check(opened.Count == 2 && settings == 0, "rapid selections are not arbitrated as a settings shortcut");
+            host.Update(selected);
+            opened.Clear();
+            foreach (var icon in host.Icons)
+            {
+                Send(Win32.NIN_SELECT, icon.Id);
+                Send(Win32.NIN_KEYSELECT, icon.Id);
+            }
+            check(opened.SequenceEqual(selected.Icons.SelectMany(icon => new[] { icon.AccountKey, icon.AccountKey })),
+                "mouse and keyboard callbacks preserve each host-specific account identity");
+            uint retired = host.Icons.First().Id;
+            check(host.Notify(new("example.ghe.com:2", "Synthetic", "Synthetic click", 50m)),
+                "host accepts a notification for a selected account");
+            Send(Win32.NIN_BALLOONUSERCLICK, host.Icons.Last().Id);
+            check(notifications == 1 && notificationAccount == "example.ghe.com:2",
+                "native notification callback preserves its accepted account");
+            host.Update(rollUp);
+            opened.Clear();
+            Send(Win32.NIN_SELECT, retired);
+            Send(Win32.NIN_KEYSELECT, retired);
+            Send(0x203, retired);
+            Send(Win32.NIN_BALLOONUSERCLICK, retired);
+            check(opened.Count == 0 && notifications == 1 && settings == 0,
+                "all retired native callback forms are ignored");
+            Win32.SendMessage(host.Handle, Win32.RegisterWindowMessage("TaskbarCreated"), 0, 0);
+            Send(Win32.NIN_SELECT);
+            check(opened.Count == 1 && callbackShell.Versions.Values.All(version => version == 4),
+                "taskbar recovery retains immediate version-four selection semantics");
+            int refreshes = 0, exits = 0;
+            host.RefreshRequested += () => refreshes++;
+            host.ExitRequested += () => exits++;
+            host.ExecuteMenuCommand(0);
+            host.ExecuteMenuCommand(3);
+            check(settings == 1 && opened.Count == 1, "context-menu Settings remains the explicit settings shortcut");
+            host.ExecuteMenuCommand(1);
+            host.ExecuteMenuCommand(2);
+            host.ExecuteMenuCommand(4);
+            check(opened.Count == 2 && opened[^1] is null && refreshes == 1 && exits == 1,
+                "context-menu Open, Refresh and Exit retain their routing");
+        }
+        check(callbackShell.Registered.Count == 0, "native callback host disposal releases its icons");
         var fake = new FakeShell();
         using (var icons = new TrayIconSet(0, root, fake.Call))
         {

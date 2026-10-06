@@ -162,7 +162,7 @@ jobs:
                 /d $layout /o | Out-Null
               if ($LASTEXITCODE -ne 0) { throw "Cannot extract packaged smoke-test payload: $directory" }
               .\tools\smoke-test-package.ps1 -Layout $layout `
-                -DiagnosticsDirectory (Join-Path $logDirectory $directory)
+                -DiagnosticsDirectory (Join-Path $logDirectory $directory) -Iterations 3 -Constrained
           }
           finally { Stop-Transcript }
       - name: Retain packaged smoke diagnostics

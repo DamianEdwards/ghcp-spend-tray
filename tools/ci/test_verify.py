@@ -48,6 +48,7 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("if ([bool]::Parse($env:STORE_PACKAGE)) {", package)
         self.assertIn("$directory = $env:PACKAGE_DIRECTORY", package)
         self.assertIn(r".\tools\smoke-test-package.ps1 -Layout $layout", package)
+        self.assertIn("-Iterations 3 -Constrained", package)
         self.assertIn("finally { Stop-Transcript }", package)
         self.assertIn("packaged-smoke-diagnostics-${{ matrix.mode }}", package)
         self.assertIn("name: ${{ matrix.artifact }}", package)
