@@ -854,23 +854,25 @@ internal static class Program
     {
         Button? FindButton() => (flyout ? shell.Flyout : shell.SettingsWindow) is { } window
             ? Find(window, id) as Button : null;
-        await WaitForUI(shell, $"automation button {id} loaded and enabled", () =>
-            FindButton() is { IsEnabled: true, IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 });
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Button? button = null;
         void Clicked(object sender, RoutedEventArgs args) => completion.TrySetResult();
         try
         {
-            await OnUI(shell, () =>
+            await WaitForUI(shell, $"automation button {id} loaded and enabled", () =>
             {
-                button = FindButton() ?? throw new InvalidOperationException($"Smoke button {id} is missing.");
-                if (!button.IsEnabled || !button.IsLoaded ||
-                    new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
-                    throw new InvalidOperationException($"Button {AutomationProperties.GetAutomationId(button)} is not ready " +
-                        $"for its accessible invoke action: enabled={button.IsEnabled}, loaded={button.IsLoaded}.");
+                if (FindButton() is not { IsEnabled: true, IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 } ready)
+                    return false;
+                if (new ButtonAutomationPeer(ready).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
+                    throw new InvalidOperationException($"Button {AutomationProperties.GetAutomationId(ready)} is not ready " +
+                        "for its accessible invoke action.");
+                // Reactor can replace the button between dispatcher turns. Check readiness,
+                // subscribe and invoke the same instance without yielding to another render.
+                button = ready;
                 // Invoke queues Click. Wait for the event, not merely for Invoke to return.
                 button.Click += Clicked;
                 invoke.Invoke();
+                return true;
             });
             try { await completion.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
             catch (TimeoutException ex)
