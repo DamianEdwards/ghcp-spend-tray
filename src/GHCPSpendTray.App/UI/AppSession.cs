@@ -51,7 +51,7 @@ internal sealed class AppSession : IDisposable
     internal string ClientId { get; private set; } = "";
     internal bool OfflineAccess { get; set; }
     internal string? ReconnectKey { get; private set; }
-    internal string PollMinutes { get; set; } = "60";
+    internal string PollMinutes { get; set; } = "10";
     internal string Thresholds { get; set; } = "50, 80, 100";
     internal string Increment { get; set; } = "";
     internal bool Notifications { get; set; } = true;

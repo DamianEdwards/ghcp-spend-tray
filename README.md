@@ -170,8 +170,10 @@ unavailable data rather than treating it as zero. See
 
 ## Use and notifications
 
-On Windows, left-click the tray icon to toggle the flyout or double-click it to open
-**Settings > Usage**; right-click it for **Open**,
+On Windows, left-click the tray icon to toggle the flyout immediately. Open
+**Settings > Usage** with the flyout's gear or the right-click **Settings** action.
+There is no double-click shortcut; rapid clicks remain ordinary selections.
+Right-click the icon for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,
 and a manual refresh action. With no accounts connected, Usage instead shows a
@@ -180,7 +182,7 @@ simple **Add account** prompt without empty totals, diagnostics, or refresh cont
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
-is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
+is 10 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
 
 In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage

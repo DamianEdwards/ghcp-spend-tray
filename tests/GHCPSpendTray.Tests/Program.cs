@@ -148,11 +148,11 @@ internal static partial class Program
         await Test("tray time alone invalidates percentages including calendar and explicit resets", () =>
         {
             var one = Settings(Account);
-            True(TrayUsage.Create(one, [first], Now.AddHours(1)).RollUp.Percent is not null);
-            True(TrayUsage.Create(one, [first], Now.AddHours(1).AddTicks(1)).RollUp.Percent is null);
+            True(TrayUsage.Create(one, [first], Now.AddMinutes(10)).RollUp.Percent is not null);
+            True(TrayUsage.Create(one, [first], Now.AddMinutes(10).AddTicks(1)).RollUp.Percent is null);
             True(TrayUsage.Create(one, [first], Now.AddMonths(1)).RollUp.Percent is null);
             True(TrayUsage.Create(one, [first], Now.AddTicks(-1)).RollUp.Percent is null);
-            var reset = Now.AddMinutes(30);
+            var reset = Now.AddMinutes(5);
             var explicitReset = first with { Snapshot = first.Snapshot! with
                 { ResetAtUtc = reset, PeriodId = BillingPeriods.Resolve(Now, reset) } };
             True(TrayUsage.Create(one, [explicitReset], reset.AddTicks(-1)).RollUp.Percent is not null);
@@ -226,10 +226,10 @@ internal static partial class Program
 
     private static async Task DomainTests()
     {
-        await Test("defaults exactly hourly and 50/80/100", () =>
+        await Test("defaults exactly ten minutes and 50/80/100", () =>
         {
             var s = new AppSettings();
-            Equal(60, s.PollIntervalMinutes);
+            Equal(10, s.PollIntervalMinutes);
             True(s.AlertThresholds.SequenceEqual([50m, 80m, 100m]));
             True(!s.RequestOfflineAccess);
             s.Validate();
@@ -664,15 +664,23 @@ internal static partial class Program
         await Test("settings atomic save load and recovery copy", async () =>
         {
             JsonStore store = Store();
-            Equal(60, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
+            Equal(10, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
             await store.SaveSettingsAsync(Settings(Account));
             await store.SaveSettingsAsync(Settings(Account) with { PollIntervalMinutes = 30 });
             Equal(30, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
             await File.WriteAllTextAsync(Path.Combine(store.RootPath, "config.json"), "{broken");
             StoreLoadResult<AppSettings> recovered = await store.LoadSettingsAsync();
-            Equal(60, recovered.Value.PollIntervalMinutes); Equal(1, recovered.Diagnostics.Length);
+            Equal(10, recovered.Value.PollIntervalMinutes); Equal(1, recovered.Diagnostics.Length);
             True(File.Exists(Path.Combine(store.RootPath, "config.json.corrupt")));
-            Equal(60, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
+            Equal(10, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
+        });
+        await Test("omitted interval uses ten minutes and saved hourly interval is preserved", async () =>
+        {
+            JsonStore store = Store();
+            await File.WriteAllTextAsync(Path.Combine(store.RootPath, "config.json"), """{"version":1}""");
+            Equal(10, (await store.LoadSettingsAsync()).Value.PollIntervalMinutes);
+            await store.SaveSettingsAsync(Settings(Account) with { PollIntervalMinutes = 60 });
+            Equal(60, (await new JsonStore(store.RootPath).LoadSettingsAsync()).Value.PollIntervalMinutes);
         });
         await Test("avatar URL survives settings restart and older settings load", async () =>
         {
@@ -1059,8 +1067,8 @@ internal static partial class Program
             JsonStore store = Store();
             await using var monitor = new MonitorService(provider, store, new(store, new Sink()), Settings(Account), clock);
             await monitor.StartAsync(); await Until(() => monitor.States[0].Status == AccountStatus.Fresh);
-            Equal<DateTimeOffset?>(Now.AddHours(1), monitor.States[0].NextRefreshUtc);
-            clock.Advance(TimeSpan.FromMinutes(10));
+            Equal<DateTimeOffset?>(Now.AddMinutes(10), monitor.States[0].NextRefreshUtc);
+            clock.Advance(TimeSpan.FromMinutes(6));
             monitor.UpdateSettings(Settings(Account) with { PollIntervalMinutes = 5 });
             await Until(() => provider.Calls == 2 && monitor.States[0].NextRefreshUtc == clock.GetUtcNow().AddMinutes(5));
             clock.Advance(TimeSpan.FromHours(6)); monitor.NotifyResume();
