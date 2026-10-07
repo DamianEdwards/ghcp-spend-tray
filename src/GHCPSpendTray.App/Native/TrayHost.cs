@@ -6,21 +6,18 @@ namespace GHCPSpendTray.App.Native;
 // Shell callbacks require a hidden top-level HWND even though all visible UI is Reactor.
 internal sealed class TrayHost : ShellWindow
 {
-    private const nuint SelectionTimer = 1;
     private readonly uint _taskbarCreated;
     private readonly TrayIconSet _icons;
-    private bool _pendingSelection;
-    private uint _selectionId, _activeId = 1, _doubleClickId;
-    private long _lastDoubleClick = long.MinValue;
+    private uint _activeId = 1;
     private TrayPresentation _presentation = TrayPresentation.Unavailable;
     internal IReadOnlyCollection<TrayIcon> Icons => _icons.Icons;
     internal event Action<string?>? OpenRequested, NotificationClicked;
     internal event Action? SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
     internal event Action? AppearanceChanged;
 
-    internal TrayHost(string? portableDirectory)
+    internal TrayHost(string? portableDirectory, TrayIcon.ShellCall? shell = null)
     {
-        _icons = new(Handle, portableDirectory);
+        _icons = new(Handle, portableDirectory, shell);
         try
         {
             _taskbarCreated = Win32.RegisterWindowMessage("TaskbarCreated");
@@ -33,7 +30,6 @@ internal sealed class TrayHost : ShellWindow
     {
         _presentation = presentation;
         _icons.Update(presentation, IconSize, TrayIconRenderer.SystemPalette());
-        if (_pendingSelection && _icons.Find(_selectionId) is null) CancelSelection();
     }
     internal bool ContainsCursor() => Icons.Any(icon => icon.ContainsCursor());
     internal bool Notify(NotificationView notification)
@@ -62,57 +58,21 @@ internal sealed class TrayHost : ShellWindow
     }
     protected override nint? Message(uint message, nuint wParam, nint lParam)
     {
-        if (message == _taskbarCreated) { CancelSelection(); _icons.Restore(); Update(_presentation); return 0; }
+        if (message == _taskbarCreated) { _icons.Restore(); Update(_presentation); return 0; }
         if (message is Win32.WM_DPICHANGED or 0x1A or 0x7E or 0x31A)
         { Update(_presentation); AppearanceChanged?.Invoke(); return 0; }
         if (message == Win32.WM_POWERBROADCAST && wParam is 7 or 18) { ResumeRequested?.Invoke(); return 1; }
-        if (message == Win32.WM_TIMER && wParam == SelectionTimer)
-        {
-            if (!_pendingSelection) return 0;
-            var selected = _icons.Find(_selectionId);
-            CancelSelection();
-            if (selected is not null) { _activeId = selected.Id; OpenRequested?.Invoke(selected.AccountKey); }
-            return 0;
-        }
         if (message != Win32.WM_TRAY) return null;
         var action = (int)((nuint)lParam & 0xFFFF);
         uint id = (uint)(((nuint)lParam >> 16) & 0xFFFF);
         if (_icons.Find(id) is not { } source) return 0;
         _activeId = id;
-        if (action == 0x400)
-        {
-            if (_doubleClickId == id && _lastDoubleClick != long.MinValue &&
-                Environment.TickCount64 - _lastDoubleClick < Win32.GetDoubleClickTime()) return 0;
-            if (_pendingSelection && _selectionId == id) { DoubleClick(); return 0; }
-            CancelSelection();
-            // Shell sends the first selection before it can report a double-click.
-            if (Win32.SetTimer(Handle, SelectionTimer, Win32.GetDoubleClickTime(), 0) == 0)
-                throw new InvalidOperationException("Cannot schedule the tray selection.");
-            _pendingSelection = true;
-            _selectionId = id;
-        }
-        else if (action == 0x203)
-        {
-            if (_doubleClickId != id || _lastDoubleClick == long.MinValue ||
-                Environment.TickCount64 - _lastDoubleClick >= Win32.GetDoubleClickTime()) DoubleClick();
-        }
-        else if (action == 0x401) { CancelSelection(); OpenRequested?.Invoke(source.AccountKey); }
-        else if (action == 0x405) NotificationClicked?.Invoke(source.NotificationAccount);
-        else if (action == 0x7B) { CancelSelection(); ContextMenu(); }
+        // Version four supplies NIN_SELECT as well as raw mouse messages. Handle only
+        // semantic selection, so a physical click is not toggled again on button-up.
+        if (action is Win32.NIN_SELECT or Win32.NIN_KEYSELECT) OpenRequested?.Invoke(source.AccountKey);
+        else if (action == Win32.NIN_BALLOONUSERCLICK) NotificationClicked?.Invoke(source.NotificationAccount);
+        else if (action == Win32.WM_CONTEXTMENU) ContextMenu();
         return 0;
-    }
-    private void DoubleClick()
-    {
-        CancelSelection();
-        _lastDoubleClick = Environment.TickCount64;
-        _doubleClickId = _activeId;
-        SettingsRequested?.Invoke();
-    }
-    private void CancelSelection()
-    {
-        if (!_pendingSelection) return;
-        _pendingSelection = false;
-        Win32.KillTimer(Handle, SelectionTimer);
     }
     private void ContextMenu()
     {
@@ -129,15 +89,19 @@ internal sealed class TrayHost : ShellWindow
             Win32.SetForegroundWindow(Handle);
             var command = Win32.TrackPopupMenuEx(menu, 0x102, point.x, point.y, Handle, 0);
             Win32.PostMessage(Handle, 0, 0, 0);
-            switch (command)
-            {
-                case 1: OpenRequested?.Invoke(null); break;
-                case 2: RefreshRequested?.Invoke(); break;
-                case 3: SettingsRequested?.Invoke(); break;
-                case 4: ExitRequested?.Invoke(); break;
-            }
+            ExecuteMenuCommand(command);
         }
         finally { Win32.DestroyMenu(menu); }
     }
-    protected override void ReleaseResources() { CancelSelection(); _icons.Dispose(); }
+    internal void ExecuteMenuCommand(int command)
+    {
+        switch (command)
+        {
+            case 1: OpenRequested?.Invoke(null); break;
+            case 2: RefreshRequested?.Invoke(); break;
+            case 3: SettingsRequested?.Invoke(); break;
+            case 4: ExitRequested?.Invoke(); break;
+        }
+    }
+    protected override void ReleaseResources() => _icons.Dispose();
 }

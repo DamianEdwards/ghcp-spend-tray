@@ -86,4 +86,5 @@ Write-Output 'PASS: verification gate rejects failures, cancellations, unexpecte
 & "$PSScriptRoot\test-package-icon-tooling.ps1"
 & "$PSScriptRoot\test-windows-app-runtime.ps1"
 & "$PSScriptRoot\test-smoke-diagnostics.ps1"
+& "$PSScriptRoot\test-package-smoke.ps1"
 Write-Output 'PASS: release version boundaries, development identity and PowerShell syntax.'
