@@ -150,6 +150,27 @@ try
     store.ClearLease(lease.Nonce);
     clock.Now = now;
     File.Delete(store.CachePath);
+    Task? handoffWorker = null;
+    using (var workerStarted = new ManualResetEventSlim())
+    {
+        service.ReadPrompt(_ => { }, (_, workerNonce) =>
+        {
+            handoffWorker = Task.Run(() =>
+            {
+                workerStarted.Set();
+                service.Refresh(key, workerNonce, (_, _) =>
+                    throw new ServiceException(AccountStatus.SignInRequired, "Synthetic credential failure."));
+            });
+            Check(workerStarted.Wait(TimeSpan.FromSeconds(5)), "worker starts before scheduler releases gate");
+            using RefreshGate? competing = store.TryLock();
+            Check(competing is null, "scheduler holds gate during worker handoff");
+            Check(!handoffWorker.Wait(TimeSpan.FromMilliseconds(100)), "worker waits while scheduler holds gate");
+        });
+        Check(handoffWorker!.Wait(TimeSpan.FromSeconds(10)), "worker handoff completes after scheduler releases gate");
+    }
+    Equal(store.Read()!.Diagnostic, PromptDiagnostic.Authentication, "handoff worker publishes its result");
+    Check(store.ReadLease() is null, "handoff worker clears its lease");
+    File.Delete(store.CachePath);
     string nonce = Guid.NewGuid().ToString("N");
     store.SaveLease(new(key, nonce, now, now + options.WorkerLifetime));
     int httpCalls = 0, discoveries = 0;
@@ -248,18 +269,25 @@ try
         string ready = Path.Combine(root, "holder-ready");
         using (var holder = Start(rootProcess, ["--hold-gate", root, nativeKey, ready], childEnvironment))
         {
-            WaitUntil(() => File.Exists(ready), "mutex holder readiness");
+            WaitUntil(() => File.Exists(ready), "gate holder readiness");
+            using (RefreshGate? competing = nativeStore.TryLock())
+                Check(competing is null, "portable native gate contention returns null");
+            using (RefreshGate? otherContext = RefreshGate.TryAcquire(root, new string('c', 64)))
+                Check(otherContext is not null, "held native gate does not block another context");
+            using (RefreshGate? waited = nativeStore.TryLock(TimeSpan.FromMilliseconds(30)))
+                Check(waited is null, "portable native gate bounded wait expires under contention");
             var due = nativeStore.Read()! with { NextAttemptUtc = current.AddSeconds(-1), AttemptedAtUtc = current.AddMinutes(-1) };
             nativeStore.Save(due);
             var locked = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
+            Equal(locked.ExitCode, 0, "held native gate is normal contention, not a helper error");
             Check(locked.Output.Trim().EndsWith("\tin_progress", StringComparison.Ordinal), "portable cross-process exclusion");
-            Check(nativeStore.ReadLease() is null, "held native mutex must not schedule another worker");
-            Equal(nativeStore.Read()!.Status, AccountStatus.Fresh, "held native mutex cannot change observation");
+            Check(nativeStore.ReadLease() is null, "held native gate must not schedule another worker");
+            Equal(nativeStore.Read()!.Status, AccountStatus.Fresh, "held native gate cannot change observation");
             holder.Kill(entireProcessTree: true);
             holder.WaitForExit();
         }
         using (RefreshGate? recovered = nativeStore.TryLock())
-            Check(recovered is not null, "abandoned native mutex recovers");
+            Check(recovered is not null, "abandoned native gate recovers");
         nativeStore.SaveLease(new(nativeKey, nonce, DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1)));
         var launched = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
         Check(launched.Output.Contains("\tin_progress", StringComparison.Ordinal),

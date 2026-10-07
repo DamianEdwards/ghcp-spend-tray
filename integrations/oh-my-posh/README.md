@@ -172,7 +172,10 @@ No token or configuration-file contents are persisted. Keyring changes that
 do not update configuration metadata need a new dedicated cache directory.
 
 Cross-process exclusion uses BCL exclusive file sharing; no external locking
-utility is needed. The native tests exercise competing processes and forced
+utility is needed. Contention recognizes the platform's sharing-violation code
+(including macOS's distinct `EWOULDBLOCK` errno). The foreground tries the gate
+without waiting; only the worker waits up to five seconds for the scheduler's
+handoff. The native tests exercise competing processes and forced
 worker termination on every CI OS. Refresh leases expire after a bounded
 lifetime; a dead worker's OS file lock is released. Atomic private-file
 replacement prevents partial JSON reads. Failure cooldowns (at least five

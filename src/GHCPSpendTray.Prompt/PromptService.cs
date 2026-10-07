@@ -21,7 +21,7 @@ public sealed class PromptService(PromptOptions options, TimeProvider? timeProvi
         PromptDiagnostic code = invalid || invalidLease ? PromptDiagnostic.Storage : cache?.Diagnostic ?? PromptDiagnostic.None;
         if ((cache is null || cache.NextAttemptUtc <= now) && !refreshing)
         {
-            using RefreshGate? gate = store.TryLock(TimeSpan.FromSeconds(5));
+            using RefreshGate? gate = store.TryLock();
             if (gate is null) refreshing = true;
             else
             {
@@ -60,7 +60,7 @@ public sealed class PromptService(PromptOptions options, TimeProvider? timeProvi
         Func<HttpClient>? createHttp = null)
     {
         var store = new PromptStore(options, expectedContext);
-        using RefreshGate? gate = store.TryLock();
+        using RefreshGate? gate = store.TryLock(TimeSpan.FromSeconds(5));
         if (gate is null) return;
         DateTimeOffset now = _time.GetUtcNow();
         PromptCache? existing = ReadCache(store, out _);

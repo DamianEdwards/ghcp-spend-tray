@@ -199,7 +199,10 @@ public sealed class RefreshGate : IDisposable
                 if (!OperatingSystem.IsWindows()) creation.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
                 return new RefreshGate(new FileStream(Path.Combine(root, context + ".lock"), creation));
             }
-            catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33 or 11)
+            // Unix FileShare contention reports raw EWOULDBLOCK: 35 on macOS, 11 on Linux.
+            catch (IOException error) when (OperatingSystem.IsWindows()
+                ? (error.HResult & 0xffff) is 32 or 33
+                : error.HResult == (OperatingSystem.IsMacOS() ? 35 : 11))
             {
                 if (timer.Elapsed >= (wait ?? TimeSpan.Zero)) return null;
                 Thread.Sleep(10);
