@@ -133,6 +133,14 @@ enum ModelTests {
         let roundTrip = try JSONDecoder().decode(SettingsData.self, from: JSONEncoder().encode(settings))
         try check(roundTrip.trayStyle == .percentage && roundTrip.trayMode == .perAccount &&
                   roundTrip.excludedTrayAccounts == ["github.com:1"], "Tray options retain the generated C# enum contract.")
+        let unlimited = try JSONDecoder().decode(TrayIndicator.self, from: Data("""
+        {"name":"Synthetic","includedAccounts":1,"selectedAccounts":1,"details":"Unlimited allocation",
+         "tooltip":"Unlimited allocation | 1/1 included","isPartial":false,"isOverAllocation":false,
+         "valueText":"Unlimited allocation","numericText":"\\u221e","isUnlimited":true}
+        """.utf8))
+        try check(unlimited.isUnlimited && unlimited.percent == nil && unlimited.numericText == "\u{221e}" &&
+                  unlimited.valueText == "Unlimited allocation" && !unlimited.isPartial,
+                  "Generated bridge unlimited state decodes without a percentage or warning.")
 
         print("PASS: Mac automatic sign-in, clipboard recovery, cancellation, reconnect and menu-bar models.")
     }

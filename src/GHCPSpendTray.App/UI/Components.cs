@@ -221,7 +221,7 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
             account.Percent is { } percent
                 ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
                     UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation").FontSize(12))
-                : UI.Copy("Allocation percentage not available").FontSize(12),
+                : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available").FontSize(12),
             UI.EstimateRow(account, account.Key + "_Flyout_"),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
@@ -363,7 +363,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         }, $"{account.Name} ({account.Host})").AutomationName($"Include {account.Login} on {account.Host} in tray")
                         .AutomationId("TrayAccount-" + account.Key).WithKey(account.Key)).ToArray()),
             TrayPreview(),
-            UI.Copy("! means a partial roll-up; ? means unavailable. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for the percentage; Usage has all inclusion details.").FontSize(12),
+            UI.Copy("\u221e means unlimited allocation; ! means a partial roll-up; ? means unavailable. Mixed roll-ups show only finite allocations. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for details.").FontSize(12),
             UI.Copy("A neutral icon remains when nothing is selected. Windows controls which icons appear in the notification area or its overflow.").FontSize(12)
         )),
         HStack(10, Button("Save changes", Session.SaveGlobal).AutomationId("SaveGeneralSettings")
@@ -539,7 +539,8 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.DetailRow("Recorded allocation", account.Details.Unlimited ? "Unlimited" :
             UI.Money(account.Details.ObservedAllocationUsd), idPrefix + "DetailRecordedAllocation"),
         UI.DetailRow("Allocation consumed", account.Details.ObservedPercentConsumed is { } percent ?
-            $"{percent:0.####}%" : "Not available", idPrefix + "DetailRecordedPercent"),
+            $"{percent:0.####}%" : account.Details.Unlimited ? "Not applicable (unlimited allocation)" :
+            "Not available", idPrefix + "DetailRecordedPercent"),
         UI.DetailRow("Last fetched", UI.Timestamp(account.UpdatedAt), idPrefix + "DetailFetched"),
         UI.DetailRow("Source timestamp", UI.Timestamp(account.Details.SourceTimestampUtc, "Not supplied"), idPrefix + "DetailSource"),
         UI.DetailRow("Billing reset", UI.Timestamp(account.Details.ResetAtUtc, "Calendar-month fallback"), idPrefix + "DetailReset"),

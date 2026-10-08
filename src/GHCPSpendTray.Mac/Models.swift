@@ -155,11 +155,12 @@ struct TrayIndicator: Decodable, Identifiable, Sendable {
     let isOverAllocation: Bool
     let valueText: String
     let numericText: String
+    let isUnlimited: Bool
 
     static let unavailable = TrayIndicator(accountKey: nil, name: "GHCPSpendTray", percent: nil,
         includedAccounts: 0, selectedAccounts: 0, details: "Consumption unavailable.",
         tooltip: "GHCPSpendTray | Consumption unavailable", isPartial: false, isOverAllocation: false,
-        valueText: "Unavailable", numericText: "?")
+        valueText: "Unavailable", numericText: "?", isUnlimited: false)
 }
 
 struct TrayPresentation: Decodable {

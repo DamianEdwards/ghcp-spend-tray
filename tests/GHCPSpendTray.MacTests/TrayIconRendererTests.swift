@@ -6,13 +6,15 @@ enum TrayIconRendererTests {
         func check(_ condition: Bool, _ message: String) throws {
             if !condition { throw AppError.message(message) }
         }
-        func indicator(_ percent: Double?, partial: Bool = false, selected: Int = 1) -> TrayIndicator {
+        func indicator(_ percent: Double?, partial: Bool = false, selected: Int = 1,
+                       unlimited: Bool = false) -> TrayIndicator {
             TrayIndicator(accountKey: nil, name: "Synthetic", percent: percent,
-                includedAccounts: percent == nil ? 0 : 1, selectedAccounts: selected,
+                includedAccounts: percent == nil && !unlimited ? 0 : 1, selectedAccounts: selected,
                 details: percent == nil ? "Synthetic usage unavailable." : "Synthetic allocation usage.",
                 tooltip: "Synthetic tooltip", isPartial: partial, isOverAllocation: (percent ?? 0) > 100,
-                valueText: percent.map { "\($0)%" } ?? "Unavailable",
-                numericText: percent.map { String(Int($0)) } ?? "?")
+                valueText: unlimited ? "Unlimited allocation" : percent.map { "\($0)%" } ?? "Unavailable",
+                numericText: unlimited ? "\u{221e}" : percent.map { String(Int($0)) } ?? "?",
+                isUnlimited: unlimited)
         }
         let unavailable = TrayIconRenderer.image(.unavailable, style: .pie)
         let zero = TrayIconRenderer.image(indicator(0), style: .pie)
@@ -23,6 +25,9 @@ enum TrayIconRendererTests {
         let overPie = TrayIconRenderer.image(over, style: .pie)
         let overNumber = TrayIconRenderer.image(over, style: .percentage)
         let selectedUnavailable = TrayIconRenderer.image(indicator(nil, partial: true, selected: 2), style: .pie)
+        let infinity = TrayIconRenderer.image(indicator(nil, unlimited: true), style: .pie)
+        let infinityNumber = TrayIconRenderer.image(indicator(nil, unlimited: true), style: .percentage)
+        let partialInfinity = TrayIconRenderer.image(indicator(nil, partial: true, selected: 2, unlimited: true), style: .pie)
 
         try check(unavailable.size == NSSize(width: 22, height: 22) &&
                   question.size == NSSize(width: 28, height: 22), "Native icon sizes are preserved.")
@@ -34,6 +39,12 @@ enum TrayIconRendererTests {
             let empty = try pixels(zero, scale: scale)
             let warning = try pixels(partialZero, scale: scale)
             let numeric = try pixels(question, scale: scale)
+            try check(pixels(infinity, scale: scale) != missing &&
+                      pixels(infinityNumber, scale: scale) != numeric &&
+                      pixels(infinity, scale: scale) != empty,
+                      "Unlimited uses infinity, never unavailable or zero, in both styles at \(scale)x.")
+            try check(pixels(infinity, scale: scale) != pixels(partialInfinity, scale: scale),
+                      "Partial unlimited roll-ups retain the warning badge at \(scale)x.")
             try check(missing == warning, "Unavailable pie is an empty outline with the circular ! warning badge, at \(scale)x.")
             try check(missing != empty, "Unavailable pie must be distinguishable from genuine 0% usage, at \(scale)x.")
             try check(missing == pixels(selectedUnavailable, scale: scale),
@@ -61,7 +72,8 @@ enum TrayIconRendererTests {
                       "Warning badge has a circular border, at \(scale)x.")
             try check(alpha(17, 6) > 0 && alpha(17, 2) > 0 && alpha(15, 5) == 0,
                       "Compact bold exclamation has a stem, dot and transparent interior, at \(scale)x.")
-            for image in [unavailable, zero, question, full, overPie, overNumber, selectedUnavailable] {
+            for image in [unavailable, zero, question, full, overPie, overNumber, selectedUnavailable,
+                          infinity, infinityNumber, partialInfinity] {
                 let alpha = try pixels(image, scale: scale)
                 try check(image.isTemplate, "Menu-bar graphics adapt to light/dark native appearance.")
                 try check(alpha.contains { $0 > 0 } && alpha.contains(0),

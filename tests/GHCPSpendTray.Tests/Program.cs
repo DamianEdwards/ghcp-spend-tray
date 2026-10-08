@@ -188,6 +188,76 @@ internal static partial class Program
                 True(!result.RollUp.IsPartial);
             }
         });
+        await Test("fresh unlimited quotas show infinity without inventing percentages", () =>
+        {
+            foreach (var style in Enum.GetValues<TrayIconStyle>())
+                foreach (var mode in Enum.GetValues<TrayDisplayMode>())
+                    foreach (decimal? entitlement in new decimal?[] { null, 0, 10000 })
+                    {
+                        var snapshot = CopilotUsageProvider.ParseJson(Json(5000, entitlement, unlimited: true),
+                            Account.Key, Now);
+                        var state = first with { Snapshot = snapshot };
+                        var result = TrayUsage.Create(Settings(Account) with { TrayStyle = style, TrayMode = mode },
+                            [state], Now);
+                        foreach (var icon in new[] { result.RollUp, result.Icons.Single() })
+                        {
+                            True(icon.IsUnlimited && !icon.IsPartial && !icon.IsOverAllocation);
+                            Equal<double?>(null, icon.Percent);
+                            Equal("\u221e", icon.NumericText);
+                            Equal("Unlimited allocation", icon.ValueText);
+                            Equal(1, icon.IncludedAccounts);
+                            True(icon.Tooltip.Contains("Unlimited allocation") && !icon.Tooltip.Contains("Unavailable"));
+                            True(icon.Details.Contains("Unlimited allocation") && !icon.Details.Contains("Unavailable"));
+                        }
+                        True(result.Accounts.Single().IsUnlimited);
+                        Equal(50m, UsageAggregation.Total([state], Now, TimeSpan.FromMinutes(10)).ConsumptionUsd);
+                    }
+        });
+        await Test("unlimited roll-ups retain selection counts and failure qualifiers", () =>
+        {
+            var unlimited = first with { Snapshot = Sample(unlimited: true) };
+            var unlimited2 = next with { Snapshot = Sample(account: second, unlimited: true) };
+            var result = TrayUsage.Create(settings, [unlimited, unlimited2], Now);
+            True(result.RollUp.IsUnlimited && !result.RollUp.IsPartial);
+            Equal(2, result.RollUp.IncludedAccounts);
+            result = TrayUsage.Create(settings, [unlimited, unlimited2 with { Status = AccountStatus.NetworkError }], Now);
+            True(result.RollUp.IsUnlimited && result.RollUp.IsPartial);
+            Equal(1, result.RollUp.IncludedAccounts);
+            True(result.RollUp.Tooltip.StartsWith("Partial ! | Unlimited allocation") &&
+                result.RollUp.Tooltip.Contains("refresh failed"));
+            result = TrayUsage.Create(settings with { TrayMode = TrayDisplayMode.PerAccount }, [first, unlimited2], Now);
+            Equal<double?>(50, result.RollUp.Percent);
+            True(!result.RollUp.IsUnlimited && result.RollUp.IsPartial);
+            True(result.RollUp.Tooltip.Contains("unlimited allocation"));
+            True(result.Icons[1].IsUnlimited && !result.Icons[1].IsPartial);
+            result = TrayUsage.Create(settings with
+                { Accounts = [Account with { ExcludeFromTray = true }, second] }, [first, unlimited2], Now);
+            True(result.RollUp.IsUnlimited && !result.RollUp.IsPartial);
+            Equal(1, result.RollUp.SelectedAccounts);
+        });
+        await Test("unlimited never masks failures invalid snapshots or expired observations", () =>
+        {
+            var unlimited = first with { Snapshot = Sample(unlimited: true) };
+            foreach (var status in Enum.GetValues<AccountStatus>().Where(s => s != AccountStatus.Fresh))
+            {
+                var icon = TrayUsage.Create(Settings(Account), [unlimited with { Status = status }], Now).RollUp;
+                True(!icon.IsUnlimited && icon.NumericText == "?" && icon.ValueText == "Unavailable");
+            }
+            foreach (var state in new[]
+            {
+                unlimited with { Snapshot = unlimited.Snapshot! with { ConsumptionUsd = -1 } },
+                unlimited with { Snapshot = unlimited.Snapshot! with { AccountKey = second.Key } },
+                unlimited with { Snapshot = null }
+            })
+                True(!TrayUsage.Create(Settings(Account), [state], Now).RollUp.IsUnlimited);
+            foreach (var at in new[] { Now.AddMinutes(10).AddTicks(1), Now.AddMonths(1), Now.AddTicks(-1) })
+                True(!TrayUsage.Create(Settings(Account), [unlimited], at).RollUp.IsUnlimited);
+            var reset = Now.AddMinutes(5);
+            var explicitReset = unlimited with { Snapshot = unlimited.Snapshot! with
+                { ResetAtUtc = reset, PeriodId = BillingPeriods.Resolve(Now, reset) } };
+            True(TrayUsage.Create(Settings(Account), [explicitReset], reset.AddTicks(-1)).RollUp.IsUnlimited);
+            True(!TrayUsage.Create(Settings(Account), [explicitReset], reset).RollUp.IsUnlimited);
+        });
         await Test("tray selection and per-account states never change dollar totals", () =>
         {
             var config = settings with { TrayMode = TrayDisplayMode.PerAccount };

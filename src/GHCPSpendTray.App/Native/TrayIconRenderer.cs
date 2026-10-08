@@ -106,6 +106,11 @@ internal static class TrayIconRenderer
                 throw new Win32Exception("Cannot configure tray text rendering.");
 
             if (text is not null) Text(text, 16, 18);
+            else if (indicator.IsUnlimited)
+            {
+                Text(indicator.NumericText, indicator.IsPartial ? 10 : 16, indicator.IsPartial ? 13 : 18);
+                if (indicator.IsPartial) Badge(11, true);
+            }
             else if (indicator.Percent is null) Text("?", 16, 18);
             else
             {
