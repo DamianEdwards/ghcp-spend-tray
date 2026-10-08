@@ -98,7 +98,7 @@ public sealed class BridgeRuntime : IDisposable
                 case "initialize":
                     if (_controller is not null) throw new AppOperationException("The application is already initialized.");
                     _directory = Path.GetFullPath(Required(command.Directory));
-                    _controller = command.Demo ? new DemoController(_directory, command.Empty) :
+                    _controller = command.Demo ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited) :
                         new ApplicationController(_directory, false, _platform,
                             createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic);
                     _controller.Changed += OnDashboard;

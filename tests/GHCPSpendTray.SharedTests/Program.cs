@@ -15,6 +15,20 @@ try
     var startup = new Startup();
     var handler = new FixtureHttp();
     using var http = new HttpClient(handler);
+    using (var bridge = new BridgeRuntime())
+    {
+        var command = JsonSerializer.Deserialize("""
+            {"id":"unlimited-demo","method":"initialize","directory":"/synthetic-unused","demo":true,"unlimited":true}
+            """, BridgeJsonContext.Default.Command)!;
+        command = command with { Directory = Path.Combine(root, "unlimited-bridge-demo") };
+        DashboardView? preview = null;
+        Check(bridge.Send(command).Error is null, "Generated bridge command accepts unlimited sample mode.");
+        var initialized = await Complete(bridge, command.Id, e => { if (e.Dashboard is not null) preview = e.Dashboard; });
+        Check(initialized.Error is null && preview?.Accounts.Count == 1 &&
+            preview.Accounts[0].Details.Unlimited && preview.ConsumptionUsd == 26.25m &&
+            preview.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" },
+            "Native bridge initializes the unlimited synthetic account and infinity indicator.");
+    }
     using (var demo = new DemoController(Path.Combine(root, "unlimited-demo"), unlimited: true))
     {
         DashboardView? preview = null;

@@ -365,8 +365,10 @@ open -n artifacts/macos/GHCPSpendTray.app --args --demo-empty --data-dir "$previ
 check its live resizing and position without signing in. The button appears
 only in sample mode, both before and after adding examples. Each click adds
 one account; examples last only for that process and are not saved. Use
-`--demo` instead of `--demo-empty` to start with the existing sample accounts.
-Both modes require a separate data directory and disable authentication,
+`--demo` instead of `--demo-empty` to start with the existing sample accounts,
+or `--demo-unlimited` for one synthetic account with unlimited allocation and
+an infinity menu-bar indicator.
+All demo modes require a separate data directory and disable authentication,
 notifications, and launch-at-login changes; they do not access saved accounts
 or credentials.
 

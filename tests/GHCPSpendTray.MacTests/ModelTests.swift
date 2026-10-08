@@ -7,6 +7,16 @@ enum ModelTests {
         func check(_ condition: Bool, _ message: String) throws {
             if !condition { throw AppError.message(message) }
         }
+        let unlimitedBridge = FixtureBridge()
+        let unlimitedModel = AppModel(directory: URL(fileURLWithPath: "/synthetic-unlimited-unused"),
+                                      demo: true, bridge: unlimitedBridge)
+        defer { unlimitedModel.shutdown() }
+        unlimitedModel.start(empty: false, unlimited: true)
+        try check(unlimitedBridge.lastRequest["method"] as? String == "initialize" &&
+                  unlimitedBridge.lastRequest["demo"] as? Bool == true &&
+                  unlimitedBridge.lastRequest["empty"] as? Bool == false &&
+                  unlimitedBridge.lastRequest["unlimited"] as? Bool == true,
+                  "Unlimited sample mode reaches the shared initializer without real account access.")
         let bridge = FixtureBridge()
         let model = AppModel(directory: URL(fileURLWithPath: "/synthetic-unused"), demo: true, bridge: bridge)
         var copies: [String] = []
