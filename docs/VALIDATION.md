@@ -881,7 +881,8 @@ dotnet run --project tests\GHCPSpendTray.AppTests -c Release --no-build -- --tra
 The bitmap contains exact 16px output and 2x nearest-neighbor magnifications,
 composited on the light/dark palette backgrounds. Append a pixel size (for
 example `24`) after the output path to inspect higher-DPI output.
-Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, and partial 50%;
+Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, partial 50%,
+unlimited (infinity), and partial unlimited;
 rows are light pie, light number, dark pie, dark number. Renderer samples are
 not screenshots of Explorer's notification area.
 

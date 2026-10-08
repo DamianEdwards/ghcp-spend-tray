@@ -25,8 +25,10 @@ internal static class Program
         bool packageSmoke = args.Contains("--package-smoke-test", StringComparer.Ordinal);
         bool smoke = packageSmoke || args.Contains("--smoke-test", StringComparer.Ordinal);
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
-        bool demo = smoke || emptyDemo || args.Contains("--demo", StringComparer.Ordinal);
-        string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and not "--demo" and not "--demo-empty").ToArray();
+        bool unlimitedDemo = args.Contains("--demo-unlimited", StringComparer.Ordinal);
+        bool demo = smoke || emptyDemo || unlimitedDemo || args.Contains("--demo", StringComparer.Ordinal);
+        string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and
+            not "--demo" and not "--demo-empty" and not "--demo-unlimited").ToArray();
         try
         {
             if (packageSmoke && (!PackageContext.IsPackaged ||
@@ -45,7 +47,7 @@ internal static class Program
             }
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
-            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime) :
+            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo) :
                 new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
             int smokeExit = 0;
             ReactorShell? shell = null;

@@ -25,8 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let arguments = Array(CommandLine.arguments.dropFirst())
             smoke = arguments.contains("--smoke-test")
             empty = arguments.contains("--demo-empty")
-            let demo = smoke || empty || arguments.contains("--demo")
-            let allowed = ["--smoke-test", "--demo", "--demo-empty", "--data-dir"]
+            let unlimited = arguments.contains("--demo-unlimited")
+            let demo = smoke || empty || unlimited || arguments.contains("--demo")
+            let allowed = ["--smoke-test", "--demo", "--demo-empty", "--demo-unlimited", "--data-dir"]
             var dataPath: String?
             var index = 0
             while index < arguments.count {
@@ -76,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                     MainActor.assumeIsolated { self?.openSettings() }
                 }
             }
-            model.start(empty: empty)
+            model.start(empty: empty, unlimited: unlimited)
             if smoke { Task { await runSmoke(model) } }
         } catch {
             if smoke { fputs("FAIL: macOS startup smoke test.\n", stderr); exit(1) }

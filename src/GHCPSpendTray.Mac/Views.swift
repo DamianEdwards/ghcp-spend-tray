@@ -295,7 +295,8 @@ struct AccountDiagnosticsView: View {
                 row("Credits used (observed)", decimalText(account.details.creditsUsed).isEmpty ? "Unavailable" : decimalText(account.details.creditsUsed))
                 row("Consumption (observed)", money(account.details.observedConsumptionUsd))
                 row("Allocation (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
-                row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ?? "Unavailable")
+                row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ??
+                    (account.details.unlimited ? "Not applicable (unlimited allocation)" : "Unavailable"))
                 row("Current billing period", account.details.isCurrentPeriod ? "Yes" : "No")
                 row("Last fetched", dateText(account.updatedAt))
                 row("Source timestamp", dateText(account.details.sourceTimestampUtc))
@@ -537,7 +538,7 @@ struct PreferencesView: View {
                             }
                         }
                     }
-                    Text("Preview changes apply to the menu bar only after Save. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over allocation. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover over an icon for details.")
+                    Text("Preview changes apply to the menu bar only after Save. \u{221e} means unlimited allocation; mixed roll-ups show only finite allocations. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over allocation. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover for details.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("A neutral icon remains when nothing is selected. macOS may hide icons on a crowded menu bar; reopen GHCPSpendTray to access Settings.")
                         .font(.caption).foregroundStyle(.secondary)

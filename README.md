@@ -110,6 +110,16 @@ Each platform has `no release`, `Major`, `Minor`, or `Patch` choices (default
 is `0.0.0`, making the default first release `0.1.0`.
 See [release setup and retry rules](docs/RELEASING.md).
 
+To preview unlimited quota on Windows without accessing real accounts, run a
+development build with an isolated data directory:
+
+```powershell
+.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-unlimited --portable --data-dir C:\Temp\ghcp-unlimited-preview
+```
+
+This starts one synthetic unlimited account, disables authentication and
+notifications, and keeps sample settings in memory.
+
 ## Connect an account
 
 1. Open the tray flyout and choose the connect button, or open
@@ -194,7 +204,13 @@ eligible allocation**, not an average of account percentages. Only valid, fresh,
 current-period observations with known, finite positive allocation qualify.
 Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
 excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
-available, not zero. On macOS, an unavailable pie stays an empty outline with
+available, not zero. Fresh unlimited accounts show an infinity sign in either
+icon style, with an **Unlimited allocation** tooltip. A roll-up shows infinity
+when its usable accounts are all unlimited; unavailable accounts still cause a
+partial `!` badge. Mixed finite/unlimited roll-ups retain the finite accounts'
+weighted percentage and identify unlimited accounts in the details. Stale or
+failed unlimited observations remain unavailable, never infinity.
+On macOS, an unavailable pie stays an empty outline with
 an `!` badge; percentage mode still shows `?`. The badged empty pie does not
 mean 0% usage. Hover for the percentage and included/selected counts;
 **Settings > Usage** lists every selected account and its inclusion or exclusion
@@ -349,8 +365,10 @@ open -n artifacts/macos/GHCPSpendTray.app --args --demo-empty --data-dir "$previ
 check its live resizing and position without signing in. The button appears
 only in sample mode, both before and after adding examples. Each click adds
 one account; examples last only for that process and are not saved. Use
-`--demo` instead of `--demo-empty` to start with the existing sample accounts.
-Both modes require a separate data directory and disable authentication,
+`--demo` instead of `--demo-empty` to start with the existing sample accounts,
+or `--demo-unlimited` for one synthetic account with unlimited allocation and
+an infinity menu-bar indicator.
+All demo modes require a separate data directory and disable authentication,
 notifications, and launch-at-login changes; they do not access saved accounts
 or credentials.
 

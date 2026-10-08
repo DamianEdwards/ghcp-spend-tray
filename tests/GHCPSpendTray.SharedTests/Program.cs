@@ -15,6 +15,41 @@ try
     var startup = new Startup();
     var handler = new FixtureHttp();
     using var http = new HttpClient(handler);
+    using (var bridge = new BridgeRuntime())
+    {
+        var command = JsonSerializer.Deserialize("""
+            {"id":"unlimited-demo","method":"initialize","directory":"/synthetic-unused","demo":true,"unlimited":true}
+            """, BridgeJsonContext.Default.Command)!;
+        command = command with { Directory = Path.Combine(root, "unlimited-bridge-demo") };
+        DashboardView? preview = null;
+        Check(bridge.Send(command).Error is null, "Generated bridge command accepts unlimited sample mode.");
+        var initialized = await Complete(bridge, command.Id, e => { if (e.Dashboard is not null) preview = e.Dashboard; });
+        Check(initialized.Error is null && preview?.Accounts.Count == 1 &&
+            preview.Accounts[0].Details.Unlimited && preview.ConsumptionUsd == 26.25m &&
+            preview.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" },
+            "Native bridge initializes the unlimited synthetic account and infinity indicator.");
+    }
+    using (var demo = new DemoController(Path.Combine(root, "unlimited-demo"), unlimited: true))
+    {
+        DashboardView? preview = null;
+        demo.Changed += value => preview = value;
+        await demo.InitializeAsync();
+        Check(preview!.Accounts.Count == 1 && preview.Accounts[0].Details.Unlimited &&
+            preview.Accounts[0].Percent is null && preview.Tray!.RollUp.IsUnlimited &&
+            preview.ConsumptionUsd == 26.25m, "Unlimited demo starts with one synthetic unlimited account.");
+        preview.TrayStates!.Single().Snapshot!.Validate();
+        Check(demo.AccountSettings("github.com:1").DisplayName == "Unlimited (demo)",
+            "Unlimited demo account preferences match the displayed account.");
+        await demo.SaveSettingsAsync(demo.Settings with { TrayStyle = TrayIconStyle.Percentage });
+        Check(preview!.Tray!.Style == TrayIconStyle.Percentage && preview.Tray.RollUp.NumericText == "\u221e",
+            "Unlimited demo supports a live percentage-style infinity preview.");
+        await demo.RefreshAsync();
+        Check(preview!.Tray!.RollUp.IsUnlimited, "Refreshing synthetic unlimited data retains infinity.");
+        await demo.AddExampleAccountAsync();
+        Check(preview!.Accounts.Count == 2 && preview.Accounts[1].Key == "github.com:2" &&
+            preview.Tray!.RollUp is { IsUnlimited: false, Percent: 25, IsPartial: true },
+            "Additional finite examples have unique identities and produce a truthful mixed roll-up.");
+    }
     using (var controller = new ApplicationController(root, false, credentials, http, () => Task.FromResult<IStartupRegistration>(startup)))
     {
         DashboardView? dashboard = null;
@@ -70,6 +105,21 @@ try
             "Artwork data uses current consumption rather than rounding down to the crossed allocation threshold.");
         Check(credentials.Values.Count == 1, "Credentials are persisted through injected platform store.");
         Check(dashboard?.Tray?.RollUp.Percent == 105 && dashboard.Tray.RollUp.IsOverAllocation, "Shared dashboard includes truthful tray allocation.");
+        handler.Unlimited = true;
+        await controller.RefreshAsync();
+        Check(dashboard!.IsComplete && dashboard.ConsumptionUsd == 26.25m &&
+            dashboard.Accounts[0].Details.Unlimited && dashboard.Accounts[0].Percent is null &&
+            dashboard.Tray!.RollUp is { IsUnlimited: true, NumericText: "\u221e", IsPartial: false },
+            "Successful unlimited refresh retains observed dollars and exposes infinity rather than unavailable usage.");
+        var unlimitedEvents = new[] { new BridgeEvent { Kind = "changed", Dashboard = dashboard, Tray = dashboard.Tray } };
+        var unlimitedJson = JsonSerializer.Serialize(unlimitedEvents, BridgeJsonContext.Default.BridgeEventArray);
+        var unlimitedRoundTrip = JsonSerializer.Deserialize(unlimitedJson, BridgeJsonContext.Default.BridgeEventArray)!.Single();
+        Check(unlimitedRoundTrip.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" } &&
+            unlimitedRoundTrip.Dashboard!.Tray!.Icons[0].IsUnlimited &&
+            unlimitedRoundTrip.Tray.Accounts[0].IsUnlimited,
+            "Generated bridge JSON preserves unlimited state and infinity in standalone and dashboard tray payloads.");
+        handler.Unlimited = false;
+        await controller.RefreshAsync();
         await controller.SaveAccountAsync("github.com:1", "", "", showPeriodEstimate: true);
         Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate && dashboard!.Accounts[0].PeriodEstimate is not null,
             "Enabling an account estimate updates the shared dashboard.");
@@ -342,6 +392,7 @@ sealed class MemoryCredentials : ICredentialStore
 sealed class FixtureHttp : HttpMessageHandler
 {
     public string UserId { get; set; } = "1";
+    public bool Unlimited { get; set; }
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string json = request.RequestUri!.AbsolutePath switch
@@ -349,7 +400,8 @@ sealed class FixtureHttp : HttpMessageHandler
             "/login/device/code" => """{"device_code":"synthetic-device","user_code":"SYNTHETIC","verification_uri":"https://github.com/login/device","expires_in":60,"interval":1}""",
             "/login/oauth/access_token" => $$"""{"access_token":"synthetic-token-{{UserId}}","token_type":"bearer","scope":"read:user"}""",
             "/user" => $$"""{"id":{{UserId}},"login":"synthetic-user"}""",
-            "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":false}}}""",
+            "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":""" +
+                Unlimited.ToString().ToLowerInvariant() + "}}}",
             _ => throw new InvalidOperationException("Unexpected synthetic request.")
         };
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });

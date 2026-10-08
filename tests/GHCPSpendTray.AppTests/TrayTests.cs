@@ -8,15 +8,16 @@ internal static class TrayTests
     {
         if (size is < 16 or > 64) throw new ArgumentOutOfRangeException(nameof(size));
         int cellWidth = Math.Max(60, size * 2 + 16), cellHeight = size * 3 + 16;
-        int width = cellWidth * 8, height = cellHeight * 4;
+        double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50, null, null];
+        int width = cellWidth * values.Length, height = cellHeight * 4;
         var sheet = new uint[width * height];
         Array.Fill(sheet, 0xFF808080u);
-        double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50];
         for (int row = 0; row < 4; row++)
             for (int col = 0; col < values.Length; col++)
             {
                 var palette = row < 2 ? new TrayPalette(0xFFF3F3F3, 0xFF161616) : new TrayPalette(0xFF202020, 0xFFF5F5F5);
-                var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col == 7 ? 2 : 1, "", "");
+                var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col is 7 or 9 ? 2 : 1,
+                    "", "", IsUnlimited: col >= 8);
                 var pixels = TrayIconRenderer.Pixels(indicator, row % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage, size, palette);
                 for (int y = 0; y < cellHeight; y++)
                     Array.Fill(sheet, palette.Background, (row * cellHeight + y) * width + col * cellWidth, cellWidth);
@@ -110,6 +111,22 @@ internal static class TrayTests
                 }
         foreach (var style in Enum.GetValues<TrayIconStyle>())
         {
+            foreach (int size in new[] { 16, 20, 24, 32, 48, 64 })
+            {
+                var unlimited = Indicator(null) with { IsUnlimited = true, IncludedAccounts = 1 };
+                var pixels = TrayIconRenderer.Pixels(unlimited, style, size, palette);
+                check(pixels.Length == size * size && pixels[0] == 0 && pixels[^1] == 0 &&
+                    pixels.Any(p => p >> 24 > 128) && pixels.Any(p => p >> 24 is > 0 and < 255),
+                    "infinity has visible antialiased ink and transparent corners at every tray DPI");
+                check(!pixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(null), style, size, palette)) &&
+                    !pixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(0), style, size, palette)),
+                    "unlimited is distinct from unavailable and zero allocation usage");
+                check(pixels.SequenceEqual(TrayIconRenderer.Pixels(unlimited, TrayIconStyle.Pie, size, palette)) &&
+                    !pixels.SequenceEqual(TrayIconRenderer.Pixels(unlimited with { SelectedAccounts = 2 }, style, size, palette)),
+                    "both styles render infinity and partial unlimited roll-ups retain their warning badge");
+                using var image = TrayIconRenderer.Create(unlimited, style, size, palette);
+                check(!image.IsInvalid, "native infinity HICON created at every tray DPI");
+            }
             var full = TrayIconRenderer.Pixels(Indicator(50), style, 16, palette);
             var partial = TrayIconRenderer.Pixels(Indicator(50, partial: true), style, 16, palette);
             var missing = TrayIconRenderer.Pixels(Indicator(null), style, 16, palette);
