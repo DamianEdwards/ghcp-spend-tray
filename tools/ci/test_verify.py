@@ -75,11 +75,36 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertIn("needs: [changes, macos]", self.jobs["macos_runtime"])
         self.assertNotIn("macos_tests", self.jobs["macos_runtime"])
         self.assertIn(
-            "needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]",
+            "needs: [changes, markdown, prompt, tests, package, macos_tests, macos, macos_runtime]",
             self.jobs["verify"],
         )
         self.assertIn("if: always()", self.jobs["verify"])
         self.assertNotIn("continue-on-error:", self.workflow)
+
+    def test_prompt_lane_is_offline_and_does_not_build_apps(self):
+        prompt = self.jobs["prompt"]
+        self.assertIn("needs: changes", prompt)
+        self.assertIn("if: needs.changes.outputs.prompt == 'true'", prompt)
+        self.assertIn("runs-on: ${{ matrix.os }}", prompt)
+        self.assertIn("os: [windows-2025, ubuntu-24.04, macos-26]", prompt)
+        self.assertIn("fail-fast: false", prompt)
+        self.assertIn("if: runner.os == 'Windows'", prompt)
+        self.assertIn("if: runner.os != 'Windows'", prompt)
+        self.assertIn("if: runner.os == 'macOS'", prompt)
+        self.assertIn("/bin/bash integrations/oh-my-posh/Test-CopilotPrompt.bash", prompt)
+        self.assertIn("/bin/zsh integrations/oh-my-posh/Test-CopilotPrompt.zsh", prompt)
+        self.assertIn(r".\integrations\oh-my-posh\Test-CopilotPrompt.ps1", prompt)
+        self.assertIn("global-json-file: global.json", prompt)
+        self.assertIn("uses: ./.github/actions/setup-macos", prompt)
+        self.assertIn(r".\tools\prompt\publish.ps1 -RuntimeIdentifier win-arm64", prompt)
+        self.assertIn('"$fixtures" --helper "$helper"', prompt)
+        self.assertNotIn("tools/verify.ps1", prompt)
+        self.assertNotIn("tools/macos/verify.sh", prompt)
+        self.assertIn("-Render", prompt)
+        self.assertIn("--render", prompt)
+        self.assertIn("Renderer digest mismatch", prompt)
+        self.assertNotIn("gh auth", prompt)
+        self.assertIn("prompt: ${{ steps.changes.outputs.prompt }}", self.jobs["changes"])
 
     def test_caching_and_triggers_remain_unchanged(self):
         triggers = self.workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
@@ -150,9 +175,9 @@ ConvertTo-Json -InputObject @($outcomes) -Depth 4 -Compress
         harnesses = {
             "Application": ["GHCPSpendTray.AppTests"],
             "CorePlatformShared": ["GHCPSpendTray.Tests", "GHCPSpendTray.PlatformTests",
-                                  "GHCPSpendTray.SharedTests"],
+                                  "GHCPSpendTray.SharedTests", "GHCPSpendTray.PromptTests"],
             "All": ["GHCPSpendTray.Tests", "GHCPSpendTray.PlatformTests",
-                    "GHCPSpendTray.AppTests", "GHCPSpendTray.SharedTests"],
+                    "GHCPSpendTray.AppTests", "GHCPSpendTray.SharedTests", "GHCPSpendTray.PromptTests"],
         }
         for shard, expected in harnesses.items():
             with self.subTest(shard=shard):

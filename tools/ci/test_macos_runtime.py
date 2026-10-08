@@ -24,7 +24,7 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("tools/macos/test-package.sh artifacts/macos-runtime/GHCPSpendTray.app", runtime)
         self.assertNotIn("build.sh", runtime)
         self.assertNotIn("setup-dotnet", runtime)
-        self.assertIn("needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]", workflow)
+        self.assertIn("needs: [changes, markdown, prompt, tests, package, macos_tests, macos, macos_runtime]", workflow)
         self.assertIn("@('macos_tests', 'macos', 'macos_runtime')", (ROOT / "tools/assert-verification.ps1").read_text())
 
     def test_build_release_and_analysis_share_current_stable_toolchain(self):

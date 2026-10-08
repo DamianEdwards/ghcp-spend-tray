@@ -178,20 +178,9 @@ public sealed class DeviceFlowClient(HttpClient httpClient, TimeProvider? timePr
         throw new ServiceException(AccountStatus.SignInRequired, "Device authorization expired. Start sign-in again.");
     }
 
-    public async Task<GitHubIdentity> GetIdentityAsync(ResolvedHost host, TokenSet tokens,
-        CancellationToken cancellationToken = default)
-    {
-        tokens.Validate();
-        using var request = HttpTransport.Request(HttpMethod.Get, host.ApiUri("user"), tokens.AccessToken);
-        using HttpResponseMessage response = await httpClient.SendAsync(request,
-            HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), GitHubOperation.Identity);
-        IdentityWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.IdentityWire, cancellationToken).ConfigureAwait(false);
-        if (wire.Id is null or <= 0 || string.IsNullOrWhiteSpace(wire.Login))
-            throw new ServiceException(AccountStatus.InvalidData, "GitHub did not return a valid immutable identity.");
-        return new(wire.Id.Value.ToString(CultureInfo.InvariantCulture), wire.Login,
-            AccountAvatar.Validate(host, wire.AvatarUrl));
-    }
+    public Task<GitHubIdentity> GetIdentityAsync(ResolvedHost host, TokenSet tokens,
+        CancellationToken cancellationToken = default) =>
+        new GitHubIdentityClient(httpClient, _time).GetAsync(host, tokens, cancellationToken);
 
     public async Task<TokenSet> RefreshAsync(ResolvedHost host, string clientId, TokenSet tokens,
         CancellationToken cancellationToken = default)
@@ -297,10 +286,30 @@ public interface ICopilotUsageProvider
     Task<UsageSnapshot> FetchAsync(Account account, CancellationToken cancellationToken = default);
 }
 
+public sealed class GitHubIdentityClient(HttpClient httpClient, TimeProvider? timeProvider = null)
+{
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
+    public async Task<GitHubIdentity> GetAsync(ResolvedHost host, TokenSet tokens,
+        CancellationToken cancellationToken = default)
+    {
+        tokens.Validate();
+        using var request = HttpTransport.Request(HttpMethod.Get, host.ApiUri("user"), tokens.AccessToken);
+        using HttpResponseMessage response = await httpClient.SendAsync(request,
+            HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        HttpTransport.EnsureSuccess(response, _time.GetUtcNow(), GitHubOperation.Identity);
+        IdentityWire wire = await HttpTransport.ReadAsync(response, WireJsonContext.Default.IdentityWire, cancellationToken).ConfigureAwait(false);
+        if (wire.Id is null or <= 0 || string.IsNullOrWhiteSpace(wire.Login))
+            throw new ServiceException(AccountStatus.InvalidData, "GitHub did not return a valid immutable identity.");
+        return new(wire.Id.Value.ToString(CultureInfo.InvariantCulture), wire.Login,
+            AccountAvatar.Validate(host, wire.AvatarUrl));
+    }
+}
+
 public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tokenManager,
     TimeProvider? timeProvider = null) : ICopilotUsageProvider
 {
-    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly CopilotUsageClient _client = new(httpClient, timeProvider);
 
     public async Task<UsageSnapshot> FetchAsync(Account account, CancellationToken cancellationToken = default)
     {
@@ -313,7 +322,19 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         }
     }
 
-    public async Task<UsageSnapshot> FetchWithTokenAsync(Account account, TokenSet tokens,
+    public Task<UsageSnapshot> FetchWithTokenAsync(Account account, TokenSet tokens,
+        CancellationToken cancellationToken = default) => _client.FetchAsync(account, tokens, cancellationToken);
+
+    public static UsageSnapshot ParseJson(string json, string accountKey, DateTimeOffset fetchedAtUtc) =>
+        CopilotUsageClient.ParseJson(json, accountKey, fetchedAtUtc);
+}
+
+/// <summary>Quota HTTP/parsing independent of how an application obtains its existing token.</summary>
+public sealed class CopilotUsageClient(HttpClient httpClient, TimeProvider? timeProvider = null)
+{
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
+    public async Task<UsageSnapshot> FetchAsync(Account account, TokenSet tokens,
         CancellationToken cancellationToken = default)
     {
         account.Validate();

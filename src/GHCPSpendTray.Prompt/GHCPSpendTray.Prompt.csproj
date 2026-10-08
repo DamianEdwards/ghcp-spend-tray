@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>ghcp-spend-prompt</AssemblyName>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GHCPSpendTray.Core\GHCPSpendTray.Core.csproj" />
+  </ItemGroup>
+  <Target Name="RequireSupportedPromptArchitecture" BeforeTargets="Restore;PrepareForBuild;Publish"
+          Condition="'$(RuntimeIdentifier)' != '' and '$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'win-arm64' and '$(RuntimeIdentifier)' != 'linux-x64' and '$(RuntimeIdentifier)' != 'osx-arm64'">
+    <Error Text="Supported prompt RIDs: win-x64, win-arm64, linux-x64, osx-arm64." />
+  </Target>
+</Project>
