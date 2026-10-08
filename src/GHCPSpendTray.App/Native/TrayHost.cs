@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using GHCPSpendTray.App.Platform;
 using GHCPSpendTray.Core;
 
@@ -10,10 +12,16 @@ internal sealed class TrayHost : ShellWindow
     private readonly TrayIconSet _icons;
     private uint _activeId = 1;
     private TrayPresentation _presentation = TrayPresentation.Unavailable;
+    internal const nuint RetryTimerId = 2;
+    internal const int RetryLimit = 5;
+    private nuint _retryTimer;
+    private int _retryAttempts;
+    private bool _restorePending, _reportingFailure;
     internal IReadOnlyCollection<TrayIcon> Icons => _icons.Icons;
     internal event Action<string?>? OpenRequested, NotificationClicked;
     internal event Action? SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
     internal event Action? AppearanceChanged;
+    internal event Action? UpdateFailed;
 
     internal TrayHost(string? portableDirectory, TrayIcon.ShellCall? shell = null)
     {
@@ -22,14 +30,48 @@ internal sealed class TrayHost : ShellWindow
         {
             _taskbarCreated = Win32.RegisterWindowMessage("TaskbarCreated");
             if (_taskbarCreated == 0) throw new InvalidOperationException("Cannot register taskbar restart recovery.");
-            Update(_presentation);
+            UpdateIcons();
         }
         catch { Dispose(); throw; }
     }
     internal void Update(TrayPresentation presentation)
     {
         _presentation = presentation;
-        _icons.Update(presentation, IconSize, TrayIconRenderer.SystemPalette());
+        if (_retryTimer != 0 || _reportingFailure) return;
+        TryUpdate();
+    }
+    private void UpdateIcons() =>
+        _icons.Update(_presentation, IconSize, TrayIconRenderer.SystemPalette());
+    private void TryUpdate()
+    {
+        try
+        {
+            if (_restorePending)
+            {
+                _restorePending = false;
+                _icons.Restore();
+            }
+            UpdateIcons();
+            if (_retryAttempts > 0) Diagnostics.Record("Tray display recovered after a Shell failure.");
+            _retryAttempts = 0;
+        }
+        catch (Exception ex) when (ex is Win32Exception || ex is InvalidOperationException { InnerException: Win32Exception })
+        {
+            _icons.Invalidate();
+            Diagnostics.RecordFailure("Tray display unavailable; attempting Shell recovery", ex);
+            if (_retryAttempts < RetryLimit)
+            {
+                _retryTimer = Win32.SetTimer(Handle, RetryTimerId, 1000, 0);
+                if (_retryTimer == 0)
+                    throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot schedule tray recovery.");
+                return;
+            }
+            Diagnostics.Record("Tray display recovery exhausted; refresh to retry.");
+            _retryAttempts = 0;
+            _reportingFailure = true;
+            try { UpdateFailed?.Invoke(); }
+            finally { _reportingFailure = false; }
+        }
     }
     internal bool ContainsCursor() => Icons.Any(icon => icon.ContainsCursor());
     internal bool Notify(NotificationView notification)
@@ -58,7 +100,22 @@ internal sealed class TrayHost : ShellWindow
     }
     protected override nint? Message(uint message, nuint wParam, nint lParam)
     {
-        if (message == _taskbarCreated) { _icons.Restore(); Update(_presentation); return 0; }
+        if (message == Win32.WM_TIMER && wParam == RetryTimerId)
+        {
+            if (_retryTimer != 0)
+            {
+                StopRetryTimer();
+                _retryAttempts++;
+                TryUpdate();
+            }
+            return 0;
+        }
+        if (message == _taskbarCreated)
+        {
+            _restorePending = true;
+            Update(_presentation);
+            return 0;
+        }
         if (message is Win32.WM_DPICHANGED or 0x1A or 0x7E or 0x31A)
         { Update(_presentation); AppearanceChanged?.Invoke(); return 0; }
         if (message == Win32.WM_POWERBROADCAST && wParam is 7 or 18) { ResumeRequested?.Invoke(); return 1; }
@@ -103,5 +160,15 @@ internal sealed class TrayHost : ShellWindow
             case 4: ExitRequested?.Invoke(); break;
         }
     }
-    protected override void ReleaseResources() => _icons.Dispose();
+    private void StopRetryTimer()
+    {
+        if (_retryTimer == 0) return;
+        Win32.KillTimer(Handle, _retryTimer);
+        _retryTimer = 0;
+    }
+    protected override void ReleaseResources()
+    {
+        StopRetryTimer();
+        _icons.Dispose();
+    }
 }
