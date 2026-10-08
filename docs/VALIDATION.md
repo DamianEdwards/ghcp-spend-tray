@@ -1,5 +1,24 @@
 # GHCPSpendTray validation and release gates
 
+## Windows tray recovery after wake/reconnect (October 8, 2026)
+
+Runtime tray updates and `TaskbarCreated` recovery retry temporary Windows
+Shell failures on the hidden window's message loop, at one-second intervals
+with at most five retries. Pending dashboard and display changes coalesce
+into the latest presentation without resetting that budget. Exhaustion is
+logged and shown through the existing application error surface; startup
+registration and unrelated callback failures still fail explicitly.
+Disposal cancels the recovery timer. Notification submission is not replayed.
+
+A rejected modify/re-add no longer allows the unchanged-render cache to skip
+a missing registration when the dashboard returns to its previous values.
+Synthetic HWND tests cover transient restart recovery, coalescing, reverted
+presentations, version-four callbacks, bounded persistent failure, later
+recovery and disposal. Failure diagnostics include the callback message ID
+and native error code where available, never exception messages or account
+data. These synthetic cases do not establish behavior for every real
+Explorer restart or monitor/network transition.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

@@ -199,6 +199,65 @@ internal static class TrayTests
                 "context-menu Open, Refresh and Exit retain their routing");
         }
         check(callbackShell.Registered.Count == 0, "native callback host disposal releases its icons");
+        var recoveryShell = new FakeShell();
+        using (var host = new TrayHost(root, recoveryShell.Call))
+        {
+            int failures = 0, appearances = 0;
+            host.UpdateFailed += () => { failures++; host.Update(rollUp); };
+            host.AppearanceChanged += () => appearances++;
+            void Retry() => Win32.SendMessage(host.Handle, Win32.WM_TIMER, TrayHost.RetryTimerId, 0);
+            uint taskbarCreated = Win32.RegisterWindowMessage("TaskbarCreated");
+            recoveryShell.FailAdd = true;
+            Win32.SendMessage(host.Handle, taskbarCreated, 0, 0);
+            check(failures == 0 && recoveryShell.Registered.Count == 0,
+                "temporary TaskbarCreated failure schedules recovery without a modal Shell callback error");
+            int calls = recoveryShell.AddCalls;
+            host.Update(selected);
+            Win32.SendMessage(host.Handle, 0x7E, 0, 0);
+            check(recoveryShell.AddCalls == calls && appearances == 1,
+                "dashboard and display changes coalesce without restarting the pending recovery");
+            recoveryShell.FailAdd = false;
+            Retry();
+            check(failures == 0 && recoveryShell.Registered.Count == 2 &&
+                host.Icons.Select(icon => icon.AccountKey).SequenceEqual(selected.Icons.Select(icon => icon.AccountKey)) &&
+                recoveryShell.Versions.Values.All(version => version == 4),
+                "timer recovery installs the latest presentation and accessible account callbacks");
+            calls = recoveryShell.AddCalls;
+            Retry();
+            check(recoveryShell.AddCalls == calls, "stale timer callbacks do not repeat a completed recovery");
+            recoveryShell.Registered.Clear();
+            recoveryShell.FailAdd = true;
+            host.Update(Presentation(Indicator(75, "github.com:1"), Indicator(50, "example.ghe.com:2")));
+            host.Update(selected);
+            recoveryShell.FailAdd = false;
+            Retry();
+            check(failures == 0 && recoveryShell.Registered.Count == 2,
+                "failed modify and re-add cannot cache a missing icon when the presentation reverts");
+            recoveryShell.FailAdd = true;
+            Win32.SendMessage(host.Handle, taskbarCreated, 0, 0);
+            calls = recoveryShell.AddCalls;
+            for (int attempt = 0; attempt < TrayHost.RetryLimit; attempt++)
+            {
+                host.Update(selected);
+                Retry();
+                check(failures == (attempt == TrayHost.RetryLimit - 1 ? 1 : 0),
+                    "persistent Shell failures are surfaced once only after the bounded retries");
+            }
+            check(recoveryShell.AddCalls == calls + TrayHost.RetryLimit,
+                "repeated dashboards do not replenish the five-attempt timer retry budget");
+            calls = recoveryShell.AddCalls;
+            Retry();
+            check(recoveryShell.AddCalls == calls && failures == 1,
+                "exhaustion stops the timer and reporting does not recursively restart recovery");
+            recoveryShell.FailAdd = false;
+            host.Update(selected);
+            check(recoveryShell.Registered.Count == 2 && failures == 1,
+                "an explicit later dashboard update can recover after retry exhaustion");
+            recoveryShell.FailAdd = true;
+            Win32.SendMessage(host.Handle, taskbarCreated, 0, 0);
+            host.Dispose();
+            check(recoveryShell.Registered.Count == 0, "disposal cancels pending recovery and removes owned icons");
+        }
         var fake = new FakeShell();
         using (var icons = new TrayIconSet(0, root, fake.Call))
         {
@@ -333,12 +392,14 @@ internal static class TrayTests
         internal bool ThrowNotification;
         internal Win32.NOTIFYICONDATA? LastNotification { get; private set; }
         internal int NotificationCalls { get; private set; }
+        internal int AddCalls { get; private set; }
         internal int MinimumRegisteredAfterFirstAdd { get; private set; } = int.MaxValue;
         internal int Call(uint message, ref Win32.NOTIFYICONDATA data)
         {
             switch (message)
             {
                 case Win32.NIM_ADD:
+                    AddCalls++;
                     if (FailAdd) return 0;
                     Registered.Add(data.uID, data.guidItem);
                     break;

@@ -62,12 +62,13 @@ internal sealed class ReactorShell : IDisposable
             else ShowFlyout();
         };
         _tray.AppearanceChanged += _session.Notify;
+        _tray.UpdateFailed += _session.ReportTrayError;
         _session.DashboardChanged += () =>
         {
             try { _tray.Update(_session.Dashboard.Tray ?? TrayPresentation.Unavailable); }
             catch (Exception ex)
             {
-                Diagnostics.Record($"Tray display update failed ({ex.GetType().Name}).");
+                Diagnostics.RecordFailure("Tray display update failed", ex);
                 _session.ReportTrayError();
             }
         };
