@@ -112,10 +112,10 @@ internal static class UI
             parts.Add($"Resets {boundary.ToUniversalTime().ToString("MMM d, yyyy 'UTC'", CultureInfo.CurrentCulture)}");
         return string.Join(" \u00B7 ", parts);
     }
-    internal static Element? EstimateRow(AccountView account, string idPrefix) =>
+    internal static Element? EstimateRow(AccountView account, string idPrefix, bool rightAlignAmount = false) =>
         account.PeriodEstimate is { } estimate
             ? VStack(3,
-                Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                Grid([rightAlignAmount ? GridSize.Star() : GridSize.Auto, GridSize.Auto], [GridSize.Auto],
                     Copy("Estimated at reset").FontSize(12).Grid(column: 0).Margin(0, 0, 12, 0)
                         .AutomationId(idPrefix + "PeriodEstimateLabel"),
                     Copy(EstimateAmount(estimate)).FontSize(12).Grid(column: 1).HAlign(HorizontalAlignment.Right)
@@ -222,7 +222,7 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
                     UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation").FontSize(12))
                 : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available").FontSize(12),
-            UI.EstimateRow(account, account.Key + "_Flyout_"),
+            UI.EstimateRow(account, account.Key + "_Flyout_", rightAlignAmount: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
                 Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")

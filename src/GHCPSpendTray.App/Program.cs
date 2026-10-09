@@ -422,7 +422,7 @@ internal static class Program
         await WaitForFlyoutUI(shell, "flyout estimate row");
         await OnUI(shell, () =>
         {
-            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount);
+            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount, rightAlignAmount: true);
             if (Find(shell.Flyout!, "example.ghe.com:2_Flyout_PeriodEstimate") is not null ||
                 Find(shell.Flyout!, "TotalConsumption") is not TextBlock { Text: "$42.75" })
                 throw new InvalidOperationException("Flyout estimate changed observed totals or another account.");
@@ -495,7 +495,7 @@ internal static class Program
                 throw new InvalidOperationException("Estimate disclosure is not keyboard/screen-reader accessible.");
             expand.Expand();
         }
-        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected)
+        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
                 Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||
@@ -510,11 +510,17 @@ internal static class Program
                     $"help={(Find(window, prefix + "PeriodEstimate") is FrameworkElement estimate ? ToolTipService.GetToolTip(estimate) is not null : false)}.");
             var labelOrigin = label.TransformToVisual(row).TransformPoint(new(0, 0));
             var amountOrigin = amount.TransformToVisual(row).TransformPoint(new(0, 0));
+            double labelGap = amountOrigin.X - (labelOrigin.X + label.ActualWidth);
+            bool aligned = rightAlignAmount
+                ? Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) <= 1
+                : Math.Abs(labelGap - 12) <= 1 && Math.Abs(labelOrigin.X) <= 1;
             if (row.ActualWidth <= 0 || Math.Abs(labelOrigin.Y - amountOrigin.Y) > 1 ||
                 amountOrigin.X < labelOrigin.X + label.ActualWidth ||
-                Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) > 1 ||
+                !aligned ||
                 amount.FontSize >= 21)
-                throw new InvalidOperationException("Estimate is not a secondary, right-aligned row like the macOS reference.");
+                throw new InvalidOperationException(rightAlignAmount
+                    ? "Flyout estimate is not a secondary row with the amount at the right edge."
+                    : "Settings estimate is not a secondary row with the amount 12 pixels beside the left-aligned label.");
         }
         static void AssertEstimateDisclosure(ReactorWindow window, string prefix, string expected)
         {
