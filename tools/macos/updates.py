@@ -66,6 +66,8 @@ def inspect_bundle(path):
     if channel not in ("Development", "Stable", "Preview"):
         raise ValueError("Invalid macOS release channel.")
     if channel != "Development":
+        if "GHCPUpdateRehearsal" in plist:
+            raise ValueError("A rehearsal bundle cannot pass production package validation.")
         public_key(plist.get("SUPublicEDKey", ""))
         if not framework.is_dir():
             raise ValueError("Production updates require the embedded Sparkle framework.")

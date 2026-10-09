@@ -7,6 +7,15 @@ version="${1:-$(cat packaging/macos/version.txt)}"
 channel="${2:-Development}"
 python3 tools/macos/release.py version "$version" >/dev/null
 case "$channel" in Development|Preview|Stable) ;; *) echo "Invalid release channel." >&2; exit 1 ;; esac
+swift_flags=(-swift-version 6 -warnings-as-errors -O -g)
+if [[ "${GHCP_UPDATE_REHEARSAL:-}" == A || "${GHCP_UPDATE_REHEARSAL:-}" == B ]]; then
+    [[ "$channel" == Development ]] || { echo "Rehearsal hooks are forbidden in release builds." >&2; exit 1; }
+    swift_flags+=(-D UPDATE_REHEARSAL tools/macos/rehearsal/AppRehearsal.swift)
+    if [[ "$GHCP_UPDATE_REHEARSAL" == B ]]; then swift_flags+=(-D UPDATE_REHEARSAL_B); fi
+elif [[ -n "${GHCP_UPDATE_REHEARSAL:-}" ]]; then
+    echo "GHCP_UPDATE_REHEARSAL must be A or B." >&2
+    exit 1
+fi
 source tools/macos/sdk.sh
 source tools/macos/sparkle.sh
 export MACOSX_DEPLOYMENT_TARGET=15.0
@@ -19,7 +28,7 @@ output="$PWD/artifacts/macos/arm64"
 dotnet publish src/GHCPSpendTray.MacBridge -c Release -r osx-arm64 \
     -p:IlcTreatWarningsAsErrors=true -o "$output" --nologo -v:q
 install_name_tool -id @rpath/GHCPSpendTray.MacBridge.dylib "$output/GHCPSpendTray.MacBridge.dylib"
-xcrun swiftc -swift-version 6 -warnings-as-errors -O -g \
+xcrun swiftc "${swift_flags[@]}" \
     -target arm64-apple-macos15.0 \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     src/GHCPSpendTray.Mac/*.swift \

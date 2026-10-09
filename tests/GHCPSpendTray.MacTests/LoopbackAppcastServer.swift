@@ -5,6 +5,7 @@ import Network
 final class LoopbackAppcastServer {
     private let listener: NWListener
     private let feed: Data
+    private let directory: URL?
     private let readiness = CallbackWait<URL>()
     private let report: (String) -> Void
     private var connections: [ObjectIdentifier: NWConnection] = [:]
@@ -15,6 +16,16 @@ final class LoopbackAppcastServer {
 
     init(feed: Data, report: @escaping (String) -> Void) throws {
         self.feed = feed
+        directory = nil
+        self.report = report
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+    }
+
+    init(directory: URL, report: @escaping (String) -> Void) throws {
+        feed = Data()
+        self.directory = directory.standardizedFileURL
         self.report = report
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
@@ -116,15 +127,46 @@ final class LoopbackAppcastServer {
             return
         }
         guard let header = String(data: request, encoding: .utf8),
-              let line = header.components(separatedBy: "\r\n").first,
-              line == "GET /appcast.xml HTTP/1.1" || line == "GET /appcast.xml HTTP/1.0" else {
+              let line = header.components(separatedBy: "\r\n").first else {
             fail(AppError.message("The synthetic listener received an unexpected HTTP request."))
             close(connection)
             return
         }
-        report("Serving /appcast.xml: \(feed.count) bytes.")
-        var response = Data("HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: \(feed.count)\r\nConnection: close\r\n\r\n".utf8)
-        response.append(feed)
+        let parts = line.split(separator: " ")
+        guard parts.count == 3, parts[0] == "GET", parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0" else {
+            fail(AppError.message("The synthetic listener received an unsupported HTTP request."))
+            close(connection)
+            return
+        }
+        let path = String(parts[1])
+        let body: Data
+        if let directory {
+            guard path.range(of: #"^/[A-Za-z0-9/-]+\.(xml|dmg)$"#, options: .regularExpression) != nil else {
+                fail(AppError.message("The rehearsal listener rejected an unsafe URL path."))
+                close(connection)
+                return
+            }
+            let file = directory.appendingPathComponent(String(path.dropFirst())).standardizedFileURL
+            guard file.resolvingSymlinksInPath().path.hasPrefix(directory.path + "/") else {
+                fail(AppError.message("The rehearsal listener rejected a path outside its disposable root."))
+                close(connection)
+                return
+            }
+            do { body = try Data(contentsOf: file) }
+            catch { fail(error); close(connection); return }
+        } else {
+            guard path == "/appcast.xml" else {
+                fail(AppError.message("The synthetic listener received an unexpected HTTP path."))
+                close(connection)
+                return
+            }
+            body = feed
+        }
+        report("Serving \(path): \(body.count) bytes.")
+        let type = path.hasSuffix(".xml") ? "application/xml" : "application/octet-stream"
+        var response = Data("HTTP/1.1 200 OK\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)
+        // Fault injection exists only in the disposable rehearsal server.
+        response.append(path.hasSuffix("/interrupted.dmg") ? body.prefix(body.count / 2) : body)
         connection.send(content: response, isComplete: true, completion: .contentProcessed { [weak self] error in
             Task { @MainActor in
                 guard let self, !self.stopped else { return }

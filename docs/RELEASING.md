@@ -556,6 +556,60 @@ Use an SDK actually installed on your machine. Local output is **ad-hoc signed
 development software**, not notarized public distribution. Do not change
 Gatekeeper settings or install a local trust certificate to distribute it.
 
+### Local end-to-end update rehearsal
+
+Use a native Apple-silicon Mac with the normal development prerequisites and a
+usable **Developer ID Application** private key in your login Keychain:
+
+```bash
+python3 tools/macos/rehearsal.py \
+  --signing-identity 'Developer ID Application: Your Name (TEAMID)'
+```
+
+A certificate SHA-1 fingerprint can be supplied instead of its display name.
+The command signs only disposable generated bundles; it neither exports the
+Developer ID private key nor changes Keychain access/trust settings. If
+`codesign` cannot access the key, authorize it yourself using Keychain
+Access/a local Terminal. Ad-hoc signatures are insufficient for this rehearsal's
+cross-version Keychain-access check. Signing timestamps contact Apple's service;
+all update downloads are served by a native listener bound only to `127.0.0.1`.
+
+The runner sequentially builds two versions of the actual SwiftUI/Native AOT
+app with compile-only `UPDATE_REHEARSAL` hooks, distinct executable bytes,
+arm64 Sparkle helpers, hardened runtime and Developer ID signatures.
+Each scenario uses a unique disposable bundle identity and data directory,
+ephemeral Ed25519 keys, signed appcasts and signed DMGs. It exercises manual
+download/replacement/relaunch, automatic download followed by Install and
+Relaunch, installation on quit, download/installation cancellation, corrupted
+archives, incorrect archive signatures and truncated downloads. Successful
+updates require exact installed bundle bytes, permissions and framework
+symlinks, a new process at the same path, preserved synthetic files and
+Keychain items, native updater preferences, and signed-downgrade rejection.
+Failure scenarios require specific callbacks and an unchanged, runnable A.
+Pass `--scenario manual` (or another reported scenario name) to run a subset.
+
+Reports, per-scenario events, app logs and the listener log remain under
+`artifacts/macos-rehearsal/<unique-run-id>/` for inspection. Generated private
+Ed25519 seeds are held outside the checkout and removed at exit. The runner
+stops its processes, deletes only its unique synthetic credential/defaults,
+and restores the ordinary development build after execution. Real accounts,
+your installed app, login startup and the production feed are not used.
+There is no release, tag, push, Pages deployment or notarization submission.
+
+The rehearsal uses a supported custom Sparkle user driver to automate choices
+inside the real app and real updater/installer. It does **not** prove the
+standard update dialogs or user interaction with them. Synthetic settings and
+history fixtures prove external-file preservation, not account/schema migration.
+Local HTTP is allowed only in these explicitly compiled rehearsal builds;
+ordinary builds retain their HTTPS-only updater guard. The normal build script
+refuses rehearsal flags with Preview/Stable channels, and production package
+inspection rejects rehearsal markers.
+
+These builds are signed but **not notarized**. Production notarization,
+quarantine/Gatekeeper behavior on a downloaded app, privileged/read-only
+install locations, actual public HTTPS delivery/Pages deployment and macOS 15
+execution of this full replacement exercise remain separate acceptance checks.
+
 ### Apple signing configuration
 
 Use the existing protected **production** GitHub environment shared with

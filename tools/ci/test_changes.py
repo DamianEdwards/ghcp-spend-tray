@@ -8,7 +8,9 @@ class ChangesTests(unittest.TestCase):
                      "packaging/macos/Info.plist", "tests/GHCPSpendTray.MacTests/PlatformTests.swift",
                      "tools/macos/build.sh", "tools/macos/architecture.py", "tools/macos/test_architecture.py",
                      ".github/actions/setup-macos/action.yml", ".github/workflows/notarization-status.yml",
-                     ".github/workflows/macos-updates.yml", "packaging/macos/sparkle.json", "tools/macos/updates.py"):
+                     ".github/workflows/macos-updates.yml", "packaging/macos/sparkle.json", "tools/macos/updates.py",
+                     "tools/macos/rehearsal.py", "tools/macos/rehearsal/AppRehearsal.swift",
+                     "tools/macos/rehearsal/Server.swift", "tools/macos/test_rehearsal.py"):
             self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
                      "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1",

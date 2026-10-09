@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var activationObserver: NSObjectProtocol?
     private var smoke = false
     private var empty = false
+    #if UPDATE_REHEARSAL
+    private var rehearsal: UpdateRehearsal?
+    #endif
     private let activationName = Notification.Name("com.damianedwards.GHCPSpendTray.activate")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -25,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let arguments = Array(CommandLine.arguments.dropFirst())
             smoke = arguments.contains("--smoke-test")
             empty = arguments.contains("--demo-empty")
-            let demo = smoke || empty || arguments.contains("--demo")
+            var demo = smoke || empty || arguments.contains("--demo")
             let allowed = ["--smoke-test", "--demo", "--demo-empty", "--data-dir"]
             var dataPath: String?
             var index = 0
@@ -38,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 }
                 index += 1
             }
+            #if UPDATE_REHEARSAL
+            rehearsal = try UpdateRehearsal.load()
+            if let rehearsal {
+                guard arguments.isEmpty else { throw AppError.message("Rehearsal launches do not accept arguments.") }
+                demo = true
+                dataPath = rehearsal.directory.path
+            }
+            #endif
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             let standard = support.appendingPathComponent("GHCPSpendTray", isDirectory: true)
             let directory: URL
@@ -62,7 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 NSApplication.shared.terminate(nil)
                 return
             }
-            let model = AppModel(directory: directory, demo: demo)
+            var updates = AppUpdates()
+            #if UPDATE_REHEARSAL
+            if let rehearsal { updates = AppUpdates.rehearsal(rehearsal) }
+            #endif
+            let model = AppModel(directory: directory, demo: demo, updates: updates)
             self.model = model
             model.showSettings = { [weak self] in self?.openSettings() }
             model.dashboardChanged = { [weak self] dashboard in self?.updateMenuBar(dashboard.tray) }
@@ -78,9 +93,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             model.start(empty: empty)
             model.updates.start(channel: Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development",
-                                isolated: demo)
+                                isolated: demo && !isUpdateRehearsal)
+            #if UPDATE_REHEARSAL
+            rehearsal?.run(model)
+            #endif
             if smoke { Task { await runSmoke(model) } }
         } catch {
+            #if UPDATE_REHEARSAL
+            if Bundle.main.object(forInfoDictionaryKey: "GHCPUpdateRehearsal") != nil {
+                fputs("FAIL: update rehearsal startup: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+            #endif
             if smoke { fputs("FAIL: macOS startup smoke test.\n", stderr); exit(1) }
             let alert = NSAlert()
             alert.messageText = "GHCPSpendTray could not start"
@@ -89,6 +113,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             alert.runModal()
             NSApplication.shared.terminate(nil)
         }
+    }
+
+    private var isUpdateRehearsal: Bool {
+        #if UPDATE_REHEARSAL
+        return rehearsal != nil && rehearsal?.configuration.scenario != "cleanup"
+        #else
+        return false
+        #endif
     }
 
     private func setupMenuBar(_ model: AppModel) {

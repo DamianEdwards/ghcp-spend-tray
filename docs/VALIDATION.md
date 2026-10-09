@@ -1,5 +1,52 @@
 # GHCPSpendTray validation and release gates
 
+## Local real-app Sparkle replacement rehearsal (October 9, 2026)
+
+`python3 tools/macos/rehearsal.py --signing-identity '<Developer ID identity>'`
+now runs a repeatable, opt-in update exercise with two different builds of the
+actual SwiftUI/AppKit app and Native AOT bridge. All embedded code is arm64,
+Developer ID signed with hardened runtime, and timestamped. The local runner
+uses disposable bundle identities, ephemeral Ed25519 keys, authenticated feeds
+and signed DMGs, and downloads solely through a native loopback listener.
+It neither publishes a release nor changes production updater configuration.
+
+Local macOS 26 / Apple-silicon execution passes eight real-engine scenarios:
+manual download/install/relaunch, background download followed by the existing
+Install and Relaunch action, install on quit, cancel download, cancel prepared
+installation, corrupted archive, archive signed by a wrong key, and interrupted
+download. Each successful case checks exact candidate file hashes, executable
+permissions/framework symlinks, a new process at the same installation path,
+preservation of synthetic external settings/history files and a device-local
+Keychain item, and native update-check/download preferences. The installed B
+then rejects an authenticated older A feed without replacing itself. Negative
+cases require signature-validation/download error codes or explicit
+cancellation and an unchanged, correctly signed, runnable A. Reports and
+callback traces remain under `artifacts/macos-rehearsal/<run-id>`.
+
+The rehearsal initially exposed two fixture assumptions: ad-hoc A/B binaries
+do not have stable cross-version Keychain trust, and background-install
+readiness can temporarily toggle during Sparkle's installer-status probe.
+Developer ID signing resolves the former; the latter now waits on actual
+readiness notifications and rechecks state at dispatch, rather than delaying
+or treating a transient ready sample as final. Neither required relaxing
+production signature validation or increasing deadlines.
+
+Automation uses a supported custom Sparkle user driver in the real app; normal
+builds retain the standard controller/dialogs. Rehearsal code lives outside the
+shipping Swift glob, requires explicit development-only compiler flags, is
+rejected by production package validation, and removes only its unique
+synthetic Keychain/defaults data. The ordinary development bundle is rebuilt
+after the runner finishes. Private seeds are never retained in evidence.
+
+This is strong evidence for the actual downloader, helpers, replacement and
+relaunch, **not** a full production acceptance result: these builds are not
+notarized, use local HTTP, have unique synthetic identities/state, and automate
+choices instead of clicking the standard UI. Notarization/quarantine/Gatekeeper,
+privileged/read-only install paths, normal update-dialog interaction, macOS 15
+full replacement, real account/schema migration, and public Pages/HTTPS delivery
+remain distinct gates. Production Sparkle signing keys, notarization credentials,
+tags and public assets were not used for the rehearsal.
+
 ## Windows period-estimate parity (October 3, 2026)
 
 Windows now consumes the shared calculation, result and per-account persistence

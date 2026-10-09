@@ -44,6 +44,12 @@ release/feed signing additionally requires the protected private seed. Never
 commit or log production signing keys. `macos-updates.yml` rebuilds the signed,
 stable-only Pages appcast from immutable release assets and can be retried
 without rebuilding or republishing a release.
+Run `python3 tools/macos/rehearsal.py --signing-identity '<Developer ID identity>'`
+for opt-in local real-app replacement/relaunch coverage. Rehearsal hooks live
+outside shipping Swift sources, compile only with `GHCP_UPDATE_REHEARSAL=A|B`,
+and cannot be built as Preview/Stable. Keep local-feed exceptions compile-only,
+synthetic state isolated, private seeds ephemeral, and reports explicit about
+the lack of notarization and standard-dialog interaction coverage.
 Production Mac signing also requires Xcode's
 `notarytool` and configured Apple credentials.
 Mac versions live in `packaging/macos/version.txt` for development and
