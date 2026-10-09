@@ -81,11 +81,12 @@ final class AppModel: ObservableObject {
         self.updates = updates
     }
 
-    func start(empty: Bool) {
+    func start(empty: Bool, unlimited: Bool = false) {
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
-        perform("initialize", fields: ["directory": directory.path, "demo": demo, "empty": empty]) { [weak self] event in
+        perform("initialize", fields: ["directory": directory.path, "demo": demo, "empty": empty,
+                                       "unlimited": unlimited]) { [weak self] event in
             self?.initialized = event.error == nil
             Task { await self?.refreshNotificationPermission() }
         }

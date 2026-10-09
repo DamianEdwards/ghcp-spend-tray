@@ -6,8 +6,10 @@ namespace GHCPSpendTray.App.Native;
 internal static unsafe partial class Win32
 {
     internal const uint WM_DESTROY = 2, WM_SIZE = 5, WM_CLOSE = 0x10, WM_PAINT = 0xF,
-        WM_COMMAND = 0x111, WM_TIMER = 0x113, WM_DPICHANGED = 0x2E0,
+        WM_QUERYENDSESSION = 0x11, WM_ENDSESSION = 0x16,
+        WM_COMMAND = 0x111, WM_TIMER = 0x113, WM_CONTEXTMENU = 0x7B, WM_DPICHANGED = 0x2E0,
         WM_POWERBROADCAST = 0x218, WM_APP_WORK = 0x8001, WM_TRAY = 0x8002;
+    internal const int NIN_SELECT = 0x400, NIN_KEYSELECT = 0x401, NIN_BALLOONUSERCLICK = 0x405;
     internal const uint WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_TABSTOP = 0x10000,
         WS_BORDER = 0x800000, WS_VSCROLL = 0x200000, WS_OVERLAPPEDWINDOW = 0xCF0000;
     internal const uint NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIM_SETVERSION = 4;
@@ -170,6 +172,10 @@ internal static unsafe partial class Win32
         int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
     [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
     internal static partial nint DefWindowProc(nint hwnd, uint message, nuint wParam, nint lParam);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nuint SetTimer(nint hwnd, nuint id, uint milliseconds, nint callback);
+    [LibraryImport("user32.dll")]
+    internal static partial int KillTimer(nint hwnd, nuint id);
     [LibraryImport("user32.dll", EntryPoint = "GetMessageW", SetLastError = true)]
     internal static partial int GetMessage(out MSG msg, nint hwnd, uint min, uint max);
     [LibraryImport("user32.dll")]
@@ -226,12 +232,6 @@ internal static unsafe partial class Win32
     internal static partial uint RegisterWindowMessage(string message);
     [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial int MessageBox(nint owner, string text, string caption, uint type);
-    [LibraryImport("user32.dll")]
-    internal static partial nuint SetTimer(nint hwnd, nuint id, uint milliseconds, nint callback);
-    [LibraryImport("user32.dll")]
-    internal static partial int KillTimer(nint hwnd, nuint id);
-    [LibraryImport("user32.dll")]
-    internal static partial uint GetDoubleClickTime();
     [LibraryImport("user32.dll")]
     internal static partial nint CreatePopupMenu();
     [LibraryImport("user32.dll", EntryPoint = "AppendMenuW", StringMarshalling = StringMarshalling.Utf16)]

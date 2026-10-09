@@ -47,6 +47,175 @@ full replacement, real account/schema migration, and public Pages/HTTPS delivery
 remain distinct gates. Production Sparkle signing keys, notarization credentials,
 tags and public assets were not used for the rehearsal.
 
+## Microsoft Store update detection and installation (October 9, 2026)
+
+Synthetic Windows tests cover periodic/throttled checks, unavailable vs current
+status, notification deduplication, About's no-button/current and Update/available
+states, download/install progress, consent cancellation, actionable errors,
+completion/restart fallback, concurrent operation suppression and disposal.
+Update notifications use distinct download artwork, with native icon creation,
+DPI, contrast tinting and unchanged About-click routing covered.
+Native HWND tests accept Restart Manager shutdown and ignore canceled shutdown.
+The source-generated restart registration/cleanup calls are exercised without
+initiating a deployment or restarting the test process.
+
+Local Release verification passed all four managed and executed x64 Native AOT
+harnesses, and the x64 Native AOT application passed populated and empty-account
+UI smoke runs. Those smoke runs inject synthetic Store availability, invoke the
+actual About Update button, check consent-cancellation retry, open About through
+both the native update-notification callback (including a closed Settings window)
+and the in-app update notice, and verify that clearing availability removes the button.
+They do not call real Store update APIs.
+
+One-off offline probes additionally passed 37 assertions against the unchanged
+production Store service source with controlled Store/dispatcher endpoints and
+real Windows restart registration. These cover Store-only gating, main-package
+selection, the actual uptime delay, UI-thread ownership, registration before
+consent, progress, canceled/failed installs, shutdown cancellation and retained
+registration after completion.
+
+A separate x64 Native AOT probe built from the production app project activated
+the real StoreContext and initialized it with the production About window HWND
+without querying or downloading. With About open and a synthetic install still
+pending, ordinary native close was blocked, while actual Restart Manager shutdown
+and restart succeeded. Windows App SDK restart also succeeded. Both produced a
+different process, accepted `--startup`, reacquired the production single-instance
+mutex and initialized the production shell. These isolated probes use synthetic
+data and a test entrypoint, not the packaged production bootstrap; they do not
+establish package replacement or execution of a newer version. No persistent CI
+upgrade test, package registration, certificate or Developer Mode change was added.
+
+The documented Store flow can terminate a desktop app before its install await
+returns. Registration therefore precedes the install request, with a 61-second
+process-uptime guard for the documented restart minimum. Windows owns termination,
+package replacement and relaunch. A surviving completed call requests Windows App
+SDK restart; an unsuccessful request is visible and retryable.
+
+An actual Store-signed, older package with a newer update offered to the same
+account/device is required to validate the real consent dialogs, replacement
+and new-version relaunch. Portable/development package smoke and fake Store
+results do not establish that end-to-end behavior. No real Store deployment has
+been performed locally for this change. The incoming version is not supplied by
+the supported Store update API; the UI deliberately does not invent it or use
+GitHub's independently published version as a proxy.
+
+## Windows tray recovery after wake/reconnect (October 8, 2026)
+
+Runtime tray updates and `TaskbarCreated` recovery retry temporary Windows
+Shell failures on the hidden window's message loop, at one-second intervals
+with at most five retries. Pending dashboard and display changes coalesce
+into the latest presentation without resetting that budget. Exhaustion is
+logged and shown through the existing application error surface; startup
+registration and unrelated callback failures still fail explicitly.
+Disposal cancels the recovery timer. Notification submission is not replayed.
+
+A rejected modify/re-add no longer allows the unchanged-render cache to skip
+a missing registration when the dashboard returns to its previous values.
+Synthetic HWND tests cover transient restart recovery, coalescing, reverted
+presentations, version-four callbacks, bounded persistent failure, later
+recovery and disposal. Failure diagnostics include the callback message ID
+and native error code where available, never exception messages or account
+data. These synthetic cases do not establish behavior for every real
+Explorer restart or monitor/network transition.
+
+## Windows tray selection and smoke readiness (October 5, 2026)
+
+Windows tray selection no longer waits for the system double-click interval.
+The version-four Shell callback handles `NIN_SELECT` and `NIN_KEYSELECT` once,
+ignoring raw mouse down/up/double-click messages. Rapid selections remain
+ordinary popup toggles (or account navigation for per-account icons), not a
+settings shortcut. Settings remains available from the popup gear and the
+right-click menu. Notification routing, retired callback filtering, taskbar
+recovery and icon ownership are unchanged.
+
+The previous timer arbitration could reopen the popup after double-clicking:
+synchronous cold settings-window creation could exceed the double-click
+interval before the trailing selection arrived. Removing that arbitration
+eliminates the clock-dependent path rather than lengthening its timeout.
+Native HWND regression tests send full raw/semantic callback sequences,
+including the old trailing timer, and assert immediate dispatch, no
+double-click settings action, host-specific routing and retired-ID rejection.
+
+Synthetic UI smoke waits for the accessible button's actual `Click` event,
+controller completion, the current committed Reactor revision, loaded
+descendants and layout. Probes run at low dispatcher priority after ordinary
+UI work. Correctness assertions then execute once; missing controls, incorrect
+values and accessibility/layout regressions still fail. Readiness waits use a
+five-second bound and record named checkpoints plus model/render revisions,
+navigation state, window visibility and foreground information on timeout.
+The portable/package process limits remain 30/45 seconds, respectively.
+
+The preview's taskbar-colored background is declarative, so Reactor cannot
+clear a parent swatch after the child image updates. Smoke retains exact pixel,
+background, accessibility, draft/save isolation and unmount-buffer assertions.
+All existing onboarding Back, disclosure, estimate, focus, notification and
+synthetic Credential Manager checks remain.
+
+Local sequential verification passed all four managed/executed x64 Native AOT
+harnesses (170 Core, 14 platform, 924 Windows integration and 81 shared/bridge
+assertions), plus release-tooling and 32 CI/28 release Python regressions.
+The x64 Native AOT app passed three consecutive populated/empty portable
+observations. Launcher fixtures also pass in PowerShell 7 and 5.1 and reject
+assertion failures, timeouts, missing results and nonzero exits without retries.
+
+Each hosted Windows packaging lane runs three populated/empty x64 observations
+against its exact extracted development MSIX, including fresh process startup.
+The synthetic child alone runs at below-normal priority on one permitted
+logical processor. Each iteration keeps separate diagnostics, and the first
+failure stops the lane; these are repeated observations, not retries until
+green. Self-contained/Store x64 and ARM64 packaging, Windows test shards and
+macOS coverage remain unchanged. No Developer Mode or other OS preference is
+changed on the developer machine. Finite green observations cannot establish
+a literal 100% guarantee for future Explorer, focus, load or runtime behavior.
+
+## Parallel PR/main verification (October 4, 2026)
+
+Windows verification uses two isolated test shards: application integration,
+and Core/platform/shared tests. Each runs its managed and executed x64 Native
+AOT harnesses; the latter also retains release-tooling checks and the full
+Release solution build. Self-contained and Store packaging run on separate
+runners, each publishing and validating both x64 and ARM64 and exercising
+populated/empty x64 packaged startup. The Store lane retains deployment-mode
+reset validation and synthetic Store identity/staging checks.
+
+macOS 26 shared managed/Native AOT tests run independently from the native
+bridge/app, Swift platform/Keychain and UI smoke lane. macOS 15 consumes the
+exact app artifact without rebuilding or waiting for shared tests. Verification
+requires both macOS 26 lanes and the runtime check; Windows matrix jobs use
+`fail-fast: false` so one failed shard does not cancel the others. The gate
+rejects failures, cancellations, unexpected skips and missing job results.
+
+Default local/release verification remains sequential and complete. Build and
+publish commands must not run concurrently in the same checkout. Cache keys,
+change routing and PR/push/manual triggers are unchanged; no verification
+coverage is moved to a schedule.
+
+The first full-matrix hosted PR
+[run 37264941553](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37264941553)
+passed every lane, including all managed/Native AOT harnesses, both Windows
+deployment modes, synthetic Mac Keychain CRUD, and populated/empty native UI
+smoke on macOS 26 and 15. Creation-to-Verification elapsed time was 5:48,
+versus the pre-change successful first-attempt PR median of 6:32 (five runs).
+The longest Windows packaging lane was 4:58 versus the old 6:09 median;
+Windows tests were 4:01 versus 4:53, and macOS 26 was 3:15 versus 3:40.
+This is an initial observation, not a long-term percentile or guaranteed SLA.
+
+The follow-up full-matrix
+[run 37265434274](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37265434274)
+passed every check in 4:16, 35% below the historical PR median and 33% below
+the historical main median. Windows packaging lanes both took 3:48; test
+shards took 3:50 and 2:52; macOS 26 app/UI and shared tests took 1:43 and 1:53,
+with macOS 15 runtime at 0:31. Summed runner time was 18:47 versus the old
+mixed-platform median of 15:31: elapsed time improves at the cost of more
+parallel runner time.
+
+Native AOT size changes landed in #65 during this work. A newer successful
+pre-split [run 37263530902](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/37263530902)
+used identical application source trees, including those size settings,
+and took 7:06 with Windows packaging at 6:49. This provides a same-application
+comparison in addition to the historical baseline; neither comparison removes
+hosted-runner/cache variability or establishes post-merge main timing.
+
 ## Windows period-estimate parity (October 3, 2026)
 
 Windows now consumes the shared calculation, result and per-account persistence
@@ -57,8 +226,10 @@ macOS UI and bridge commands are unchanged by this Windows integration.
 
 The three macOS reference screenshots on issue #47 were compared with the
 Windows estimate surfaces. Windows keeps native Fluent cards and controls while
-matching the secondary row hierarchy: Estimated at reset at the left,
-approximate amount at the right, then early/projected-excess/UTC-reset context.
+matching the secondary row hierarchy: Estimated at reset and an approximate
+amount, then early/projected-excess/UTC-reset context. Following issue #64,
+Usage and account settings keep the amount beside the label with a 12-pixel
+gap; the flyout retains right alignment to match its observed consumption.
 Projected excess uses a theme-aware caution brush and a warning glyph, not
 a projected progress bar. Small positive amounts use `<$1` and small excesses
 use Less than $1 over allocation, matching macOS without implying zero.
@@ -77,8 +248,10 @@ consumption, totals and tray allocation.
 An x64 Native AOT app publish passed populated and empty native WinUI smoke.
 Populated smoke drives the real preference checkbox, Save and accessible
 expanders, checks all three estimate surfaces, and measures that the label
-and amount share a baseline, the amount reaches the row's right edge without
-overlapping the label, and forecast text remains smaller than actual consumption.
+and amount share a baseline without overlap, and forecast text remains smaller
+than actual consumption. The geometry assertions now require a 12-pixel
+label-to-amount gap in Usage and account settings (including unavailable
+estimates), and right-edge alignment in the flyout.
 It also checks label association/help, expanded diagnostics on Usage and
 account settings, and unavailable/explicit-off behavior. These are synthetic
 controls and geometry checks, not proof of pixel-identical cross-platform
@@ -460,11 +633,24 @@ commit. CodeQL does not run automatically on pushes or pull requests; use
 **Actions > CodeQL > Run workflow** for an additional scan, such as before a
 release. This trades pre-merge CodeQL feedback for post-merge scheduled
 findings. The required **Verification** checks still run on PRs and main pushes.
-Swift analysis uses manual build
-mode on macOS, with `tools/macos/build.sh` running after CodeQL initialization
-so the extractor observes the real Swift compiler invocations. The pinned
-.NET SDK builds the in-process Native AOT bridge; analysis does not require
-production signing credentials or run the application.
+Swift analysis uses manual build mode on macOS. Before CodeQL initialization,
+`tools/macos/build.sh --bridge-only` uses the pinned .NET SDK to build the
+in-process Native AOT bridge. After initialization,
+`tools/macos/build.sh --frontend-only` compiles the real Swift frontend against
+that bridge, so the extractor observes the Swift compiler invocations without
+tracing the unrelated .NET/AOT build. A missing bridge is an error, not a skipped
+build. Normal verification and release builds still compile both components
+with the same script. Analysis does not require production signing credentials
+or run the application.
+
+CodeQL's bundled Clang importer cannot consume the bridging-header PCH produced
+by Apple Clang (`PCH file ... built from a different branch`). During Swift
+CodeQL extraction only, the shared build script passes the supported
+`-disable-bridging-pch` driver flag so both compilers parse the original
+`Bridge.h`. Normal verification and release builds retain their usual PCH
+behavior. Failed Swift scans retain extractor diagnostics and the build-tracer
+log for seven days; a successful app build alone does not prove successful
+CodeQL extraction.
 
 GitHub's default setup cannot discover our command-line Swift build: there is
 no Xcode project/workspace or Swift package. It also detects `Bridge.h` as C/C++
@@ -478,6 +664,37 @@ workflow; default and advanced result uploads cannot coexist. Do not add a
 dummy C source, suppress extraction errors, or disable Swift scanning to make
 the check green. Add an appropriate C/C++ analysis job if native C/C++ sources
 are introduced later.
+
+## Dependency and repository security configuration
+
+Keep the dependency graph, automatic dependency submission, Dependabot alerts
+and Dependabot security updates enabled in GitHub repository settings.
+Automatic submission resolves the .NET dependency tree, including the shared
+engine and Mac bridge. The committed npm lock file supplies the artwork
+tooling's direct and transitive dependencies; GitHub also tracks the pinned
+Actions dependencies.
+
+`.github/dependabot.yml` schedules weekly Wednesday version updates for NuGet
+projects under `src` and `tests`, the pinned .NET SDK in `global.json`, GitHub
+Actions, and npm tooling under `tools`. Windows App SDK component updates stay
+grouped, as do Actions updates. SDK major and minor version updates remain
+ignored.
+
+The Swift frontend currently imports only Apple system frameworks and the
+local C ABI header. It has no `Package.swift`, `Package.resolved`, CocoaPods,
+or Carthage dependencies, so there is no separate Swift package graph or
+Dependabot update entry to configure. Add Swift Package Manager coverage when
+introducing external Swift packages. Xcode and Apple SDK updates require
+manual changes to the shared `.github/actions/setup-macos` toolchain and
+macOS verification; Dependabot does not update these toolchain pins.
+
+Keep secret scanning, push protection, and private vulnerability reporting
+enabled on this public repository. Actions use read-only
+default token permissions, require full-SHA action pins, and cannot approve
+pull requests. The main branch requires pull requests and the aggregate
+**Verification** check; the weekly/manual CodeQL scan is not a pre-merge gate.
+`tools/ci/test_dependabot.py` guards package coverage alongside the CodeQL
+workflow checks.
 
 ## macOS implementation evidence (October 1, 2026)
 
@@ -713,7 +930,8 @@ populated/empty native UI smoke paths. It removes its registration in `finally`.
 It does not change Developer Mode, certificate trust, or login startup preferences.
 
 The portable smoke path checks hidden startup, tray mouse/keyboard callbacks,
-duplicate activation, focus transitions, accessible settings/onboarding actions,
+raw callback deduplication, rapid ordinary selection, focus transitions,
+accessible settings/onboarding actions,
 detail disclosures, synthetic notification submission and a uniquely named
 synthetic Credential Manager write/read/delete. Shell accepting a notification
 does not prove visual delivery. Synthetic callbacks do not reproduce all Explorer
@@ -828,7 +1046,8 @@ dotnet run --project tests\GHCPSpendTray.AppTests -c Release --no-build -- --tra
 The bitmap contains exact 16px output and 2x nearest-neighbor magnifications,
 composited on the light/dark palette backgrounds. Append a pixel size (for
 example `24`) after the output path to inspect higher-DPI output.
-Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, and partial 50%;
+Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, partial 50%,
+unlimited (infinity), and partial unlimited;
 rows are light pie, light number, dark pie, dark number. Renderer samples are
 not screenshots of Explorer's notification area.
 

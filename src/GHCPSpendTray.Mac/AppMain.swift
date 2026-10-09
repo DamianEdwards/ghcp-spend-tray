@@ -28,8 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let arguments = Array(CommandLine.arguments.dropFirst())
             smoke = arguments.contains("--smoke-test")
             empty = arguments.contains("--demo-empty")
-            var demo = smoke || empty || arguments.contains("--demo")
-            let allowed = ["--smoke-test", "--demo", "--demo-empty", "--data-dir"]
+            let unlimited = arguments.contains("--demo-unlimited")
+            var demo = smoke || empty || unlimited || arguments.contains("--demo")
+            let allowed = ["--smoke-test", "--demo", "--demo-empty", "--demo-unlimited", "--data-dir"]
             var dataPath: String?
             var index = 0
             while index < arguments.count {
@@ -91,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     MainActor.assumeIsolated { self?.openSettings() }
                 }
             }
-            model.start(empty: empty)
+            model.start(empty: empty, unlimited: unlimited)
             model.updates.start(channel: Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development",
                                 isolated: demo && !isUpdateRehearsal)
             #if UPDATE_REHEARSAL

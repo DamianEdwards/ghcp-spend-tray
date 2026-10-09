@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using GHCPSpendTray.App.Native;
 using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
@@ -40,6 +41,29 @@ internal static class UI
                 ? InfoBar("Complete!", notice).Success().IsClosable(false).AutomationId("AccountConnectionComplete")
                 : InfoBar("", notice).Informational().IsClosable(false)
             : null;
+    internal static Element? UpdateNotice(AppSession state, bool onAbout = false) => state.StoreUpdates is { HasUpdate: true }
+        && !onAbout
+        ? Card(VStack(8, Copy("A GHCPSpendTray update is available."),
+            Button("View update", () => state.OpenSettings?.Invoke(SettingsPage.About))
+                .AutomationId("ViewStoreUpdate").HAlign(HorizontalAlignment.Left)))
+        : null;
+    internal static Element StoreUpdateCard(StoreUpdateSession updates, nint owner) => Card(VStack(12,
+        TextBlock("Microsoft Store updates").SemiBold(),
+        Copy(updates.Status).AutomationId("StoreUpdateStatus"),
+        updates.Error is { } error ? InfoBar("Unable to complete update", error).Error().IsClosable(false) : null,
+        updates.Updating ? Progress(updates.Progress).AutomationName("App update progress") : null,
+        updates.HasUpdate
+            ? VStack(8,
+                Copy("Windows will ask permission to download and install. The app may close and restart."),
+                Button(updates.RestartRequired ? "Restart" : "Update", () => updates.Install(owner))
+                    .AccentButton().AutomationName(updates.RestartRequired ? "Restart app" : "Install app update")
+                    .AutomationId("InstallStoreUpdate").HAlign(HorizontalAlignment.Left)
+                    .IsEnabled(!updates.Checking && !updates.Updating))
+            : updates.Error is not null
+                ? Button("Try again", () => updates.Check(force: true)).HAlign(HorizontalAlignment.Left)
+                    .IsEnabled(!updates.Checking)
+                : null
+    )).AutomationId("StoreUpdateCard");
     internal static Element DeviceSignIn(AppSession state, DevicePrompt device, nint owner)
     {
         int remaining = Math.Max(0, (int)(device.Expires - DateTimeOffset.UtcNow).TotalSeconds);
@@ -111,10 +135,10 @@ internal static class UI
             parts.Add($"Resets {boundary.ToUniversalTime().ToString("MMM d, yyyy 'UTC'", CultureInfo.CurrentCulture)}");
         return string.Join(" \u00B7 ", parts);
     }
-    internal static Element? EstimateRow(AccountView account, string idPrefix) =>
+    internal static Element? EstimateRow(AccountView account, string idPrefix, bool rightAlignAmount = false) =>
         account.PeriodEstimate is { } estimate
             ? VStack(3,
-                Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                Grid([rightAlignAmount ? GridSize.Star() : GridSize.Auto, GridSize.Auto], [GridSize.Auto],
                     Copy("Estimated at reset").FontSize(12).Grid(column: 0).Margin(0, 0, 12, 0)
                         .AutomationId(idPrefix + "PeriodEstimateLabel"),
                     Copy(EstimateAmount(estimate)).FontSize(12).Grid(column: 1).HAlign(HorizontalAlignment.Right)
@@ -148,6 +172,7 @@ internal static class UI
 internal abstract class SessionComponent(AppSession session) : Component
 {
     protected AppSession Session { get; } = session;
+    internal int RenderedRevision { get; private set; } = -1;
     protected void UseSession()
     {
         var (_, setRevision) = UseState(Session.Revision);
@@ -157,6 +182,10 @@ internal abstract class SessionComponent(AppSession session) : Component
             Session.Changed += Changed;
             return () => Session.Changed -= Changed;
         }, Session);
+        int revision = Session.Revision;
+        // Reactor flushes effects before reconciling children. Publish the marker on
+        // the next dispatcher turn, after that reconciliation has committed.
+        UseEffect(() => Session.Post(() => RenderedRevision = revision), revision);
     }
 }
 
@@ -195,7 +224,8 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 UI.Glyph("\uE713", "Settings", () => Session.OpenSettings?.Invoke(SettingsPage.Usage))
                     .AutomationId("OpenSettings").Grid(column: 2)
             ).Grid(row: 0).Padding(20, 14),
-            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), body)).Grid(row: 1).Padding(20, 0),
+            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), UI.UpdateNotice(Session), body))
+                .Grid(row: 1).Padding(20, 0),
             Border(VStack(10,
                 Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                     UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12).Grid(column: 0).VAlign(VerticalAlignment.Center),
@@ -215,8 +245,8 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
             account.Percent is { } percent
                 ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName($"{percent:0.##}% of allocation consumed"),
                     UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation").FontSize(12))
-                : UI.Copy("Allocation percentage not available").FontSize(12),
-            UI.EstimateRow(account, account.Key + "_Flyout_"),
+                : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available").FontSize(12),
+            UI.EstimateRow(account, account.Key + "_Flyout_", rightAlignAmount: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
                 Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")
@@ -241,7 +271,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             SettingsPage.Usage => Usage(),
             SettingsPage.Accounts => Accounts(hwnd),
             SettingsPage.Notifications => Notifications(),
-            SettingsPage.About => About(),
+            SettingsPage.About => About(hwnd),
             _ => General(hwnd)
         };
         var navigation = NavigationView(
@@ -254,6 +284,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ], ScrollView(VStack(22,
                 TextBlock(Session.Page.ToString()).FontSize(30).SemiBold(),
                 UI.Feedback(Session),
+                UI.UpdateNotice(Session, onAbout: Session.Page == SettingsPage.About),
                 content
             ).Padding(30, 24)))
             with { SelectedTag = Session.Page.ToString(), IsSettingsVisible = false };
@@ -331,7 +362,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         Button("Open Windows startup settings", () => Session.OpenLink("ms-settings:startupapps", owner))
             .IsEnabled(!Session.Controller.Portable),
         Card(VStack(10, TextBlock("Refresh interval").SemiBold(),
-            UI.Copy("Check each account every 5 to 1440 minutes. The default is one hour."),
+            UI.Copy("Check each account every 5 to 1440 minutes. The default is 10 minutes."),
             TextBox(Session.PollMinutes, value => Session.PollMinutes = value).Width(180)
                 .HAlign(HorizontalAlignment.Left).AutomationName("Refresh interval in minutes"))),
         Card(VStack(12,
@@ -357,7 +388,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         }, $"{account.Name} ({account.Host})").AutomationName($"Include {account.Login} on {account.Host} in tray")
                         .AutomationId("TrayAccount-" + account.Key).WithKey(account.Key)).ToArray()),
             TrayPreview(),
-            UI.Copy("! means a partial roll-up; ? means unavailable. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for the percentage; Usage has all inclusion details.").FontSize(12),
+            UI.Copy("\u221e means unlimited allocation; ! means a partial roll-up; ? means unavailable. Mixed roll-ups show only finite allocations. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for details.").FontSize(12),
             UI.Copy("A neutral icon remains when nothing is selected. Windows controls which icons appear in the notification area or its overflow.").FontSize(12)
         )),
         HStack(10, Button("Save changes", Session.SaveGlobal).AutomationId("SaveGeneralSettings")
@@ -368,6 +399,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     private Element TrayPreview()
     {
         var preview = Session.PreviewTray();
+        string background = $"#{TrayIconRenderer.SystemPalette().Background:X8}";
         return VStack(8,
             TextBlock("Live preview").SemiBold(),
             UI.Copy("Draft choices using current usage. Icons are shown at tray size; apply with Save changes.").FontSize(12),
@@ -380,6 +412,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         .Width(16).Height(16)
                         .AutomationId("TrayPreviewIcon-" + (icon.AccountKey ?? "rollup"))
                         .AutomationName($"{label}: {icon.Details}").ToolTip(icon.Details))
+                        .Background(background)
                         .Padding(2).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0).Grid(column: 0),
                     TextBlock($"{label} - {icon.ValueText}" +
                         (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over allocation)" : ""))
@@ -531,7 +564,8 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.DetailRow("Recorded allocation", account.Details.Unlimited ? "Unlimited" :
             UI.Money(account.Details.ObservedAllocationUsd), idPrefix + "DetailRecordedAllocation"),
         UI.DetailRow("Allocation consumed", account.Details.ObservedPercentConsumed is { } percent ?
-            $"{percent:0.####}%" : "Not available", idPrefix + "DetailRecordedPercent"),
+            $"{percent:0.####}%" : account.Details.Unlimited ? "Not applicable (unlimited allocation)" :
+            "Not available", idPrefix + "DetailRecordedPercent"),
         UI.DetailRow("Last fetched", UI.Timestamp(account.UpdatedAt), idPrefix + "DetailFetched"),
         UI.DetailRow("Source timestamp", UI.Timestamp(account.Details.SourceTimestampUtc, "Not supplied"), idPrefix + "DetailSource"),
         UI.DetailRow("Billing reset", UI.Timestamp(account.Details.ResetAtUtc, "Calendar-month fallback"), idPrefix + "DetailReset"),
@@ -542,9 +576,10 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ? UI.Copy("This observation is from a previous billing period and is excluded from current consumption.") : null
     ).AutomationId(idPrefix + "AccountDiagnosticsTable");
 
-    private static Element About() => VStack(16, UI.Logo(64).HAlign(HorizontalAlignment.Left),
+    private Element About(nint owner) => VStack(16, UI.Logo(64).HAlign(HorizontalAlignment.Left),
         TextBlock("GHCPSpendTray").FontSize(28).SemiBold(),
         UI.Copy($"Version {UI.Version}"),
+        Session.StoreUpdates is { } updates ? UI.StoreUpdateCard(updates, owner) : null,
         UI.Copy("GitHub Copilot consumption, at a glance."),
         UI.Copy("Consumption is the USD value of AI credits used, not an invoice, internal finance budget, or all-product spend."),
         UI.Copy("Built with Microsoft UI Reactor, WinUI 3, and .NET Native AOT. The consumption endpoint is undocumented and may change."),

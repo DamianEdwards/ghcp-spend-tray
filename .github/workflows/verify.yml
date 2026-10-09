@@ -53,11 +53,17 @@ jobs:
           globs: "**/*.{md,markdown}"
 
   tests:
-    name: Windows managed and Native AOT tests
+    name: Windows managed and Native AOT tests (${{ matrix.shard }})
     needs: changes
     if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [Application, CorePlatformShared]
+    env:
+      TEST_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -74,14 +80,32 @@ jobs:
             nuget-${{ runner.os }}-${{ runner.arch }}-tests-
       - name: Verify managed and Native AOT tests
         shell: pwsh
-        run: .\tools\verify.ps1 -NativeTests
+        run: .\tools\verify.ps1 -NativeTests -TestShard $env:TEST_SHARD
 
   package:
-    name: Windows packaging and startup smoke
+    name: Windows packaging and startup smoke (${{ matrix.mode }})
     needs: changes
     if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: self-contained
+            store: false
+            package_directory: msix
+            release_directory: release
+            artifact: unsigned-development-msix
+          - mode: store
+            store: true
+            package_directory: msix-store
+            release_directory: release-store
+            artifact: unsigned-store-msix
+    env:
+      STORE_PACKAGE: ${{ matrix.store }}
+      PACKAGE_DIRECTORY: ${{ matrix.package_directory }}
+      RELEASE_DIRECTORY: ${{ matrix.release_directory }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -99,13 +123,14 @@ jobs:
       - name: Build and validate both MSIX architectures
         shell: pwsh
         run: |
-          .\tools\package.ps1
-          .\tools\test-package-deployment.ps1 -Bundle .\artifacts\release\GHCPSpendTray-0.1.0.msixbundle `
-            -Version 0.1.0 -IdentityName GHCPSpendTray.Development -Publisher 'CN=GHCPSpendTray Development'
-          .\tools\package.ps1 -Store
-          dotnet build src\GHCPSpendTray.App\GHCPSpendTray.App.csproj -c Release -r win-x64 --nologo -v:q
-          if ($LASTEXITCODE -ne 0) { throw 'Default self-contained build failed after Store publishing.' }
-          .\tools\test-package-deployment.ps1 -Store -Bundle .\artifacts\release-store\GHCPSpendTray-0.1.0.msixbundle `
+          $store = [bool]::Parse($env:STORE_PACKAGE)
+          .\tools\package.ps1 -Store:$store
+          if ($store) {
+              dotnet build src\GHCPSpendTray.App\GHCPSpendTray.App.csproj -c Release -r win-x64 --nologo -v:q
+              if ($LASTEXITCODE -ne 0) { throw 'Default self-contained build failed after Store publishing.' }
+          }
+          .\tools\test-package-deployment.ps1 -Store:$store `
+            -Bundle ".\artifacts\$env:RELEASE_DIRECTORY\GHCPSpendTray-0.1.0.msixbundle" `
             -Version 0.1.0 -IdentityName GHCPSpendTray.Development -Publisher 'CN=GHCPSpendTray Development'
       - name: Launch packaged x64 smoke scenarios
         id: package_smoke
@@ -122,40 +147,42 @@ jobs:
               New-Item -Path $unlock -Force | Out-Null
               New-ItemProperty -Path $unlock -Name AllowDevelopmentWithoutDevLicense `
                 -PropertyType DWord -Value 1 -Force | Out-Null
-              $runtime = .\tools\get-windows-app-runtime.ps1 -Architecture x64
-              $installed = Get-AppxPackage -Name $runtime.Name | Where-Object {
-                  $_.Architecture -eq 'X64' -and [version]$_.Version -ge [version]$runtime.MinVersion
+              if ([bool]::Parse($env:STORE_PACKAGE)) {
+                  $runtime = .\tools\get-windows-app-runtime.ps1 -Architecture x64
+                  $installed = Get-AppxPackage -Name $runtime.Name | Where-Object {
+                      $_.Architecture -eq 'X64' -and [version]$_.Version -ge [version]$runtime.MinVersion
+                  }
+                  if (-not $installed) { Add-AppxPackage -Path $runtime.PackagePath }
               }
-              if (-not $installed) { Add-AppxPackage -Path $runtime.PackagePath }
               $makeappx = .\tools\get-windows-sdk-tool.ps1 -Name makeappx.exe
-              foreach ($directory in @('msix', 'msix-store')) {
-                  Write-Output "Packaged smoke: $directory"
-                  $layout = ".\artifacts\package-smoke-$directory"
-                  & $makeappx unpack /p ".\artifacts\$directory\packages\GHCPSpendTray-0.1.0-x64.msix" `
-                    /d $layout /o | Out-Null
-                  if ($LASTEXITCODE -ne 0) { throw "Cannot extract packaged smoke-test payload: $directory" }
-                  .\tools\smoke-test-package.ps1 -Layout $layout `
-                    -DiagnosticsDirectory (Join-Path $logDirectory $directory)
-              }
+              $directory = $env:PACKAGE_DIRECTORY
+              Write-Output "Packaged smoke: $directory"
+              $layout = ".\artifacts\package-smoke-$directory"
+              & $makeappx unpack /p ".\artifacts\$directory\packages\GHCPSpendTray-0.1.0-x64.msix" `
+                /d $layout /o | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Cannot extract packaged smoke-test payload: $directory" }
+              .\tools\smoke-test-package.ps1 -Layout $layout `
+                -DiagnosticsDirectory (Join-Path $logDirectory $directory) -Iterations 3 -Constrained
           }
           finally { Stop-Transcript }
       - name: Retain packaged smoke diagnostics
         if: ${{ always() && steps.package_smoke.outcome != 'skipped' && steps.package_smoke.outcome != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: packaged-smoke-diagnostics
+          name: packaged-smoke-diagnostics-${{ matrix.mode }}
           path: ${{ runner.temp }}/GHCPSpendTray-package-smoke/
           if-no-files-found: warn
           retention-days: 7
-      - name: Retain unsigned development bundle
+      - name: Retain unsigned bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: unsigned-development-msix
-          path: artifacts/release/*.msixbundle
+          name: ${{ matrix.artifact }}
+          path: artifacts/${{ matrix.release_directory }}/*.msixbundle
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
       - name: Exercise Store packaging without credentials or submission
+        if: matrix.store
         shell: pwsh
         run: |
           $publisher = 'CN=11111111-1111-1111-1111-111111111111'
@@ -165,8 +192,8 @@ jobs:
             -Version 0.1.0 -SourceCommit $env:GITHUB_SHA -StoreId 000000000000 `
             -IdentityName GHCPSpendTray.StoreTest -Publisher $publisher -PublisherDisplayName 'Store Test'
 
-  macos:
-    name: macOS 26 / Apple silicon
+  macos_tests:
+    name: macOS 26 / Apple silicon shared tests
     needs: changes
     if: needs.changes.outputs.macos == 'true'
     runs-on: macos-26
@@ -186,9 +213,33 @@ jobs:
           key: nuget-${{ runner.os }}-${{ runner.arch }}-macos-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-${{ runner.arch }}-macos-
-      - name: Verify shared engine, native bridge, arm64 app and synthetic UI
+      - name: Verify shared managed and Native AOT tests
+        run: bash tools/macos/verify.sh --shared-tests
+
+  macos:
+    name: macOS 26 / Apple silicon app and UI
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-macos
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Cache macOS NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-macos-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-macos-
+      - name: Verify native bridge, arm64 app, platform tests and synthetic UI
         id: native_verify
-        run: bash tools/macos/verify.sh
+        run: bash tools/macos/verify.sh --app
       - name: Retain native macOS test diagnostics
         if: ${{ always() && steps.native_verify.outcome != 'skipped' && steps.native_verify.outcome != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -235,7 +286,7 @@ jobs:
 
   verify:
     name: Verification
-    needs: [changes, markdown, tests, package, macos, macos_runtime]
+    needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

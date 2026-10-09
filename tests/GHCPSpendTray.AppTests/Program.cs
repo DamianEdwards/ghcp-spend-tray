@@ -28,7 +28,7 @@ try
     app.Changed += next => Volatile.Write(ref view, next);
     app.SetNotificationHandler(_ => { Interlocked.Increment(ref notifications); return Task.FromResult(true); });
     await app.InitializeAsync();
-    Check(app.Settings.PollMinutes == 60, "exact one-hour default");
+    Check(app.Settings.PollMinutes == 10, "exact ten-minute default");
     Check(app.Portable && !app.Settings.Startup, "portable startup disabled");
     Check(app.Settings.TrayStyle == TrayIconStyle.Pie && app.Settings.TrayMode == TrayDisplayMode.RollUp &&
         app.Settings.ExcludedTrayAccounts!.Length == 0, "initial tray is an all-account roll-up pie");
@@ -460,6 +460,7 @@ try
     foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         Check(!(await File.ReadAllTextAsync(file)).Contains("fixture-", StringComparison.Ordinal), "no token in persisted files");
     assertions += await BackNavigationTests.RunAsync(root);
+    assertions += await StoreUpdateTests.RunAsync();
     assertions += await PeriodEstimateTests.RunAsync(Path.Combine(root, "estimates"));
     assertions += await AccountSignInTests.RunAsync(Path.Combine(root, "sign-in"));
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");

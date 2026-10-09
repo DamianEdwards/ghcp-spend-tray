@@ -3,7 +3,8 @@ using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.Shared;
 
-public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null) : IApplicationController
+public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null,
+    bool unlimited = false) : IApplicationController
 {
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly List<AccountView> _examples = [];
@@ -12,7 +13,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public string DataDirectory => directory;
     public bool Portable => true;
     public event Action<DashboardView>? Changed;
-    public SettingsView Settings { get; private set; } = new(60, "50, 80, 100", true, false);
+    public SettingsView Settings { get; private set; } = new(10, "50, 80, 100", true, false);
     public Task InitializeAsync() => RefreshAsync();
     public Task RefreshAsync(string? accountKey = null)
     {
@@ -24,7 +25,11 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             return Task.CompletedTask;
         }
         List<AccountView> views = [];
-        if (!empty) views.AddRange([
+        if (!empty && unlimited)
+            views.Add(new("github.com:1", "Unlimited (demo)", "demo-unlimited", "github.com",
+                new(2625m, 26.25m, null, null, true, now, null, now.AddHours(1), "synthetic", true, null),
+                null, 26.25m, null, "Fresh", now));
+        else if (!empty) views.AddRange([
             new("github.com:1", "Personal (demo)", "demo-user", "github.com",
                 new(2625m, 26.25m, 25m, 105m, false, now, null, now.AddHours(1), "synthetic", true, null), 105m,
                 26.25m, 25m, "Fresh", now),
@@ -58,6 +63,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             {
                 AccountKey = a.Key, FetchedAtUtc = now, SourceTimestampUtc = now, PeriodId = BillingPeriods.Resolve(now, null),
                 CreditsUsed = dashboard.Accounts[i].Details.CreditsUsed!.Value,
+                Unlimited = dashboard.Accounts[i].Details.Unlimited,
                 Entitlement = dashboard.Accounts[i].AllocationUsd * 100,
                 ConsumptionUsd = dashboard.Accounts[i].ConsumptionUsd!.Value,
                 AllocationUsd = dashboard.Accounts[i].AllocationUsd, PercentConsumed = dashboard.Accounts[i].Percent
@@ -80,7 +86,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public Task AddExampleAccountAsync()
     {
         var now = _time.GetUtcNow();
-        string id = (_examples.Count + (empty ? 1 : 3)).ToString(CultureInfo.InvariantCulture);
+        string id = (_examples.Count + (empty ? 1 : unlimited ? 2 : 3)).ToString(CultureInfo.InvariantCulture);
         _examples.Add(new($"github.com:{id}", $"Example {id} (demo)", $"demo-example-{id}", "github.com",
             new(1250m, 12.5m, 50m, 25m, false, now, null, now.AddHours(1), "synthetic", true, null),
             25m, 12.5m, 50m, "Fresh", now));
@@ -106,8 +112,8 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key)
     {
         if (_preferences.TryGetValue(key, out var preferences)) return preferences;
-        if (key is "github.com:1" && !empty) return ("Personal (demo)", "", null, false);
-        if (key is "example.ghe.com:2" && !empty) return ("Work (demo)", "", null, false);
+        if (key is "github.com:1" && !empty) return (unlimited ? "Unlimited (demo)" : "Personal (demo)", "", null, false);
+        if (key is "example.ghe.com:2" && !empty && !unlimited) return ("Work (demo)", "", null, false);
         var example = _examples.SingleOrDefault(account => account.Key == key)
             ?? throw new AppOperationException("That account is no longer configured.");
         return (example.Name, "", null, false);

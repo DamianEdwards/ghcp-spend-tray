@@ -1,18 +1,27 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+case "$#:${1:-}" in
+    0:) verification=all ;;
+    1:--shared-tests) verification=shared-tests ;;
+    1:--app) verification=app ;;
+    *) echo "Usage: $0 [--shared-tests|--app]" >&2; exit 2 ;;
+esac
 source tools/macos/sdk.sh
 python3 tools/macos/architecture.py host
 rid=osx-arm64
-python3 -m unittest discover -s tools/ci -p 'test_*.py'
-python3 -m unittest discover -s tools/release -p 'test_*.py'
-python3 -m unittest discover -s tools/macos -p 'test_*.py'
-for name in GHCPSpendTray.Tests GHCPSpendTray.SharedTests; do
-    dotnet run --project "tests/$name" -c Release | tail -n 1
-    dotnet publish "tests/$name" -c Release -r "$rid" -p:PublishAot=true \
-        -p:IlcTreatWarningsAsErrors=true -o "artifacts/tests/$rid/$name" --nologo -v:q
-    "artifacts/tests/$rid/$name/$name" | tail -n 1
-done
+if [[ "$verification" != app ]]; then
+    python3 -m unittest discover -s tools/ci -p 'test_*.py'
+    python3 -m unittest discover -s tools/release -p 'test_*.py'
+    python3 -m unittest discover -s tools/macos -p 'test_*.py'
+    for name in GHCPSpendTray.Tests GHCPSpendTray.SharedTests; do
+        dotnet run --project "tests/$name" -c Release | tail -n 1
+        dotnet publish "tests/$name" -c Release -r "$rid" -p:PublishAot=true \
+            -p:IlcTreatWarningsAsErrors=true -o "artifacts/tests/$rid/$name" --nologo -v:q
+        "artifacts/tests/$rid/$name/$name" | tail -n 1
+    done
+fi
+if [[ "$verification" == shared-tests ]]; then exit 0; fi
 bash tools/macos/build.sh
 source tools/macos/sparkle.sh
 xcrun swiftc -swift-version 6 -warnings-as-errors -O \

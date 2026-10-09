@@ -47,6 +47,11 @@ Requires Windows 11 22H2 (build 22621) or newer on x64 or ARM64.
 Install [GHCPSpendTray from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295),
 then start it from the Start menu. It stays in the notification area.
 
+Store-installed copies automatically check for updates. Click an update
+notification to open **Settings > About**, then select **Update** to install
+and restart the app. If no update is available, About shows that you're running
+the latest version.
+
 Alternatively, download `GHCPSpendTray-<version>.msixbundle` from
 [GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases),
 open the signed bundle in Windows App Installer, and select **Install**.
@@ -119,6 +124,16 @@ Each platform has `no release`, `Major`, `Minor`, or `Patch` choices (default
 is `0.0.0`, making the default first release `0.1.0`.
 See [release setup and retry rules](docs/RELEASING.md).
 
+To preview unlimited quota on Windows without accessing real accounts, run a
+development build with an isolated data directory:
+
+```powershell
+.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-unlimited --portable --data-dir C:\Temp\ghcp-unlimited-preview
+```
+
+This starts one synthetic unlimited account, disables authentication and
+notifications, and keeps sample settings in memory.
+
 ## Connect an account
 
 1. Open the tray flyout and choose the connect button, or open
@@ -169,8 +184,10 @@ unavailable data rather than treating it as zero. See
 
 ## Use and notifications
 
-On Windows, left-click the tray icon to toggle the flyout or double-click it to open
-**Settings > Usage**; right-click it for **Open**,
+On Windows, left-click the tray icon to toggle the flyout immediately. Open
+**Settings > Usage** with the flyout's gear or the right-click **Settings** action.
+There is no double-click shortcut; rapid clicks remain ordinary selections.
+Right-click the icon for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,
 and a manual refresh action. With no accounts connected, Usage instead shows a
@@ -179,7 +196,7 @@ simple **Add account** prompt without empty totals, diagnostics, or refresh cont
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
-is 60 minutes (configurable from 5 to 1440), and the default allocation alerts
+is 10 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
 
 In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
@@ -201,7 +218,13 @@ eligible allocation**, not an average of account percentages. Only valid, fresh,
 current-period observations with known, finite positive allocation qualify.
 Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
 excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
-available, not zero. On macOS, an unavailable pie stays an empty outline with
+available, not zero. Fresh unlimited accounts show an infinity sign in either
+icon style, with an **Unlimited allocation** tooltip. A roll-up shows infinity
+when its usable accounts are all unlimited; unavailable accounts still cause a
+partial `!` badge. Mixed finite/unlimited roll-ups retain the finite accounts'
+weighted percentage and identify unlimited accounts in the details. Stale or
+failed unlimited observations remain unavailable, never infinity.
+On macOS, an unavailable pie stays an empty outline with
 an `!` badge; percentage mode still shows `?`. The badged empty pie does not
 mean 0% usage. Hover for the percentage and included/selected counts;
 **Settings > Usage** lists every selected account and its inclusion or exclusion
@@ -307,7 +330,12 @@ Set-Location ghcp-spend-tray
 
 `verify.ps1 -NativeTests` also runs the test suites under executed x64 Native
 AOT. Run build and publish commands sequentially because they share
-intermediates. Local `package.ps1` output is an **unsigned development bundle**,
+intermediates. CI runs `-TestShard Application` and `-TestShard CorePlatformShared`
+on separate runners; together they retain all four harnesses and the full
+solution build. Omitting `-TestShard` still runs all checks locally.
+Self-contained and Store packaging also run independently, each publishing
+and validating both architectures and exercising populated/empty packaged x64
+startup. Local `package.ps1` output is an **unsigned development bundle**,
 not the signed public release. For isolated synthetic UI checks, see
 [`VALIDATION.md`](docs/VALIDATION.md); for release and signing details, see
 [`RELEASING.md`](docs/RELEASING.md).
@@ -334,8 +362,11 @@ named synthetic item; it never reads account credentials or enables login
 startup. The resulting app is ad-hoc signed for local development only.
 `bash tools/macos/build.sh` builds without running tests. If using a preview
 toolchain, select a stable SDK with `SDKROOT`; see [release documentation](docs/RELEASING.md).
-CI builds once on macOS 26 / Apple silicon, then tests that exact artifact
-on macOS 15 / Apple silicon without rebuilding.
+CI runs `verify.sh --shared-tests` and `verify.sh --app` on separate macOS 26 /
+Apple silicon runners. The app lane builds once and exercises native platform/UI
+tests; macOS 15 tests that exact artifact without rebuilding or waiting for the
+independent shared-test lane. Both lanes and the runtime check are required.
+Omitting the flag still runs complete local verification sequentially.
 
 To run an empty, isolated preview alongside an installed release:
 
@@ -348,8 +379,10 @@ open -n artifacts/macos/GHCPSpendTray.app --args --demo-empty --data-dir "$previ
 check its live resizing and position without signing in. The button appears
 only in sample mode, both before and after adding examples. Each click adds
 one account; examples last only for that process and are not saved. Use
-`--demo` instead of `--demo-empty` to start with the existing sample accounts.
-Both modes require a separate data directory and disable authentication,
+`--demo` instead of `--demo-empty` to start with the existing sample accounts,
+or `--demo-unlimited` for one synthetic account with unlimited allocation and
+an infinity menu-bar indicator.
+All demo modes require a separate data directory and disable authentication,
 notifications, and launch-at-login changes; they do not access saved accounts
 or credentials.
 

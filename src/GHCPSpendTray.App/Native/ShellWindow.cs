@@ -46,7 +46,7 @@ internal abstract unsafe class ShellWindow : IDisposable
         }
         catch (Exception ex)
         {
-            Diagnostics.Record($"Shell callback failed ({ex.GetType().Name}).");
+            Diagnostics.RecordFailure($"Shell callback failed (message 0x{message:X})", ex);
             Win32.MessageBox(0, "A tray operation failed. Check the diagnostic log.", "GHCPSpendTray", Win32.MB_ICONERROR);
         }
         return Win32.DefWindowProc(hwnd, message, wParam, lParam);

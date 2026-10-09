@@ -296,7 +296,8 @@ struct AccountDiagnosticsView: View {
                 row("Credits used (observed)", decimalText(account.details.creditsUsed).isEmpty ? "Unavailable" : decimalText(account.details.creditsUsed))
                 row("Consumption (observed)", money(account.details.observedConsumptionUsd))
                 row("Allocation (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
-                row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ?? "Unavailable")
+                row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ??
+                    (account.details.unlimited ? "Not applicable (unlimited allocation)" : "Unavailable"))
                 row("Current billing period", account.details.isCurrentPeriod ? "Yes" : "No")
                 row("Last fetched", dateText(account.updatedAt))
                 row("Source timestamp", dateText(account.details.sourceTimestampUtc))
@@ -452,7 +453,7 @@ struct AccountEditor: View {
 struct PreferencesView: View {
     @ObservedObject var model: AppModel
     let notifications: Bool
-    @State private var minutes = "60"
+    @State private var minutes = "10"
     @State private var thresholds = "50, 80, 100"
     @State private var increment = ""
     @State private var enabled = true
@@ -501,7 +502,7 @@ struct PreferencesView: View {
                 Section("General") {
                     TextField("Refresh interval (minutes)", text: $minutes)
                         .textFieldStyle(.roundedBorder)
-                    Text("From 5 to 1440 minutes; default 60.").font(.caption).foregroundStyle(.secondary)
+                    Text("From 5 to 1440 minutes; default 10.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Launch at login", isOn: $startup).disabled(model.settings?.canChangeStartup != true || model.demo)
                     Text(model.settings?.startupDescription ?? "").font(.caption).foregroundStyle(.secondary)
                     Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() }.disabled(model.demo)
@@ -538,7 +539,7 @@ struct PreferencesView: View {
                             }
                         }
                     }
-                    Text("Preview changes apply to the menu bar only after Save. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over allocation. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover over an icon for details.")
+                    Text("Preview changes apply to the menu bar only after Save. \u{221e} means unlimited allocation; mixed roll-ups show only finite allocations. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over allocation. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover for details.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("A neutral icon remains when nothing is selected. macOS may hide icons on a crowded menu bar; reopen GHCPSpendTray to access Settings.")
                         .font(.caption).foregroundStyle(.secondary)

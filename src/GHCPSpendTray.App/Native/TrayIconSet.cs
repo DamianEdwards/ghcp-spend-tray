@@ -42,6 +42,11 @@ internal sealed class TrayIconSet(nint owner, string? portableDirectory, TrayIco
         }
     }
 
+    internal void Invalidate()
+    {
+        foreach (var icon in _icons.Values) icon.Invalidate();
+    }
+
     internal void Restore()
     {
         Win32Exception? failure = null;

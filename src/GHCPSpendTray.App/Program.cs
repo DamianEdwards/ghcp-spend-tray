@@ -12,6 +12,8 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Diagnostics;
+using Microsoft.UI.Dispatching;
 
 namespace GHCPSpendTray.App;
 
@@ -23,8 +25,10 @@ internal static class Program
         bool packageSmoke = args.Contains("--package-smoke-test", StringComparer.Ordinal);
         bool smoke = packageSmoke || args.Contains("--smoke-test", StringComparer.Ordinal);
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
-        bool demo = smoke || emptyDemo || args.Contains("--demo", StringComparer.Ordinal);
-        string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and not "--demo" and not "--demo-empty").ToArray();
+        bool unlimitedDemo = args.Contains("--demo-unlimited", StringComparer.Ordinal);
+        bool demo = smoke || emptyDemo || unlimitedDemo || args.Contains("--demo", StringComparer.Ordinal);
+        string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and
+            not "--demo" and not "--demo-empty" and not "--demo-unlimited").ToArray();
         try
         {
             if (packageSmoke && (!PackageContext.IsPackaged ||
@@ -43,7 +47,8 @@ internal static class Program
             }
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
-            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime) :
+            var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
+            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo) :
                 new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
             int smokeExit = 0;
             ReactorShell? shell = null;
@@ -53,7 +58,7 @@ internal static class Program
                 ReactorApp.Run(context =>
                 {
                     if (smoke) RecordSmokePhase(runtime.DataDirectory, "Reactor initialized; creating tray shell");
-                    shell = new ReactorShell(controller);
+                    shell = new ReactorShell(controller, storeUpdates: !demo, updateService: smokeUpdates);
                     Application.Current.UnhandledException += (_, e) =>
                     {
                         Diagnostics.Record($"Reactor dispatch failed ({e.Exception.GetType().Name}).");
@@ -71,7 +76,7 @@ internal static class Program
                     shell.Start(!smoke && !runtime.IsStartup);
                     runtime.SignalReady();
                     if (smoke) RecordSmokePhase(runtime.DataDirectory, "Tray shell ready; starting synthetic smoke");
-                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, code => smokeExit = code);
+                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, smokeUpdates!, code => smokeExit = code);
                 });
             }
             finally { shell?.Dispose(); }
@@ -91,7 +96,8 @@ internal static class Program
         File.AppendAllText(Path.Combine(directory, "native-smoke-progress.txt"),
             $"{DateTimeOffset.UtcNow:O} {phase}{Environment.NewLine}");
 
-    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time, Action<int> setExit)
+    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time,
+        SmokeStoreUpdates updates, Action<int> setExit)
     {
         try
         {
@@ -105,45 +111,43 @@ internal static class Program
                     throw new InvalidOperationException("Packaged smoke test did not use package-local storage.");
             }
             RecordSmokePhase(directory, "Testing tray mouse/keyboard activation and settings navigation");
-            await Task.Delay(1800);
+            await WaitForUI(shell, "controller initialization", () => shell.Session.Initialized && !shell.Session.Busy);
             await OnUI(shell, () =>
             {
                 if (shell.Flyout is not null) throw new InvalidOperationException("Hidden startup unexpectedly opened a window.");
-                SendTraySelection(shell, 0x400);
+                SendTraySelection(shell, 0x201);
+                SendTraySelection(shell, Win32.NIN_SELECT);
+                SendTraySelection(shell, 0x202);
             });
             await WaitForFlyoutVisibility(shell, true, "after mouse single-click");
             await OnUI(shell, () =>
             {
                 AssertFlyoutVisible(shell, "after mouse single-click");
-                SendTraySelection(shell, 0x400);
+                SendTraySelection(shell, Win32.NIN_SELECT);
             });
             await WaitForFlyoutVisibility(shell, false, "after mouse click on open flyout");
-            await OnUI(shell, () => SendTraySelection(shell, 0x401));
+            await OnUI(shell, () => SendTraySelection(shell, Win32.NIN_KEYSELECT));
             await WaitForFlyoutVisibility(shell, true, "after keyboard selection");
-            await OnUI(shell, () => SendTraySelection(shell, 0x401));
+            await OnUI(shell, () => SendTraySelection(shell, Win32.NIN_KEYSELECT));
             await WaitForFlyoutVisibility(shell, false, "after keyboard selection toggled closed");
             await OnUI(shell, () =>
             {
-                SendTraySelection(shell, 0x400);
+                SendTraySelection(shell, Win32.NIN_SELECT);
                 SendTraySelection(shell, 0x203);
-                SendTraySelection(shell, 0x400);
-                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0 || shell.SettingsWindow is null)
-                    throw new InvalidOperationException("Double-click flashed the flyout instead of opening settings.");
+                SendTraySelection(shell, Win32.NIN_SELECT);
+                Win32.SendMessage(shell.TrayHandle, 0x113, 1, 0);
             });
-            await Task.Delay(checked((int)Win32.GetDoubleClickTime()) + 150);
             await OnUI(shell, () =>
             {
-                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
-                    throw new InvalidOperationException("Double-click's pending single click opened the flyout.");
-                shell.Session.Navigate(SettingsPage.Notifications);
-                SendTraySelection(shell, 0x400);
-                SendTraySelection(shell, 0x400);
-                if (shell.Session.Page != SettingsPage.Usage ||
-                    Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
-                    throw new InvalidOperationException("Two mouse selections did not open usage settings.");
-                shell.ShowSettings(SettingsPage.Usage);
+                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0 || shell.SettingsWindow is not null)
+                    throw new InvalidOperationException("Double-click must remain two ordinary toggles, without opening settings.");
+                SendTraySelection(shell, Win32.NIN_KEYSELECT);
             });
-            await Task.Delay(checked((int)Win32.GetDoubleClickTime()) + 150);
+            await WaitForFlyoutVisibility(shell, true, "before opening settings from the gear");
+            await WaitForFlyoutUI(shell, "settings gear");
+            await InvokeButtonAsync(shell, "OpenSettings", flyout: true);
+            await WaitForSettingsUI(shell, "usage settings from the gear");
+            bool empty = shell.Session.Dashboard.Accounts.Count == 0;
             await OnUI(shell, () =>
             {
                 if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
@@ -160,11 +164,6 @@ internal static class Program
                         Find(shell.SettingsWindow!, "TrayUsageDetails") is not null ||
                         Find(shell.SettingsWindow!, "RefreshUsage") is not null)
                         throw new InvalidOperationException("Empty usage showed consumption details or refresh controls.");
-                    InvokeButton(add);
-                    if (shell.Session.Page != SettingsPage.Accounts || !shell.Session.ShowAddForm)
-                        throw new InvalidOperationException("Usage empty-state action did not open account setup.");
-                    shell.Session.TryGoBack();
-                    shell.Session.Navigate(SettingsPage.Usage);
                 }
                 else
                 {
@@ -172,17 +171,31 @@ internal static class Program
                         throw new InvalidOperationException("Usage summary did not render.");
                     if (Find(shell.SettingsWindow!, "RefreshUsage") is not Button refresh || !refresh.IsEnabled)
                         throw new InvalidOperationException("Usage refresh control did not render.");
-                    InvokeButton(refresh);
                 }
                 if (Find(shell.SettingsWindow!, "AccountHistory") is not null)
                     throw new InvalidOperationException("Usage page still displayed sampled spending history.");
             });
+            await InvokeButtonAsync(shell, empty ? "UsageAddAccount" : "RefreshUsage");
+            await WaitForSettingsUI(shell, empty ? "empty Usage account setup" : "Usage refresh");
+            await OnUI(shell, () =>
+            {
+                if (empty)
+                {
+                    if (shell.Session.Page != SettingsPage.Accounts || !shell.Session.ShowAddForm ||
+                        Find(shell.SettingsWindow!, "AccountOnboarding") is null)
+                        throw new InvalidOperationException("Usage empty-state action did not open account setup.");
+                    shell.Session.TryGoBack();
+                    shell.Session.Navigate(SettingsPage.Usage);
+                }
+            });
+            await WaitForSettingsUI(shell, "Usage after empty-state navigation");
             RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
             await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
             RecordSmokePhase(directory, "Testing flyout focus transitions and account onboarding");
-            await OnUI(shell, () => SendTraySelection(shell, 0x401));
-            await Task.Delay(250);
+            await OnUI(shell, () => SendTraySelection(shell, Win32.NIN_KEYSELECT));
+            await WaitForFlyoutVisibility(shell, true, "after opening from settings");
+            await WaitForFlyoutUI(shell, "flyout from settings");
             await OnUI(shell, () =>
             {
                 AssertFlyoutVisible(shell, "after opening from settings");
@@ -190,7 +203,7 @@ internal static class Program
                 shell.SettingsWindow!.Activate();
                 shell.ShowFlyout();
             });
-            await Task.Delay(250);
+            await WaitForFlyoutUI(shell, "rapid focus transition");
             await OnUI(shell, () =>
             {
                 AssertFlyoutVisible(shell, "after rapid focus transition");
@@ -200,7 +213,6 @@ internal static class Program
                 {
                     if (Find(flyout, "AddFirstAccount") is not Button connect)
                         throw new InvalidOperationException("Empty-state connect action did not render.");
-                    InvokeButton(connect);
                 }
                 else if (Find(flyout, "TotalConsumption") is not TextBlock { Text: "$42.75" })
                     throw new InvalidOperationException("Reactor cost display did not render.");
@@ -209,16 +221,16 @@ internal static class Program
                     if (Find(flyout, "AccountAvatar-" + shell.Session.Dashboard.Accounts[0].Key) is not PersonPicture)
                         throw new InvalidOperationException("Flyout account picture did not render.");
                     if (Find(flyout, "OpenSettings") is not Button settings) throw new InvalidOperationException("Settings gear is missing.");
-                    InvokeButton(settings);
                 }
             });
-            await Task.Delay(700);
+            await InvokeButtonAsync(shell, empty ? "AddFirstAccount" : "OpenSettings", flyout: true);
+            await WaitForSettingsUI(shell, "flyout settings/account setup action");
             await OnUI(shell, () =>
             {
                 if (shell.SettingsWindow is null) throw new InvalidOperationException("Settings action did not open a window.");
                 if (shell.Session.Dashboard.Accounts.Count != 0) shell.Session.Navigate(SettingsPage.Accounts);
             });
-            await Task.Delay(500);
+            await WaitForSettingsUI(shell, "accounts list");
             await OnUI(shell, () =>
             {
                 if (shell.Session.Dashboard.Accounts.Count == 0) return;
@@ -226,7 +238,7 @@ internal static class Program
                     throw new InvalidOperationException("Settings account picture did not render.");
                 shell.Session.AddAccount();
             });
-            await Task.Delay(500);
+            await WaitForSettingsUI(shell, "add-account deep link");
             await OnUI(shell, () =>
             {
                 var settings = shell.SettingsWindow ?? throw new InvalidOperationException("Settings did not open.");
@@ -234,9 +246,9 @@ internal static class Program
                     Find(settings, "ChangeSignInHost") is not Button changeHost ||
                     Find(settings, "AccountIdentityConfirmation") is not null)
                     throw new InvalidOperationException("Add-account deep link did not render.");
-                InvokeButton(changeHost);
             });
-            await Task.Delay(300);
+            await InvokeButtonAsync(shell, "ChangeSignInHost");
+            await WaitForSettingsUI(shell, "change sign-in host");
             await OnUI(shell, () =>
             {
                 var settings = shell.SettingsWindow!;
@@ -244,9 +256,9 @@ internal static class Program
                     throw new InvalidOperationException("Change host did not expose host-specific sign-in settings.");
                 if (Find(settings, "AccountBack") is not Button back)
                     throw new InvalidOperationException("Onboarding Back action did not render.");
-                InvokeButton(back);
             });
-            await Task.Delay(300);
+            await InvokeButtonAsync(shell, "AccountBack");
+            await WaitForSettingsUI(shell, "onboarding Back");
             await OnUI(shell, () =>
             {
                 if (shell.Session.ShowAddForm || shell.Session.CanGoBack ||
@@ -255,11 +267,11 @@ internal static class Program
                 AssertBackAccelerators(shell.SettingsWindow!);
                 shell.Session.Navigate(SettingsPage.Notifications);
             });
-            await Task.Delay(500);
+            await WaitForSettingsUI(shell, "Notifications navigation");
             if (shell.Session.Dashboard.Accounts.Count > 0)
             {
                 await OnUI(shell, () => shell.Session.EditAccount(shell.Session.Dashboard.Accounts[0].Key));
-                await Task.Delay(500);
+                await WaitForSettingsUI(shell, "account details");
                 await OnUI(shell, () =>
                 {
                     var settings = shell.SettingsWindow!;
@@ -277,45 +289,48 @@ internal static class Program
                         throw new InvalidOperationException("Advanced disclosure is not accessible.");
                     expand.Expand();
                 });
-                await Task.Delay(500);
+                await WaitForSettingsUI(shell, "expanded account diagnostics");
                 await OnUI(shell, () =>
                 {
                     if (Find(shell.SettingsWindow!, "DetailCredits") is not TextBlock { Text: "2,625" })
                         throw new InvalidOperationException("Expanded account details did not expose labeled data.");
                     if (Find(shell.SettingsWindow!, "AccountBack") is not Button back)
                         throw new InvalidOperationException("Account details Back action did not render.");
-                    InvokeButton(back);
                 });
-                await Task.Delay(300);
+                await InvokeButtonAsync(shell, "AccountBack");
+                await WaitForSettingsUI(shell, "account details Back");
                 await OnUI(shell, () =>
                 {
                     if (shell.Session.SelectedAccount is not null || shell.Session.CanGoBack)
                         throw new InvalidOperationException("Account details Back did not return to accounts.");
                     shell.Session.Navigate(SettingsPage.Notifications);
                 });
-                await Task.Delay(300);
+                await WaitForSettingsUI(shell, "Notifications after account Back");
             }
             RecordSmokePhase(directory, "Testing tray settings, preview and callback lifecycle");
             await SmokeTraySettingsAsync(shell);
             RecordSmokePhase(directory, "Testing settings close/reopen and native notification/credentials");
             await OnUI(shell, () => shell.SettingsWindow!.NativeWindow.Close());
-            await Task.Delay(300);
+            await WaitForUI(shell, "settings close", () => shell.SettingsWindow is null);
             await OnUI(shell, () =>
             {
                 if (shell.SettingsWindow is not null || shell.Session.CanGoBack)
                     throw new InvalidOperationException("Closing settings retained its window or Back target.");
                 shell.ShowSettings(SettingsPage.Notifications);
             });
-            await Task.Delay(300);
+            await WaitForSettingsUI(shell, "reopened Notifications settings");
+            RecordSmokePhase(directory, "Testing synthetic Store update About controls");
+            await SmokeStoreUpdatesAsync(shell, updates);
             await OnUI(shell, () =>
             {
                 AssertBackAccelerators(shell.SettingsWindow!);
-                if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
+                if (shell.Session.Page != SettingsPage.About) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 RecordSmokePhase(directory, "All synthetic smoke assertions passed; exiting Reactor");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
-                    "PASS: mouse/keyboard tray toggle, double-click settings without flyout flash, hide/reopen and focus transitions, " +
+                    "PASS: immediate semantic mouse/keyboard tray toggle, raw mouse callbacks ignored, no double-click shortcut, " +
+                    "popup settings gear, hide/reopen and focus transitions, synchronized automation and committed UI layout, " +
                     "Reactor cost flyout, usage-first settings without sampled chart, independent collapsed account diagnostics, " +
                     "per-account estimate opt-in/off/unavailable, UTC disclosure and unchanged observed totals/tray, " +
                     "account avatars and diagnostics, add-account deep link, " +
@@ -323,6 +338,7 @@ internal static class Program
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
                     "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
                     "simulated TaskbarCreated recovery and display-change repaint, " +
+                    "synthetic Store latest/update About controls, native update notification opens About, consent cancellation and retry, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -335,6 +351,88 @@ internal static class Program
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
+    }
+    private sealed class SmokeStoreUpdates : IStoreUpdates
+    {
+        internal bool Available { get; set; }
+        internal int Installs { get; private set; }
+        public Task<bool> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(Available);
+        public Task<StoreInstallResult> InstallAsync(nint owner, Action<StoreUpdateProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            if (owner == 0) throw new InvalidOperationException("Synthetic Store request has no owner HWND.");
+            Installs++;
+            return Task.FromResult(StoreInstallResult.Canceled);
+        }
+        public void Restart() => throw new InvalidOperationException("Synthetic canceled update must not restart.");
+    }
+    private static async Task SmokeStoreUpdatesAsync(ReactorShell shell, SmokeStoreUpdates updates)
+    {
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.About));
+        await WaitForSettingsUI(shell, "Store latest-version About");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "You're running the latest version." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not null)
+                throw new InvalidOperationException("Current Store app must show latest-version status without an Update button.");
+            updates.Available = true;
+            shell.Session.StoreUpdates!.Check(force: true);
+        });
+        await WaitForSettingsUI(shell, "Store update available");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "An update is available." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { Content: "Update", IsEnabled: true })
+                throw new InvalidOperationException("Available Store update must render its enabled Update action.");
+            shell.Session.Navigate(SettingsPage.Usage);
+            shell.SettingsWindow!.NativeWindow.Close();
+        });
+        await WaitForUI(shell, "settings closed before notification click", () => shell.SettingsWindow is null);
+        await OnUI(shell, () =>
+        {
+            var icon = shell.TrayIcons.Single(icon => icon.NotificationAccount == "store-update");
+            Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0,
+                (nint)((icon.Id << 16) | (uint)Win32.NIN_BALLOONUSERCLICK));
+        });
+        await WaitForSettingsUI(shell, "native Store notification opens About");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Page != SettingsPage.About ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("Clicking the Store update notification must open About with its Update action.");
+        });
+        await InvokeButtonAsync(shell, "InstallStoreUpdate");
+        await WaitForSettingsUI(shell, "Store consent cancellation");
+        await OnUI(shell, () =>
+        {
+            if (updates.Installs != 1 || shell.Session.StoreUpdates!.Updating ||
+                Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Update canceled. You can try again." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("Canceled Store consent must leave a retryable Update action.");
+            shell.Session.Navigate(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "Store update in-app notice");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "ViewStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("An available update must be discoverable outside About.");
+        });
+        await InvokeButtonAsync(shell, "ViewStoreUpdate");
+        await WaitForSettingsUI(shell, "Store update notice opens About");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Page != SettingsPage.About)
+                throw new InvalidOperationException("Update notice did not open About.");
+            updates.Available = false;
+            shell.Session.StoreUpdates!.Check(force: true);
+        });
+        await WaitForSettingsUI(shell, "Store update cleared externally");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "You're running the latest version." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not null)
+                throw new InvalidOperationException("A cleared Store update must remove the Update action.");
+        });
     }
     private sealed class SmokeTimeProvider : TimeProvider
     {
@@ -351,7 +449,7 @@ internal static class Program
         var trayBefore = shell.Session.Dashboard.Tray!.RollUp;
         string amount = UI.UI.ApproximateMoney(26.25m * (start.AddMonths(1) - start).Days / 3m);
         await OnUI(shell, () => shell.Session.EditAccount(key));
-        await Task.Delay(150);
+        await WaitForSettingsUI(shell, "account estimate preferences");
         await OnUI(shell, () =>
         {
             var window = shell.SettingsWindow!;
@@ -361,14 +459,14 @@ internal static class Program
             time.Now = start.AddDays(3);
             preference.IsChecked = true;
         });
-        await Task.Delay(100);
+        await WaitForSettingsUI(shell, "draft estimate opt-in");
         await OnUI(shell, () =>
         {
             if (shell.Session.Controller.AccountSettings(key).ShowPeriodEstimate ||
                 Find(shell.SettingsWindow!, "PeriodEstimate") is not null)
                 throw new InvalidOperationException("Draft forecast opt-in changed saved usage before Save.");
-            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveAccount")!);
         });
+        await InvokeButtonAsync(shell, "SaveAccount");
         phase("Estimates: saving opt-in and checking account row");
         await WaitForAccountSave();
         await OnUI(shell, () =>
@@ -383,14 +481,14 @@ internal static class Program
                 throw new InvalidOperationException("Estimate row, collapsed disclosure or observed usage contract failed.");
             ExpandDetails(window, "AdvancedAccountDetails");
         });
-        await Task.Delay(150);
+        await WaitForSettingsUI(shell, "expanded estimate details");
         phase("Estimates: checking expanded account details");
         await OnUI(shell, () =>
         {
             AssertEstimateDisclosure(shell.SettingsWindow!, "", amount);
             shell.Session.Navigate(SettingsPage.Usage);
         });
-        await Task.Delay(100);
+        await WaitForSettingsUI(shell, "Usage estimate row");
         phase("Estimates: checking Usage row");
         await OnUI(shell, () =>
         {
@@ -399,7 +497,7 @@ internal static class Program
                 throw new InvalidOperationException("Usage estimates are missing or not independently opt-in.");
             ExpandDetails(shell.SettingsWindow!, key + "_AdvancedAccountDetails");
         });
-        await Task.Delay(150);
+        await WaitForSettingsUI(shell, "expanded Usage estimate details");
         phase("Estimates: checking expanded Usage details");
         await OnUI(shell, () =>
         {
@@ -408,10 +506,10 @@ internal static class Program
         });
         await WaitForFlyoutVisibility(shell, true, "with account estimate enabled");
         phase("Estimates: checking flyout row");
-        await Task.Delay(100);
+        await WaitForFlyoutUI(shell, "flyout estimate row");
         await OnUI(shell, () =>
         {
-            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount);
+            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount, rightAlignAmount: true);
             if (Find(shell.Flyout!, "example.ghe.com:2_Flyout_PeriodEstimate") is not null ||
                 Find(shell.Flyout!, "TotalConsumption") is not TextBlock { Text: "$42.75" })
                 throw new InvalidOperationException("Flyout estimate changed observed totals or another account.");
@@ -433,7 +531,7 @@ internal static class Program
             preference.IsChecked = false;
             ExpandDetails(window, "AdvancedAccountDetails");
         });
-        await Task.Delay(150);
+        await WaitForSettingsUI(shell, "expanded unavailable estimate reason");
         phase("Estimates: checking expanded unavailable reason");
         await OnUI(shell, () =>
         {
@@ -441,13 +539,13 @@ internal static class Program
             if (Find(shell.SettingsWindow!, "PeriodEstimateUnavailable") is not TextBlock reason || !reason.Text.Contains("24 hours"))
                 throw new InvalidOperationException("Expanded estimate details lost the unavailable reason.");
         });
-        await Task.Delay(100);
+        await WaitForSettingsUI(shell, "draft estimate disable");
         await OnUI(shell, () =>
         {
             if (Find(shell.SettingsWindow!, "PeriodEstimate") is null)
                 throw new InvalidOperationException("Draft disable hid the forecast before Save.");
-            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveAccount")!);
         });
+        await InvokeButtonAsync(shell, "SaveAccount");
         phase("Estimates: saving explicit disable");
         await WaitForAccountSave();
         await OnUI(shell, () =>
@@ -460,7 +558,7 @@ internal static class Program
         });
         await WaitForIdle();
         await OnUI(shell, () => shell.Session.Navigate(SettingsPage.Usage));
-        await Task.Delay(100);
+        await WaitForSettingsUI(shell, "disabled Usage estimate");
         await OnUI(shell, () =>
         {
             if (Find(shell.SettingsWindow!, key + "_PeriodEstimate") is not null)
@@ -469,7 +567,7 @@ internal static class Program
         });
         await WaitForFlyoutVisibility(shell, true, "after disabling the account estimate");
         phase("Estimates: checking disabled flyout row");
-        await Task.Delay(100);
+        await WaitForFlyoutUI(shell, "disabled flyout estimate");
         await OnUI(shell, () =>
         {
             if (Find(shell.Flyout!, key + "_Flyout_PeriodEstimate") is not null)
@@ -484,21 +582,32 @@ internal static class Program
                 throw new InvalidOperationException("Estimate disclosure is not keyboard/screen-reader accessible.");
             expand.Expand();
         }
-        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected)
+        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
                 Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||
                 Find(window, prefix + "PeriodEstimateAmount") is not TextBlock amount || amount.Text != expected ||
                 AutomationProperties.GetLabeledBy(amount) != label ||
                 ToolTipService.GetToolTip(row) is null)
-                throw new InvalidOperationException("Compact estimate label, amount, help or accessibility association is missing.");
+                throw new InvalidOperationException($"Compact estimate ({prefix}) label, amount, help or accessibility association is missing: " +
+                    $"row={Find(window, prefix + "PeriodEstimate") is not null}, " +
+                    $"label={(Find(window, prefix + "PeriodEstimateLabel") as TextBlock)?.Text ?? "missing"}, " +
+                    $"amount={(Find(window, prefix + "PeriodEstimateAmount") as TextBlock)?.Text ?? "missing"}, expected={expected}, " +
+                    $"labeledBy={(Find(window, prefix + "PeriodEstimateAmount") is TextBlock value ? AutomationProperties.GetLabeledBy(value) is not null : false)}, " +
+                    $"help={(Find(window, prefix + "PeriodEstimate") is FrameworkElement estimate ? ToolTipService.GetToolTip(estimate) is not null : false)}.");
             var labelOrigin = label.TransformToVisual(row).TransformPoint(new(0, 0));
             var amountOrigin = amount.TransformToVisual(row).TransformPoint(new(0, 0));
+            double labelGap = amountOrigin.X - (labelOrigin.X + label.ActualWidth);
+            bool aligned = rightAlignAmount
+                ? Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) <= 1
+                : Math.Abs(labelGap - 12) <= 1 && Math.Abs(labelOrigin.X) <= 1;
             if (row.ActualWidth <= 0 || Math.Abs(labelOrigin.Y - amountOrigin.Y) > 1 ||
                 amountOrigin.X < labelOrigin.X + label.ActualWidth ||
-                Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) > 1 ||
+                !aligned ||
                 amount.FontSize >= 21)
-                throw new InvalidOperationException("Estimate is not a secondary, right-aligned row like the macOS reference.");
+                throw new InvalidOperationException(rightAlignAmount
+                    ? "Flyout estimate is not a secondary row with the amount at the right edge."
+                    : "Settings estimate is not a secondary row with the amount 12 pixels beside the left-aligned label.");
         }
         static void AssertEstimateDisclosure(ReactorWindow window, string prefix, string expected)
         {
@@ -523,18 +632,11 @@ internal static class Program
         }
         async Task WaitForIdle()
         {
-            for (int attempt = 0; attempt < 100; attempt++)
+            await WaitForSettingsUI(shell, "account estimate operation");
+            await OnUI(shell, () =>
             {
-                bool ready = false;
-                await OnUI(shell, () =>
-                {
-                    if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
-                    ready = !shell.Session.Busy;
-                });
-                if (ready) { await Task.Delay(100); return; }
-                await Task.Delay(30);
-            }
-            throw new TimeoutException("Account estimate operation did not complete.");
+                if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
+            });
         }
     }
     private static async Task SmokeUsageDisclosureAsync(ReactorShell shell)
@@ -555,7 +657,7 @@ internal static class Program
                 throw new InvalidOperationException("Usage account disclosure is not accessible.");
             expand.Expand();
         });
-        await Task.Delay(300);
+        await WaitForSettingsUI(shell, "expanded Usage diagnostics");
         await OnUI(shell, () =>
         {
             var window = shell.SettingsWindow!;
@@ -565,7 +667,7 @@ internal static class Program
                 throw new InvalidOperationException("Usage disclosure did not expose just the selected account's diagnostics.");
             shell.Session.Refresh();
         });
-        await Task.Delay(300);
+        await WaitForSettingsUI(shell, "refreshed Usage disclosure");
         await OnUI(shell, () =>
         {
             var window = shell.SettingsWindow!;
@@ -575,7 +677,7 @@ internal static class Program
                 throw new InvalidOperationException("Refreshing usage lost the account disclosure state.");
             expand.Collapse();
         });
-        await Task.Delay(300);
+        await WaitForSettingsUI(shell, "collapsed Usage diagnostics");
         await OnUI(shell, () =>
         {
             var window = shell.SettingsWindow!;
@@ -611,20 +713,70 @@ internal static class Program
 
     private static async Task WaitForFlyoutVisibility(ReactorShell shell, bool expected, string stage)
     {
-        for (int attempt = 0; attempt < 100; attempt++)
+        await WaitForUI(shell, $"flyout {(expected ? "visible" : "hidden")} {stage}",
+            () => (shell.Flyout is not null && Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0) == expected);
+    }
+
+    private static Task WaitForSettingsUI(ReactorShell shell, string stage) =>
+        WaitForUI(shell, stage, () => LayoutReady(shell.SettingsWindow) && shell.Session.Initialized && !shell.Session.Busy &&
+            shell.SettingsRenderedRevision == shell.Session.Revision);
+
+    private static Task WaitForFlyoutUI(ReactorShell shell, string stage) =>
+        WaitForUI(shell, stage, () => LayoutReady(shell.Flyout) && shell.Session.Initialized && !shell.Session.Busy &&
+            shell.FlyoutRenderedRevision == shell.Session.Revision);
+
+    private static bool LayoutReady(ReactorWindow? window)
+    {
+        if (window?.NativeWindow.Content is not FrameworkElement { IsLoaded: true } root) return false;
+        root.UpdateLayout();
+        return root.ActualWidth > 0 && root.ActualHeight > 0 && TreeLoaded(root);
+    }
+
+    private static bool TreeLoaded(DependencyObject node)
+    {
+        if (node is FrameworkElement { IsLoaded: false }) return false;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+            if (!TreeLoaded(VisualTreeHelper.GetChild(node, i))) return false;
+        return true;
+    }
+
+    private static async Task WaitForUI(ReactorShell shell, string stage, Func<bool> ready)
+    {
+        RecordSmokePhase(shell.Session.Controller.DataDirectory, $"Waiting for {stage}");
+        var elapsed = Stopwatch.StartNew();
+        string state = "";
+        do
         {
-            bool visible = false;
-            await OnUI(shell, () => visible = shell.Flyout is not null && Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0);
-            if (visible == expected) return;
-            await Task.Delay(50);
-        }
-        throw new InvalidOperationException($"Tray flyout did not become {(expected ? "visible" : "hidden")} {stage}.");
+            var remaining = TimeSpan.FromSeconds(5) - elapsed.Elapsed;
+            if (remaining <= TimeSpan.Zero) break;
+            bool complete = false;
+            try
+            {
+                await OnUI(shell, () =>
+                {
+                    complete = ready();
+                    state = $"page={shell.Session.Page}, initialized={shell.Session.Initialized}, busy={shell.Session.Busy}, " +
+                        $"revision={shell.Session.Revision}, settingsRender={shell.SettingsRenderedRevision}, " +
+                        $"flyoutRender={shell.FlyoutRenderedRevision}, addForm={shell.Session.ShowAddForm}, " +
+                        $"back={shell.Session.CanGoBack}, settings={shell.SettingsWindow is not null}, " +
+                        $"flyoutVisible={shell.Flyout is not null && Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0}, " +
+                        $"foreground=0x{Win32.GetForegroundWindow():X}, error={shell.Session.Error ?? "none"}";
+                }).WaitAsync(remaining);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException($"UI dispatch stalled at {stage}: {state}", ex);
+            }
+            if (complete) return;
+            await Task.Delay(25);
+        } while (elapsed.Elapsed < TimeSpan.FromSeconds(5));
+        throw new TimeoutException($"UI readiness timed out at {stage} after {elapsed.Elapsed.TotalSeconds:F2}s: {state}");
     }
 
     private static async Task SmokeTraySettingsAsync(ReactorShell shell)
     {
         await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
-        await Task.Delay(200);
+        await WaitForSettingsUI(shell, "General tray controls");
         nint installedImage = 0;
         await OnUI(shell, () =>
         {
@@ -637,15 +789,15 @@ internal static class Program
             style.SelectedIndex = 1;
             mode.SelectedIndex = 1;
         });
-        await Task.Delay(200);
+        await WaitForSettingsUI(shell, "draft tray style/mode");
         await OnUI(shell, () =>
         {
             AssertTrayPreview(shell);
             if (shell.TrayIcons.Count != 1 || shell.TrayIcons.Single().ImageHandle != installedImage ||
                 shell.Session.Controller.Settings is not { TrayStyle: TrayIconStyle.Pie, TrayMode: TrayDisplayMode.RollUp })
                 throw new InvalidOperationException("Draft preview changed the installed tray before Save.");
-            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
         });
+        await InvokeButtonAsync(shell, "SaveGeneralSettings");
         await WaitForTraySave();
         uint retired = 0;
         await OnUI(shell, () =>
@@ -657,20 +809,20 @@ internal static class Program
             if (icon.AccountKey is not null)
             {
                 retired = icon.Id;
-                SendTraySelection(shell, 0x401, icon.Id);
+                SendTraySelection(shell, Win32.NIN_KEYSELECT, icon.Id);
             }
             // Only this app's icons are re-added; Explorer and other apps are untouched.
             Win32.SendMessage(shell.TrayHandle, Win32.RegisterWindowMessage("TaskbarCreated"), 0, 0);
             Win32.SendMessage(shell.TrayHandle, 0x7E, 0, 0);
         });
-        await Task.Delay(200);
+        await WaitForSettingsUI(shell, "per-account selection and taskbar recovery");
         await OnUI(shell, () =>
         {
             if (retired != 0 && shell.Session.SelectedAccount != shell.TrayIcons.First().AccountKey)
                 throw new InvalidOperationException("Per-account callback opened the wrong identity.");
             shell.ShowSettings(SettingsPage.General);
         });
-        await Task.Delay(200);
+        await WaitForSettingsUI(shell, "tray account selections");
         (uint Id, nint Image)[] installedIcons = [];
         await OnUI(shell, () =>
         {
@@ -682,14 +834,14 @@ internal static class Program
                 selection.IsChecked = false;
             }
         });
-        await Task.Delay(200);
+        await WaitForSettingsUI(shell, "draft tray exclusions");
         await OnUI(shell, () =>
         {
             AssertTrayPreview(shell);
             if (!shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).SequenceEqual(installedIcons))
                 throw new InvalidOperationException("Draft exclusions changed installed tray icons.");
-            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
         });
+        await InvokeButtonAsync(shell, "SaveGeneralSettings");
         await WaitForTraySave();
         await OnUI(shell, () =>
         {
@@ -699,23 +851,24 @@ internal static class Program
             if (retired != 0)
             {
                 int revision = shell.Session.Revision;
-                SendTraySelection(shell, 0x401, retired);
+                SendTraySelection(shell, Win32.NIN_KEYSELECT, retired);
                 if (shell.Session.Revision != revision)
                     throw new InvalidOperationException("A retired callback was processed.");
             }
-            SendTraySelection(shell, 0x401);
+            SendTraySelection(shell, Win32.NIN_KEYSELECT);
         });
         await WaitForFlyoutVisibility(shell, true, "with no selected tray accounts");
         await OnUI(shell, () => shell.ShowSettings(SettingsPage.General));
-        await Task.Delay(200);
+        await WaitForSettingsUI(shell, "restore tray preferences");
         await OnUI(shell, () =>
         {
             ((ComboBox)Find(shell.SettingsWindow!, "TrayStyle")!).SelectedIndex = 0;
             ((ComboBox)Find(shell.SettingsWindow!, "TrayMode")!).SelectedIndex = 0;
             foreach (var account in shell.Session.Dashboard.Accounts)
                 ((CheckBox)Find(shell.SettingsWindow!, "TrayAccount-" + account.Key)!).IsChecked = true;
-            InvokeButton((Button)Find(shell.SettingsWindow!, "SaveGeneralSettings")!);
         });
+        await WaitForSettingsUI(shell, "draft restored tray preferences");
+        await InvokeButtonAsync(shell, "SaveGeneralSettings");
         await WaitForTraySave();
         Image? retiredPreview = null;
         await OnUI(shell, () =>
@@ -726,7 +879,7 @@ internal static class Program
                 throw new InvalidOperationException("Restoring the roll-up pie failed.");
             shell.Session.Navigate(SettingsPage.Notifications);
         });
-        await Task.Delay(150);
+        await WaitForSettingsUI(shell, "unmounted tray preview");
         await OnUI(shell, () =>
         {
             if (retiredPreview!.Source is not null)
@@ -735,18 +888,12 @@ internal static class Program
 
         async Task WaitForTraySave()
         {
-            for (int attempt = 0; attempt < 100; attempt++)
+            await WaitForSettingsUI(shell, "tray settings save");
+            await OnUI(shell, () =>
             {
-                bool ready = false;
-                await OnUI(shell, () =>
-                {
-                    if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
-                    ready = !shell.Session.Busy && shell.Session.Notice == "Settings saved.";
-                });
-                if (ready) { await Task.Delay(100); return; }
-                await Task.Delay(30);
-            }
-            throw new TimeoutException("Tray settings save did not complete.");
+                if (shell.Session.Error is { } error) throw new InvalidOperationException(error);
+                if (shell.Session.Notice != "Settings saved.") throw new InvalidOperationException("Tray settings were not saved.");
+            });
         }
     }
 
@@ -798,20 +945,50 @@ internal static class Program
     private static void SendTraySelection(ReactorShell shell, int notification, uint id = 1) =>
         Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((id << 16) | (uint)notification));
 
-    private static void InvokeButton(Button button)
+    private static async Task InvokeButtonAsync(ReactorShell shell, string id, bool flyout = false)
     {
-        if (new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
-            throw new InvalidOperationException("Button does not expose its accessible invoke action.");
-        invoke.Invoke();
+        Button? FindButton() => (flyout ? shell.Flyout : shell.SettingsWindow) is { } window
+            ? Find(window, id) as Button : null;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Button? button = null;
+        void Clicked(object sender, RoutedEventArgs args) => completion.TrySetResult();
+        try
+        {
+            await WaitForUI(shell, $"automation button {id} loaded and enabled", () =>
+            {
+                if (FindButton() is not { IsEnabled: true, IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 } ready)
+                    return false;
+                if (new ButtonAutomationPeer(ready).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
+                    throw new InvalidOperationException($"Button {AutomationProperties.GetAutomationId(ready)} is not ready " +
+                        "for its accessible invoke action.");
+                // Reactor can replace the button between dispatcher turns. Check readiness,
+                // subscribe and invoke the same instance without yielding to another render.
+                button = ready;
+                // Invoke queues Click. Wait for the event, not merely for Invoke to return.
+                button.Click += Clicked;
+                invoke.Invoke();
+                return true;
+            });
+            try { await completion.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException($"Accessible button {id} invocation did not deliver Click.", ex);
+            }
+        }
+        finally
+        {
+            if (button is not null) await OnUI(shell, () => button.Click -= Clicked);
+        }
     }
     private static Task OnUI(ReactorShell shell, Action action)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        shell.Session.Post(() =>
+        // Probe after normal-priority automation, model and Reactor work has drained.
+        if (ReactorApp.UIDispatcher?.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             try { action(); completion.SetResult(); }
             catch (Exception ex) { completion.SetException(ex); }
-        });
+        }) != true) throw new InvalidOperationException("Smoke UI dispatcher rejected an operation.");
         return completion.Task.WaitAsync(TimeSpan.FromSeconds(10));
     }
     private static FrameworkElement? Find(ReactorWindow window, string id)

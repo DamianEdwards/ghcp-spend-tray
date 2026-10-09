@@ -1,5 +1,6 @@
 using System.Globalization;
 using GHCPSpendTray.App.Native;
+using GHCPSpendTray.App.Platform;
 using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.App.UI;
@@ -15,6 +16,7 @@ internal sealed class AppSession : IDisposable
     private readonly System.Threading.Timer _countdown;
     private bool _disposed;
     internal IApplicationController Controller { get; }
+    internal StoreUpdateSession? StoreUpdates { get; }
     internal DashboardView Dashboard { get; private set; } = new("Loading", "Loading accounts...", "GHCPSpendTray | Loading", []);
     internal SettingsPage Page { get; private set; } = SettingsPage.Usage;
     internal event Action? Changed;
@@ -51,7 +53,7 @@ internal sealed class AppSession : IDisposable
     internal string ClientId { get; private set; } = "";
     internal bool OfflineAccess { get; set; }
     internal string? ReconnectKey { get; private set; }
-    internal string PollMinutes { get; set; } = "60";
+    internal string PollMinutes { get; set; } = "10";
     internal string Thresholds { get; set; } = "50, 80, 100";
     internal string Increment { get; set; } = "";
     internal bool Notifications { get; set; } = true;
@@ -65,9 +67,14 @@ internal sealed class AppSession : IDisposable
     internal bool InheritIncrement { get; set; } = true;
     internal bool ShowPeriodEstimate { get; set; }
 
-    internal AppSession(IApplicationController controller, Action<Action> dispatch)
+    internal AppSession(IApplicationController controller, Action<Action> dispatch, IStoreUpdates? storeUpdates = null)
     {
         Controller = controller; _dispatch = dispatch;
+        if (storeUpdates is not null)
+        {
+            StoreUpdates = new(storeUpdates, Post);
+            StoreUpdates.Changed += Notify;
+        }
         controller.Changed += OnDashboard;
         _countdown = new(_ => Post(() => { if (Prompt is not null) Notify(); }), null, 1000, 1000);
     }
@@ -117,6 +124,7 @@ internal sealed class AppSession : IDisposable
     {
         if (SigningIn) CancelSignIn();
         Page = page; Error = null; Notice = null; ConfirmRemove = false;
+        if (page == SettingsPage.About) StoreUpdates?.Check();
         Notify();
     }
     internal void AddAccount()
@@ -395,6 +403,7 @@ internal sealed class AppSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        StoreUpdates?.Dispose();
         _lifetime.Cancel(); _countdown.Dispose();
         Controller.Changed -= OnDashboard;
     }

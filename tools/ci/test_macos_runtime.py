@@ -24,8 +24,8 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("tools/macos/test-package.sh artifacts/macos-runtime/GHCPSpendTray.app", runtime)
         self.assertNotIn("build.sh", runtime)
         self.assertNotIn("setup-dotnet", runtime)
-        self.assertIn("needs: [changes, markdown, tests, package, macos, macos_runtime]", workflow)
-        self.assertIn("@('macos', 'macos_runtime')", (ROOT / "tools/assert-verification.ps1").read_text())
+        self.assertIn("needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]", workflow)
+        self.assertIn("@('macos_tests', 'macos', 'macos_runtime')", (ROOT / "tools/assert-verification.ps1").read_text())
 
     def test_build_release_and_analysis_share_current_stable_toolchain(self):
         setup = (ROOT / ".github/actions/setup-macos/action.yml").read_text()
@@ -41,7 +41,11 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("runs-on: macos-26", build)
         self.assertNotIn("matrix:", build)
         self.assertIn("uses: ./.github/actions/setup-macos", build)
-        self.assertEqual(verify.count("run: bash tools/macos/verify.sh"), 1)
+        self.assertIn("run: bash tools/macos/verify.sh --app", build)
+        shared = verify.split("\n  macos_tests:\n")[1].split("\n  macos:\n")[0]
+        self.assertIn("runs-on: macos-26", shared)
+        self.assertIn("uses: ./.github/actions/setup-macos", shared)
+        self.assertIn("run: bash tools/macos/verify.sh --shared-tests", shared)
         release = (ROOT / ".github/workflows/release.yml").read_text().split("\n  macos:\n")[1]
         self.assertIn("runs-on: macos-26", release)
         self.assertIn("uses: ./.github/actions/setup-macos", release)
