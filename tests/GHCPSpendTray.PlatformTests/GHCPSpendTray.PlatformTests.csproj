@@ -8,6 +8,9 @@
   <ItemGroup>
     <Using Include="GHCPSpendTray.Shared" />
     <ProjectReference Include="../../src/GHCPSpendTray.Application/GHCPSpendTray.Application.csproj" />
-    <Compile Include="..\..\src\GHCPSpendTray.App\Platform\*.cs" Link="Platform\%(Filename)%(Extension)" />
+    <!-- UI-bound Store integration is exercised by AppTests. -->
+    <Compile Include="..\..\src\GHCPSpendTray.App\Platform\*.cs"
+             Exclude="..\..\src\GHCPSpendTray.App\Platform\StoreUpdates.cs"
+             Link="Platform\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

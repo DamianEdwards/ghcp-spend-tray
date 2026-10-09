@@ -35,14 +35,18 @@ internal static class TrayIconRenderer
     internal static TrayImage Create(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette) =>
         Create(Pixels(indicator, style, size, palette), size);
 
-    internal static TrayImage CreateNotification(NotificationView notification, int size, TrayPalette palette) =>
-        Create(NotificationPixels(notification, size, palette), size);
+    internal static TrayImage CreateNotification(NotificationView notification, int size, TrayPalette palette,
+        bool updateAvailable = false) =>
+        Create(NotificationPixels(notification, size, palette, updateAvailable), size);
 
-    internal static uint[] NotificationPixels(NotificationView notification, int size, TrayPalette palette)
+    internal static uint[] NotificationPixels(NotificationView notification, int size, TrayPalette palette,
+        bool updateAvailable = false)
     {
         double? percent = notification.PercentConsumed is { } value ? (double)value : null;
         var indicator = new TrayIndicator(notification.AccountKey, notification.Title, percent,
             percent is null ? 0 : 1, 1, "", "");
+        if (updateAvailable)
+            return Pixels(indicator, TrayIconStyle.Pie, size, palette, "\uE896", "Segoe Fluent Icons"); // Download.
         string? text = percent is null && notification.SpendMilestoneUsd is { } milestone
             ? "$" + milestone.ToString("0.##", CultureInfo.InvariantCulture) : null;
         return Pixels(indicator, TrayIconStyle.Pie, size, palette, text);
@@ -80,7 +84,8 @@ internal static class TrayIconRenderer
     internal static uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette) =>
         Pixels(indicator, style, size, palette, null);
 
-    private static unsafe uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette, string? text)
+    private static unsafe uint[] Pixels(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette,
+        string? text, string fontFamily = "Segoe UI")
     {
         if (size is < 16 or > 256) throw new ArgumentOutOfRangeException(nameof(size));
         const int samples = 4;
@@ -169,7 +174,7 @@ internal static class TrayIconRenderer
             for (;;)
             {
                 nint font = Win32.CreateFont(-(int)(fontHeight * scale), width, 0, 0, 600,
-                    0, 0, 0, 1, 0, 0, 4, 0, "Segoe UI");
+                    0, 0, 0, 1, 0, 0, 4, 0, fontFamily);
                 if (font == 0) throw new Win32Exception("Cannot create tray text font.");
                 nint oldFont = Win32.SelectObject(dc, font);
                 try

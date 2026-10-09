@@ -82,6 +82,21 @@ internal static class TrayTests
             var unknownPixels = TrayIconRenderer.NotificationPixels(unavailable, size, palette);
             check(unknownPixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(null), TrayIconStyle.Pie, size, palette)),
                 "missing allocation renders unavailable, never a zero-percent pie");
+            var update = new NotificationView("store-update", "Update available", "Synthetic update");
+            var updatePixels = TrayIconRenderer.NotificationPixels(update, size, palette, updateAvailable: true);
+            check(updatePixels.Length == size * size && updatePixels.Any(p => p >> 24 > 128) &&
+                updatePixels.Any(p => p >> 24 is > 0 and < 255) && updatePixels[0] == 0 &&
+                !updatePixels.SequenceEqual(unknownPixels),
+                "update notifications use a distinct antialiased download glyph, not unavailable-consumption artwork");
+            var tintedUpdate = TrayIconRenderer.NotificationPixels(update, size,
+                new(0xFF202020, 0xFF19AAE6), updateAvailable: true);
+            check(tintedUpdate.Select(p => p >> 24).SequenceEqual(updatePixels.Select(p => p >> 24)) &&
+                tintedUpdate.All(p => (p >> 16 & 255) == (0x19 * (p >> 24) + 127) / 255 &&
+                    (p >> 8 & 255) == (0xAA * (p >> 24) + 127) / 255 &&
+                    (p & 255) == (0xE6 * (p >> 24) + 127) / 255),
+                "update notification glyph preserves theme and high-contrast tinting at every notification DPI");
+            using (var image = TrayIconRenderer.CreateNotification(update, size, palette, updateAvailable: true))
+                check(!image.IsInvalid, "native update notification HICON created");
             foreach (decimal milestone in new decimal[] { .01m, 50, 100, 1234.56m, 1e28m })
             {
                 var notification = unavailable with { SpendMilestoneUsd = milestone };
@@ -191,13 +206,18 @@ internal static class TrayTests
             Send(Win32.NIN_BALLOONUSERCLICK, host.Icons.Last().Id);
             check(notifications == 1 && notificationAccount == "example.ghe.com:2",
                 "native notification callback preserves its accepted account");
+            check(host.Notify(new("store-update", "Update available", "Synthetic update"), updateAvailable: true),
+                "host accepts an update notification with dedicated download artwork");
+            Send(Win32.NIN_BALLOONUSERCLICK, host.Icons.First().Id);
+            check(notifications == 2 && notificationAccount == "store-update",
+                "dedicated update artwork preserves notification routing to About");
             host.Update(rollUp);
             opened.Clear();
             Send(Win32.NIN_SELECT, retired);
             Send(Win32.NIN_KEYSELECT, retired);
             Send(0x203, retired);
             Send(Win32.NIN_BALLOONUSERCLICK, retired);
-            check(opened.Count == 0 && notifications == 1 && settings == 0,
+            check(opened.Count == 0 && notifications == 2 && settings == 0,
                 "all retired native callback forms are ignored");
             Win32.SendMessage(host.Handle, Win32.RegisterWindowMessage("TaskbarCreated"), 0, 0);
             Send(Win32.NIN_SELECT);
@@ -214,6 +234,14 @@ internal static class TrayTests
             host.ExecuteMenuCommand(4);
             check(opened.Count == 2 && opened[^1] is null && refreshes == 1 && exits == 1,
                 "context-menu Open, Refresh and Exit retain their routing");
+            bool ending = false;
+            host.SessionEnding += value => ending = value;
+            check(Win32.SendMessage(host.Handle, Win32.WM_QUERYENDSESSION, 0, 1) == 1 && ending,
+                "Restart Manager can close the tray process for package replacement");
+            Win32.SendMessage(host.Handle, Win32.WM_ENDSESSION, 0, 1);
+            check(exits == 1 && !ending, "canceled Restart Manager shutdown leaves the tray running");
+            Win32.SendMessage(host.Handle, Win32.WM_ENDSESSION, 1, 1);
+            check(exits == 2 && ending, "confirmed Restart Manager shutdown routes through application exit");
         }
         check(callbackShell.Registered.Count == 0, "native callback host disposal releases its icons");
         var recoveryShell = new FakeShell();

@@ -41,6 +41,29 @@ internal static class UI
                 ? InfoBar("Complete!", notice).Success().IsClosable(false).AutomationId("AccountConnectionComplete")
                 : InfoBar("", notice).Informational().IsClosable(false)
             : null;
+    internal static Element? UpdateNotice(AppSession state, bool onAbout = false) => state.StoreUpdates is { HasUpdate: true }
+        && !onAbout
+        ? Card(VStack(8, Copy("A GHCPSpendTray update is available."),
+            Button("View update", () => state.OpenSettings?.Invoke(SettingsPage.About))
+                .AutomationId("ViewStoreUpdate").HAlign(HorizontalAlignment.Left)))
+        : null;
+    internal static Element StoreUpdateCard(StoreUpdateSession updates, nint owner) => Card(VStack(12,
+        TextBlock("Microsoft Store updates").SemiBold(),
+        Copy(updates.Status).AutomationId("StoreUpdateStatus"),
+        updates.Error is { } error ? InfoBar("Unable to complete update", error).Error().IsClosable(false) : null,
+        updates.Updating ? Progress(updates.Progress).AutomationName("App update progress") : null,
+        updates.HasUpdate
+            ? VStack(8,
+                Copy("Windows will ask permission to download and install. The app may close and restart."),
+                Button(updates.RestartRequired ? "Restart" : "Update", () => updates.Install(owner))
+                    .AccentButton().AutomationName(updates.RestartRequired ? "Restart app" : "Install app update")
+                    .AutomationId("InstallStoreUpdate").HAlign(HorizontalAlignment.Left)
+                    .IsEnabled(!updates.Checking && !updates.Updating))
+            : updates.Error is not null
+                ? Button("Try again", () => updates.Check(force: true)).HAlign(HorizontalAlignment.Left)
+                    .IsEnabled(!updates.Checking)
+                : null
+    )).AutomationId("StoreUpdateCard");
     internal static Element DeviceSignIn(AppSession state, DevicePrompt device, nint owner)
     {
         int remaining = Math.Max(0, (int)(device.Expires - DateTimeOffset.UtcNow).TotalSeconds);
@@ -201,7 +224,8 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 UI.Glyph("\uE713", "Settings", () => Session.OpenSettings?.Invoke(SettingsPage.Usage))
                     .AutomationId("OpenSettings").Grid(column: 2)
             ).Grid(row: 0).Padding(20, 14),
-            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), body)).Grid(row: 1).Padding(20, 0),
+            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), UI.UpdateNotice(Session), body))
+                .Grid(row: 1).Padding(20, 0),
             Border(VStack(10,
                 Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                     UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12).Grid(column: 0).VAlign(VerticalAlignment.Center),
@@ -247,7 +271,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             SettingsPage.Usage => Usage(),
             SettingsPage.Accounts => Accounts(hwnd),
             SettingsPage.Notifications => Notifications(),
-            SettingsPage.About => About(),
+            SettingsPage.About => About(hwnd),
             _ => General(hwnd)
         };
         var navigation = NavigationView(
@@ -260,6 +284,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ], ScrollView(VStack(22,
                 TextBlock(Session.Page.ToString()).FontSize(30).SemiBold(),
                 UI.Feedback(Session),
+                UI.UpdateNotice(Session, onAbout: Session.Page == SettingsPage.About),
                 content
             ).Padding(30, 24)))
             with { SelectedTag = Session.Page.ToString(), IsSettingsVisible = false };
@@ -551,9 +576,10 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ? UI.Copy("This observation is from a previous billing period and is excluded from current consumption.") : null
     ).AutomationId(idPrefix + "AccountDiagnosticsTable");
 
-    private static Element About() => VStack(16, UI.Logo(64).HAlign(HorizontalAlignment.Left),
+    private Element About(nint owner) => VStack(16, UI.Logo(64).HAlign(HorizontalAlignment.Left),
         TextBlock("GHCPSpendTray").FontSize(28).SemiBold(),
         UI.Copy($"Version {UI.Version}"),
+        Session.StoreUpdates is { } updates ? UI.StoreUpdateCard(updates, owner) : null,
         UI.Copy("GitHub Copilot consumption, at a glance."),
         UI.Copy("Consumption is the USD value of AI credits used, not an invoice, internal finance budget, or all-product spend."),
         UI.Copy("Built with Microsoft UI Reactor, WinUI 3, and .NET Native AOT. The consumption endpoint is undocumented and may change."),

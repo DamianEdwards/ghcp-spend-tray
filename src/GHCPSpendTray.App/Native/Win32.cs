@@ -6,6 +6,7 @@ namespace GHCPSpendTray.App.Native;
 internal static unsafe partial class Win32
 {
     internal const uint WM_DESTROY = 2, WM_SIZE = 5, WM_CLOSE = 0x10, WM_PAINT = 0xF,
+        WM_QUERYENDSESSION = 0x11, WM_ENDSESSION = 0x16,
         WM_COMMAND = 0x111, WM_TIMER = 0x113, WM_CONTEXTMENU = 0x7B, WM_DPICHANGED = 0x2E0,
         WM_POWERBROADCAST = 0x218, WM_APP_WORK = 0x8001, WM_TRAY = 0x8002;
     internal const int NIN_SELECT = 0x400, NIN_KEYSELECT = 0x401, NIN_BALLOONUSERCLICK = 0x405;

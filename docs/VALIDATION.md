@@ -1,5 +1,57 @@
 # GHCPSpendTray validation and release gates
 
+## Microsoft Store update detection and installation (October 9, 2026)
+
+Synthetic Windows tests cover periodic/throttled checks, unavailable vs current
+status, notification deduplication, About's no-button/current and Update/available
+states, download/install progress, consent cancellation, actionable errors,
+completion/restart fallback, concurrent operation suppression and disposal.
+Update notifications use distinct download artwork, with native icon creation,
+DPI, contrast tinting and unchanged About-click routing covered.
+Native HWND tests accept Restart Manager shutdown and ignore canceled shutdown.
+The source-generated restart registration/cleanup calls are exercised without
+initiating a deployment or restarting the test process.
+
+Local Release verification passed all four managed and executed x64 Native AOT
+harnesses, and the x64 Native AOT application passed populated and empty-account
+UI smoke runs. Those smoke runs inject synthetic Store availability, invoke the
+actual About Update button, check consent-cancellation retry, open About through
+both the native update-notification callback (including a closed Settings window)
+and the in-app update notice, and verify that clearing availability removes the button.
+They do not call real Store update APIs.
+
+One-off offline probes additionally passed 37 assertions against the unchanged
+production Store service source with controlled Store/dispatcher endpoints and
+real Windows restart registration. These cover Store-only gating, main-package
+selection, the actual uptime delay, UI-thread ownership, registration before
+consent, progress, canceled/failed installs, shutdown cancellation and retained
+registration after completion.
+
+A separate x64 Native AOT probe built from the production app project activated
+the real StoreContext and initialized it with the production About window HWND
+without querying or downloading. With About open and a synthetic install still
+pending, ordinary native close was blocked, while actual Restart Manager shutdown
+and restart succeeded. Windows App SDK restart also succeeded. Both produced a
+different process, accepted `--startup`, reacquired the production single-instance
+mutex and initialized the production shell. These isolated probes use synthetic
+data and a test entrypoint, not the packaged production bootstrap; they do not
+establish package replacement or execution of a newer version. No persistent CI
+upgrade test, package registration, certificate or Developer Mode change was added.
+
+The documented Store flow can terminate a desktop app before its install await
+returns. Registration therefore precedes the install request, with a 61-second
+process-uptime guard for the documented restart minimum. Windows owns termination,
+package replacement and relaunch. A surviving completed call requests Windows App
+SDK restart; an unsuccessful request is visible and retryable.
+
+An actual Store-signed, older package with a newer update offered to the same
+account/device is required to validate the real consent dialogs, replacement
+and new-version relaunch. Portable/development package smoke and fake Store
+results do not establish that end-to-end behavior. No real Store deployment has
+been performed locally for this change. The incoming version is not supplied by
+the supported Store update API; the UI deliberately does not invent it or use
+GitHub's independently published version as a proxy.
+
 ## Windows tray recovery after wake/reconnect (October 8, 2026)
 
 Runtime tray updates and `TaskbarCreated` recovery retry temporary Windows

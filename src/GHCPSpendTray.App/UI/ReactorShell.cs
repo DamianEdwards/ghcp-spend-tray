@@ -20,8 +20,9 @@ internal sealed class ReactorShell : IDisposable
     private ReactorWindow? _flyout, _settings;
     private FlyoutComponent? _flyoutComponent;
     private SettingsComponent? _settingsComponent;
-    private bool _exiting;
+    private bool _exiting, _sessionEnding;
     private long _flyoutPresentation;
+    private const string UpdateNotificationKey = "store-update";
     internal AppSession Session => _session;
     internal ReactorWindow? Flyout => _flyout;
     internal ReactorWindow? SettingsWindow => _settings;
@@ -30,14 +31,25 @@ internal sealed class ReactorShell : IDisposable
     internal int FlyoutRenderedRevision => _flyoutComponent?.RenderedRevision ?? -1;
     internal int SettingsRenderedRevision => _settingsComponent?.RenderedRevision ?? -1;
 
-    internal ReactorShell(IApplicationController controller)
+    internal ReactorShell(IApplicationController controller, bool storeUpdates = true, IStoreUpdates? updateService = null)
     {
         _tray = new TrayHost(controller.Portable ? controller.DataDirectory : null);
         _session = new AppSession(controller, action =>
         {
             if (ReactorApp.UIDispatcher?.TryEnqueue(() => action()) != true)
                 Diagnostics.Record("Reactor UI dispatcher rejected an operation.");
-        });
+        }, updateService ?? Platform.StoreUpdates.Create(storeUpdates && !controller.Portable));
+        if (_session.StoreUpdates is { } updates)
+            updates.Available += () =>
+            {
+                try
+                {
+                    if (!_tray.Notify(new(UpdateNotificationKey, "GHCPSpendTray update available",
+                        "Open About to download and install the update from Microsoft Store."), updateAvailable: true))
+                        Diagnostics.Record("Microsoft Store update notification rejected; the in-app notice remains available.");
+                }
+                catch (Exception ex) { Diagnostics.RecordFailure("Microsoft Store update notification failed", ex); }
+            };
         _session.OpenSettings = ShowSettings;
         _session.CopyToClipboard = text =>
         {
@@ -55,10 +67,12 @@ internal sealed class ReactorShell : IDisposable
         _tray.SettingsRequested += () => ShowSettings(SettingsPage.Usage);
         _tray.RefreshRequested += () => _session.Refresh();
         _tray.ExitRequested += Exit;
-        _tray.ResumeRequested += () => _session.Run(controller.ResumeAsync);
+        _tray.SessionEnding += ending => _sessionEnding = ending;
+        _tray.ResumeRequested += () => { _session.Run(controller.ResumeAsync); _session.StoreUpdates?.Check(); };
         _tray.NotificationClicked += key =>
         {
-            if (key is not null) _session.EditAccount(key);
+            if (key == UpdateNotificationKey) ShowSettings(SettingsPage.About);
+            else if (key is not null) _session.EditAccount(key);
             else ShowFlyout();
         };
         _tray.AppearanceChanged += _session.Notify;
@@ -86,6 +100,7 @@ internal sealed class ReactorShell : IDisposable
     internal void Start(bool show)
     {
         _session.Initialize();
+        _session.StoreUpdates?.Start();
         if (show) ShowFlyout();
     }
     internal void ShowFlyout()
@@ -106,7 +121,7 @@ internal sealed class ReactorShell : IDisposable
             _flyout.Deactivated += (_, _) => DismissAfterDeactivation();
             _flyout.Closing += (_, e) =>
             {
-                if (!_exiting) { e.Cancel = true; _flyout?.Hide(); }
+                if (!_exiting && !_sessionEnding) { e.Cancel = true; _flyout?.Hide(); }
             };
             if (_flyout.NativeWindow.Content is UIElement root)
                 root.KeyDown += (_, e) =>
@@ -182,6 +197,10 @@ internal sealed class ReactorShell : IDisposable
                 };
             }
             _settings.Closed += (_, _) => { _settings = null; _settingsComponent = null; _session.CloseSettings(); };
+            _settings.Closing += (_, e) =>
+            {
+                if (!_exiting && !_sessionEnding && _session.StoreUpdates is { Updating: true }) e.Cancel = true;
+            };
             _settings.NativeWindow.Activated += (_, e) =>
             {
                 if (e.WindowActivationState != WindowActivationState.Deactivated && !_session.Busy)
@@ -192,6 +211,7 @@ internal sealed class ReactorShell : IDisposable
             };
         }
         _settings.Show(); _settings.Activate();
+        if (page == SettingsPage.About) _session.StoreUpdates?.Check();
     }
     private bool TryGoBack(UIElement root) =>
         VisualTreeHelper.GetOpenPopupsForXamlRoot(root.XamlRoot).Count == 0 &&
