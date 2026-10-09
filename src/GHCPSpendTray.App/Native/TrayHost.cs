@@ -22,6 +22,7 @@ internal sealed class TrayHost : ShellWindow
     internal event Action? SettingsRequested, RefreshRequested, ExitRequested, ResumeRequested;
     internal event Action? AppearanceChanged;
     internal event Action? UpdateFailed;
+    internal event Action<bool>? SessionEnding;
 
     internal TrayHost(string? portableDirectory, TrayIcon.ShellCall? shell = null)
     {
@@ -74,11 +75,11 @@ internal sealed class TrayHost : ShellWindow
         }
     }
     internal bool ContainsCursor() => Icons.Any(icon => icon.ContainsCursor());
-    internal bool Notify(NotificationView notification)
+    internal bool Notify(NotificationView notification, bool updateAvailable = false)
     {
         var icon = _icons.ForAccount(notification.AccountKey) ?? _icons.Primary;
         return icon.Notify(notification, TrayIconRenderer.NotificationSizeForDpi(Monitor(icon).Dpi),
-            TrayIconRenderer.SystemPalette());
+            TrayIconRenderer.SystemPalette(), updateAvailable);
     }
     private int IconSize(TrayIcon? icon) =>
         TrayIconRenderer.SizeForDpi(Monitor(icon).Dpi);
@@ -100,6 +101,17 @@ internal sealed class TrayHost : ShellWindow
     }
     protected override nint? Message(uint message, nuint wParam, nint lParam)
     {
+        if (message == Win32.WM_QUERYENDSESSION)
+        {
+            SessionEnding?.Invoke(true);
+            return 1;
+        }
+        if (message == Win32.WM_ENDSESSION)
+        {
+            SessionEnding?.Invoke(wParam != 0);
+            if (wParam != 0) ExitRequested?.Invoke();
+            return 0;
+        }
         if (message == Win32.WM_TIMER && wParam == RetryTimerId)
         {
             if (_retryTimer != 0)

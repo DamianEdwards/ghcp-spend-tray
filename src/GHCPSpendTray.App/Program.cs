@@ -47,6 +47,7 @@ internal static class Program
             }
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
+            var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
             using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo) :
                 new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
             int smokeExit = 0;
@@ -57,7 +58,7 @@ internal static class Program
                 ReactorApp.Run(context =>
                 {
                     if (smoke) RecordSmokePhase(runtime.DataDirectory, "Reactor initialized; creating tray shell");
-                    shell = new ReactorShell(controller);
+                    shell = new ReactorShell(controller, storeUpdates: !demo, updateService: smokeUpdates);
                     Application.Current.UnhandledException += (_, e) =>
                     {
                         Diagnostics.Record($"Reactor dispatch failed ({e.Exception.GetType().Name}).");
@@ -75,7 +76,7 @@ internal static class Program
                     shell.Start(!smoke && !runtime.IsStartup);
                     runtime.SignalReady();
                     if (smoke) RecordSmokePhase(runtime.DataDirectory, "Tray shell ready; starting synthetic smoke");
-                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, code => smokeExit = code);
+                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, smokeUpdates!, code => smokeExit = code);
                 });
             }
             finally { shell?.Dispose(); }
@@ -95,7 +96,8 @@ internal static class Program
         File.AppendAllText(Path.Combine(directory, "native-smoke-progress.txt"),
             $"{DateTimeOffset.UtcNow:O} {phase}{Environment.NewLine}");
 
-    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time, Action<int> setExit)
+    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time,
+        SmokeStoreUpdates updates, Action<int> setExit)
     {
         try
         {
@@ -317,10 +319,12 @@ internal static class Program
                 shell.ShowSettings(SettingsPage.Notifications);
             });
             await WaitForSettingsUI(shell, "reopened Notifications settings");
+            RecordSmokePhase(directory, "Testing synthetic Store update About controls");
+            await SmokeStoreUpdatesAsync(shell, updates);
             await OnUI(shell, () =>
             {
                 AssertBackAccelerators(shell.SettingsWindow!);
-                if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
+                if (shell.Session.Page != SettingsPage.About) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 RecordSmokePhase(directory, "All synthetic smoke assertions passed; exiting Reactor");
@@ -334,6 +338,7 @@ internal static class Program
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
                     "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
                     "simulated TaskbarCreated recovery and display-change repaint, " +
+                    "synthetic Store latest/update About controls, native update notification opens About, consent cancellation and retry, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -346,6 +351,88 @@ internal static class Program
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
+    }
+    private sealed class SmokeStoreUpdates : IStoreUpdates
+    {
+        internal bool Available { get; set; }
+        internal int Installs { get; private set; }
+        public Task<bool> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(Available);
+        public Task<StoreInstallResult> InstallAsync(nint owner, Action<StoreUpdateProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            if (owner == 0) throw new InvalidOperationException("Synthetic Store request has no owner HWND.");
+            Installs++;
+            return Task.FromResult(StoreInstallResult.Canceled);
+        }
+        public void Restart() => throw new InvalidOperationException("Synthetic canceled update must not restart.");
+    }
+    private static async Task SmokeStoreUpdatesAsync(ReactorShell shell, SmokeStoreUpdates updates)
+    {
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.About));
+        await WaitForSettingsUI(shell, "Store latest-version About");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "You're running the latest version." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not null)
+                throw new InvalidOperationException("Current Store app must show latest-version status without an Update button.");
+            updates.Available = true;
+            shell.Session.StoreUpdates!.Check(force: true);
+        });
+        await WaitForSettingsUI(shell, "Store update available");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "An update is available." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { Content: "Update", IsEnabled: true })
+                throw new InvalidOperationException("Available Store update must render its enabled Update action.");
+            shell.Session.Navigate(SettingsPage.Usage);
+            shell.SettingsWindow!.NativeWindow.Close();
+        });
+        await WaitForUI(shell, "settings closed before notification click", () => shell.SettingsWindow is null);
+        await OnUI(shell, () =>
+        {
+            var icon = shell.TrayIcons.Single(icon => icon.NotificationAccount == "store-update");
+            Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0,
+                (nint)((icon.Id << 16) | (uint)Win32.NIN_BALLOONUSERCLICK));
+        });
+        await WaitForSettingsUI(shell, "native Store notification opens About");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Page != SettingsPage.About ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("Clicking the Store update notification must open About with its Update action.");
+        });
+        await InvokeButtonAsync(shell, "InstallStoreUpdate");
+        await WaitForSettingsUI(shell, "Store consent cancellation");
+        await OnUI(shell, () =>
+        {
+            if (updates.Installs != 1 || shell.Session.StoreUpdates!.Updating ||
+                Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Update canceled. You can try again." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("Canceled Store consent must leave a retryable Update action.");
+            shell.Session.Navigate(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "Store update in-app notice");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "ViewStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("An available update must be discoverable outside About.");
+        });
+        await InvokeButtonAsync(shell, "ViewStoreUpdate");
+        await WaitForSettingsUI(shell, "Store update notice opens About");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Page != SettingsPage.About)
+                throw new InvalidOperationException("Update notice did not open About.");
+            updates.Available = false;
+            shell.Session.StoreUpdates!.Check(force: true);
+        });
+        await WaitForSettingsUI(shell, "Store update cleared externally");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "You're running the latest version." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not null)
+                throw new InvalidOperationException("A cleared Store update must remove the Update action.");
+        });
     }
     private sealed class SmokeTimeProvider : TimeProvider
     {

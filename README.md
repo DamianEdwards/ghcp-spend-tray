@@ -47,6 +47,11 @@ Requires Windows 11 22H2 (build 22621) or newer on x64 or ARM64.
 Install [GHCPSpendTray from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295),
 then start it from the Start menu. It stays in the notification area.
 
+Store-installed copies automatically check for updates. Click an update
+notification to open **Settings > About**, then select **Update** to install
+and restart the app. If no update is available, About shows that you're running
+the latest version.
+
 Alternatively, download `GHCPSpendTray-<version>.msixbundle` from
 [GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases),
 open the signed bundle in Windows App Installer, and select **Install**.

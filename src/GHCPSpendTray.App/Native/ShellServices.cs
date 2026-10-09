@@ -165,9 +165,9 @@ internal sealed unsafe class TrayIcon : IDisposable
         _rendered = (indicator, style, size, palette);
         _updatePending = false;
     }
-    internal bool Notify(NotificationView notification, int size, TrayPalette palette)
+    internal bool Notify(NotificationView notification, int size, TrayPalette palette, bool updateAvailable = false)
     {
-        var image = TrayIconRenderer.CreateNotification(notification, size, palette);
+        var image = TrayIconRenderer.CreateNotification(notification, size, palette, updateAvailable);
         try
         {
             var data = _data;
