@@ -127,8 +127,10 @@ macOS UI and bridge commands are unchanged by this Windows integration.
 
 The three macOS reference screenshots on issue #47 were compared with the
 Windows estimate surfaces. Windows keeps native Fluent cards and controls while
-matching the secondary row hierarchy: Estimated at reset at the left,
-approximate amount at the right, then early/projected-excess/UTC-reset context.
+matching the secondary row hierarchy: Estimated at reset and an approximate
+amount, then early/projected-excess/UTC-reset context. Following issue #64,
+Usage and account settings keep the amount beside the label with a 12-pixel
+gap; the flyout retains right alignment to match its observed consumption.
 Projected excess uses a theme-aware caution brush and a warning glyph, not
 a projected progress bar. Small positive amounts use `<$1` and small excesses
 use Less than $1 over allocation, matching macOS without implying zero.
@@ -147,8 +149,10 @@ consumption, totals and tray allocation.
 An x64 Native AOT app publish passed populated and empty native WinUI smoke.
 Populated smoke drives the real preference checkbox, Save and accessible
 expanders, checks all three estimate surfaces, and measures that the label
-and amount share a baseline, the amount reaches the row's right edge without
-overlapping the label, and forecast text remains smaller than actual consumption.
+and amount share a baseline without overlap, and forecast text remains smaller
+than actual consumption. The geometry assertions now require a 12-pixel
+label-to-amount gap in Usage and account settings (including unavailable
+estimates), and right-edge alignment in the flyout.
 It also checks label association/help, expanded diagnostics on Usage and
 account settings, and unavailable/explicit-off behavior. These are synthetic
 controls and geometry checks, not proof of pixel-identical cross-platform
