@@ -1,4 +1,5 @@
 import AppKit
+import LocalAuthentication
 import Security
 import ServiceManagement
 
@@ -21,8 +22,13 @@ enum KeychainStore {
         }
     }
 
-    static func read(_ target: String) throws -> Tokens? {
+    static func read(_ target: String, allowInteraction: Bool = true) throws -> Tokens? {
         var query = query(target)
+        if !allowInteraction {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+        }
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
