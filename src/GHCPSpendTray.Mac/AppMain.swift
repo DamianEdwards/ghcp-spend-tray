@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var empty = false
     private var poweringOff = false
     private var powerObserver: NSObjectProtocol?
+    private var unsavedAlert: NSAlert?
     #if UPDATE_REHEARSAL
     private var rehearsal: UpdateRehearsal?
     #endif
@@ -280,7 +281,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             model.resolveUnsavedChanges(.keepEditing)
             return
         }
-        UnsavedChangesAlert.make().beginSheetModal(for: window) { response in
+        let alert = UnsavedChangesAlert.make()
+        unsavedAlert = alert
+        alert.beginSheetModal(for: window) { [weak self] response in
+            self?.unsavedAlert = nil
             model.resolveUnsavedChanges(UnsavedChangesAlert.choice(response))
         }
     }
@@ -299,15 +303,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         guard let model else { return .terminateNow }
         guard !model.saving && !model.pendingNavigation else { return .terminateCancel }
-        if !model.requestLeaving({ sender.reply(toApplicationShouldTerminate: true) },
-                                 cancelled: { sender.reply(toApplicationShouldTerminate: false) }) {
-            return .terminateLater
+        // Keep the normal event loop running so bridge saves can complete before retrying Quit.
+        if !model.requestLeaving({ sender.terminate(nil) }) {
+            return .terminateCancel
         }
         model.cancelSignIn()
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if smoke, let model {
+            do {
+                guard model.settings?.pollMinutes == 20, !model.hasUnsavedChanges,
+                      !model.saving, !model.pendingNavigation, model.formMessage == nil else {
+                    throw AppError.message("Native Quit did not finish saving the protected preferences draft.")
+                }
+                try "PASS: native menu bar, settings bridge, protected close and save-before-Quit.\n"
+                    .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
+                print("PASS: macOS arm64 \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
+            } catch {
+                fputs("FAIL: macOS synthetic termination smoke: \(error.localizedDescription)\n", stderr)
+                model.shutdown()
+                exit(1)
+            }
+        }
         model?.shutdown()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         if let activationObserver { DistributedNotificationCenter.default().removeObserver(activationObserver) }
@@ -560,6 +579,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             guard model.formMessage == nil, !model.hasUnsavedChanges else {
                 throw AppError.message("Explicit native API-allocation reset did not clear the budget.")
             }
+            progress("rejecting invalid budget through native navigation Save")
+            model.accountDraft.useCustomBudget = true
+            model.accountDraft.budget = "0"
+            model.selectPage(.general)
+            try await chooseUnsavedButton(0)
+            guard model.page == .accounts, model.accountDraft.budget == "0",
+                  model.fieldErrors["budget"] != nil, model.hasUnsavedChanges else {
+                throw AppError.message("Invalid native Save must retain the budget draft and cancel navigation.")
+            }
+            model.accountDraft.budget = "50.00"
+            progress("saving budget before native navigation")
+            model.selectPage(.general)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { model.page == .general && model.formLoaded && !model.busy }
+            guard model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == 50 else {
+                throw AppError.message("Native Save must apply the budget before continuing navigation.")
+            }
+            guard let window = settingsWindow else { throw AppError.message("Settings window missing.") }
+            model.globalDraft.minutes = "18"
+            progress("saving before native Settings close")
+            window.performClose(nil)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { !window.isVisible && !model.busy }
+            guard model.settings?.pollMinutes == 18, !model.hasUnsavedChanges else {
+                throw AppError.message("Native close Save must finish saving before closing Settings.")
+            }
+            openSettings()
+            try await waitUntil { !model.busy }
+            model.globalDraft.minutes = "4"
+            progress("keeping dirty Settings open")
+            window.performClose(nil)
+            try await chooseUnsavedButton(2)
+            guard window.isVisible, model.globalDraft.minutes == "4", model.hasUnsavedChanges else {
+                throw AppError.message("Native close Keep Editing must retain the visible dirty form.")
+            }
+            progress("rejecting invalid Save on native Quit")
+            NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(0)
+            guard window.isVisible, model.globalDraft.minutes == "4",
+                  model.fieldErrors["minutes"] != nil, model.hasUnsavedChanges else {
+                throw AppError.message("Invalid native Quit Save must cancel termination and retain the draft.")
+            }
+            progress("keeping draft on native Quit")
+            NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(2)
+            guard window.isVisible, model.hasUnsavedChanges else {
+                throw AppError.message("Native Quit Keep Editing must cancel termination.")
+            }
+            progress("discarding before native Settings close")
+            window.performClose(nil)
+            try await chooseUnsavedButton(1)
+            guard !window.isVisible, !model.hasUnsavedChanges,
+                  model.globalDraft.minutes == String(model.settings!.pollMinutes) else {
+                throw AppError.message("Native close Discard must restore saved values before closing.")
+            }
+            openSettings()
+            try await waitUntil { !model.busy }
             model.addAccount()
             progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))
@@ -568,16 +644,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             model.showingSignIn = false
             try await waitUntil { self.settingsWindow?.attachedSheet == nil }
-            try "PASS: native menu bar, five settings pages, synthetic dashboard and settings bridge.\n"
-                .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
-            print("PASS: macOS arm64 \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
-            progress("terminating")
+            model.selectPage(.general)
+            try await waitUntil { model.formLoaded && !model.busy }
+            model.globalDraft.minutes = "20"
+            guard model.hasUnsavedChanges else { throw AppError.message("Native Quit must start with an unsaved draft.") }
+            progress("saving before native Quit")
             NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { !model.saving }
+            throw AppError.message("Native Quit returned instead of terminating after Save.")
         } catch {
             fputs("FAIL: macOS synthetic smoke test: \(error.localizedDescription)\n", stderr)
             model.shutdown()
             exit(1)
         }
+    }
+
+    private func chooseUnsavedButton(_ index: Int) async throws {
+        try await waitUntil { self.unsavedAlert != nil }
+        guard let alert = unsavedAlert, alert.buttons.indices.contains(index) else {
+            throw AppError.message("Native unsaved-changes sheet did not contain the expected action.")
+        }
+        alert.buttons[index].performClick(nil)
+        try await waitUntil { self.unsavedAlert == nil && self.settingsWindow?.attachedSheet == nil }
     }
 
     private func waitForPopupAnchor(_ button: NSStatusBarButton, phase: String, presented: Bool = true,

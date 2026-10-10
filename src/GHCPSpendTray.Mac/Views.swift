@@ -566,6 +566,13 @@ struct PreferencesView: View {
 
 }
 
+struct PreferenceBounds: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] { [:] }
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
 struct PreferenceTextField: View {
     let title: String
     @Binding var text: String
@@ -592,6 +599,7 @@ struct PreferenceTextField: View {
                 Label(error, systemImage: "exclamationmark.circle.fill")
                     .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(identifier + "Error")
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { [identifier + "Error": $0] }
             }
         }
     }
@@ -615,9 +623,11 @@ struct FormActions: View {
                 Button("Cancel") { model.cancelChanges() }
                     .disabled(model.saving || !model.formLoaded || model.pendingNavigation)
                     .accessibilityIdentifier("CancelPreferences")
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["CancelPreferences": $0] }
                 Button("Save") { model.saveChanges() }.buttonStyle(.borderedProminent)
                     .disabled(model.busy || !model.formLoaded || model.pendingNavigation)
                     .accessibilityIdentifier("SavePreferences")
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["SavePreferences": $0] }
             }
         }
         .padding([.horizontal, .bottom], 20).padding(.top, 4)

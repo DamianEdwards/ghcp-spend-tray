@@ -32,6 +32,18 @@ enum SettingsFormTests {
         """.utf8))
         try check(unknown.allocationSummary == account.allocationSummary,
                   "Unknown API allocation does not hide a finite custom target.")
+        let unlimited = try JSONDecoder().decode(AccountData.self, from: Data("""
+        {"key":"github.com:3","name":"Synthetic","login":"fixture","host":"github.com",
+         "details":{"unlimited":true,"isCurrentPeriod":true},"freshness":"Fresh","consumptionUsd":16.5}
+        """.utf8))
+        try check(unlimited.allocationSummary == "Unlimited API allocation",
+                  "Unlimited API allocation without a custom target must not look like zero percent.")
+        let unavailable = try JSONDecoder().decode(AccountData.self, from: Data("""
+        {"key":"github.com:4","name":"Synthetic","login":"fixture","host":"github.com",
+         "details":{"unlimited":false,"isCurrentPeriod":false},"freshness":"Stale","customBudgetUsd":50}
+        """.utf8))
+        try check(unavailable.allocationSummary.contains("Consumption unavailable"),
+                  "Saved budgets do not fabricate unavailable consumption.")
         model.selectAccount(account.key)
         model.loadAccountDraft(account.key)
         let load = bridge.lastRequest
@@ -45,6 +57,12 @@ enum SettingsFormTests {
         try check(model.hasUnsavedChanges, "Toggles participate in dirty tracking.")
         model.accountDraft.showPeriodEstimate = false
         try check(!model.hasUnsavedChanges, "Returning toggles to the original value makes the form clean.")
+        model.accountDraft.inheritIncrement = false
+        model.accountDraft.increment = "invalid hidden draft"
+        model.accountDraft.inheritIncrement = true
+        model.accountDraft.name = "Changed"
+        model.accountDraft.name = "Synthetic"
+        try check(!model.hasUnsavedChanges, "Reverted names and inherited overrides ignore inactive draft values.")
         model.accountDraft.name = String(repeating: "x", count: 129)
         model.accountDraft.thresholds = "0, test"
         model.accountDraft.inheritIncrement = false
@@ -102,6 +120,20 @@ enum SettingsFormTests {
         model.poll()
         try check(model.page == .accounts && model.accountDraft.budget == "75.00" && model.hasUnsavedChanges &&
                   model.formMessage == "Synthetic save failed.", "Failed persistence retains the draft and cancels navigation.")
+        let failedDraft = model.accountDraft
+        bridge.requestError = "Synthetic receipt failure."
+        model.saveChanges()
+        try check(model.accountDraft == failedDraft && model.hasUnsavedChanges && !model.busy && !model.saving &&
+                  model.formMessage == "Synthetic receipt failure.",
+                  "Immediate bridge failure retains the exact draft and releases the saving state.")
+        bridge.requestError = nil
+        model.selectPage(.general)
+        model.resolveUnsavedChanges(.save)
+        try bridge.enqueue("completed", id: bridge.lastRequest["id"], values: ["cancelled": true])
+        model.poll()
+        try check(model.page == .accounts && model.accountDraft == failedDraft && model.hasUnsavedChanges &&
+                  !model.saving && model.formMessage == "Saving was cancelled. Your draft has been retained.",
+                  "Cancelled saves cannot advance the baseline or continue navigation.")
         model.selectPage(.general)
         model.resolveUnsavedChanges(.save)
         try bridge.enqueue("completed", id: bridge.lastRequest["id"])
@@ -157,7 +189,8 @@ enum SettingsFormTests {
             "displayName": "Synthetic", "thresholds": "", "showPeriodEstimate": false, "customBudgetUsd": 50
         ]])
         model.poll()
-        let view = NSHostingView(rootView: AccountEditor(model: model, account: account).frame(width: 500, height: 400))
+        let layout = PreferenceLayoutProbe()
+        let view = NSHostingView(rootView: measuredForm(AccountEditor(model: model, account: account), layout: layout))
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 500, height: 400),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -168,6 +201,8 @@ enum SettingsFormTests {
             for _ in 0..<20 { view.layoutSubtreeIfNeeded(); RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
         }
         settle()
+        try checkFooter(view, layout: layout)
+        let savedActions = layout.frames.filter { $0.key == "SavePreferences" || $0.key == "CancelPreferences" }
         func fields(_ root: NSView) -> [NSTextField] {
             (root as? NSTextField).map { [$0] } ?? root.subviews.flatMap { fields($0) }
         }
@@ -176,24 +211,27 @@ enum SettingsFormTests {
         }
         field.scrollToVisible(field.bounds)
         window.makeFirstResponder(field)
-        guard let editor = field.currentEditor() else { throw AppError.message("The budget field could not begin native editing.") }
-        editor.string = "invalid"
-        field.stringValue = "invalid"
-        field.sendAction(field.action, to: field.target)
-        model.accountDraft.budget = "invalid"
+        guard let editor = field.currentEditor() as? NSTextView else {
+            throw AppError.message("The budget field could not begin native editing.")
+        }
+        editor.selectAll(nil)
+        editor.insertText("invalid", replacementRange: editor.selectedRange())
+        let selection = editor.selectedRange()
         model.saveChanges()
         settle()
         guard fields(view).contains(where: { $0 === field }), field.currentEditor() === editor,
-              model.accountDraft.budget == "invalid", model.fieldErrors["budget"] != nil else {
-            throw AppError.message("Inline validation replaced the active native editor or lost its focus/draft.")
+              window.firstResponder === editor, editor.selectedRange() == selection,
+              model.accountDraft.budget == "invalid", model.fieldErrors["budget"] != nil,
+              (layout.frames["CustomBudgetError"]?.height ?? 0) > 0,
+              layout.frames.filter({ savedActions[$0.key] != nil }) == savedActions else {
+            throw AppError.message("Inline validation must preserve the editor, selection, draft and fixed action bounds.")
         }
-        editor.string = "50"
-        field.stringValue = "50"
-        field.sendAction(field.action, to: field.target)
-        model.accountDraft.budget = "50"
+        try checkFooter(view, layout: layout)
+        editor.selectAll(nil)
+        editor.insertText("50", replacementRange: editor.selectedRange())
         settle()
         guard fields(view).contains(where: { $0 === field }), field.currentEditor() === editor,
-              model.fieldErrors["budget"] == nil else {
+              model.accountDraft.budget == "50", model.fieldErrors["budget"] == nil else {
             throw AppError.message("Correcting inline validation replaced the native editor.")
         }
         window.makeFirstResponder(nil)
@@ -214,10 +252,12 @@ enum SettingsFormTests {
         for page in [SettingsPage.general, .notifications] {
             model.selectPage(page)
             model.prepareGlobalDraft()
-            let preferences = NSHostingView(rootView: PreferencesView(model: model, notifications: page == .notifications)
-                .frame(width: 500, height: 400))
+            layout.frames = [:]
+            let preferences = NSHostingView(rootView: measuredForm(
+                PreferencesView(model: model, notifications: page == .notifications), layout: layout))
             window.contentView = preferences
             for _ in 0..<20 { preferences.layoutSubtreeIfNeeded(); RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+            try checkFooter(preferences, layout: layout)
             if page == .general { model.globalDraft.minutes = "15" }
             else { model.globalDraft.notifications = false }
             for _ in 0..<20 { preferences.layoutSubtreeIfNeeded(); RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
@@ -237,6 +277,13 @@ enum SettingsFormTests {
             guard !model.hasUnsavedChanges else {
                 throw AppError.message("Cancel is not clickable in the constrained \(page.rawValue) footer.")
             }
+            if page == .general { model.globalDraft.minutes = "4" }
+            else { model.globalDraft.increment = "invalid" }
+            model.saveChanges()
+            for _ in 0..<20 { preferences.layoutSubtreeIfNeeded(); RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+            try checkFooter(preferences, layout: layout)
+            guard !model.fieldErrors.isEmpty else { throw AppError.message("The constrained form did not show validation.") }
+            model.cancelChanges()
         }
         var alert: NSAlert?
         model.unsavedChangesRequested = {
@@ -280,5 +327,28 @@ enum SettingsFormTests {
             throw AppError.message("Native Save failure lost the draft or continued navigation.")
         }
         model.cancelChanges()
+    }
+
+    private static func measuredForm(_ form: some View, layout: PreferenceLayoutProbe) -> some View {
+        form.frame(width: 500, height: 400)
+            .overlayPreferenceValue(PreferenceBounds.self) { anchors in
+                GeometryReader { geometry in
+                    let frames = anchors.mapValues { geometry[$0] }
+                    Color.clear.onAppear { layout.frames = frames }
+                        .onChange(of: frames) { _, value in layout.frames = value }
+                }.allowsHitTesting(false)
+            }
+    }
+
+    private static func checkFooter(_ view: NSView, layout: PreferenceLayoutProbe) throws {
+        guard let save = layout.frames["SavePreferences"], let cancel = layout.frames["CancelPreferences"],
+              view.bounds.contains(save), view.bounds.contains(cancel), save.maxY > 330, cancel.maxY > 330 else {
+            throw AppError.message("Measured Save and Cancel bounds must remain inside the bottom of the 500 x 400 form.")
+        }
+    }
+
+    @MainActor
+    private final class PreferenceLayoutProbe {
+        var frames: [String: CGRect] = [:]
     }
 }
