@@ -160,11 +160,15 @@ enum ModelTests {
 final class FixtureBridge: ApplicationBridge {
     var requests: [[String: Any]] = []
     var events: [BridgeEvent] = []
+    var requestError: String?
     var lastRequest: [String: Any] { requests.last! }
 
     func request(_ fields: [String: Any]) throws -> Receipt {
         requests.append(fields)
-        return Receipt(error: nil)
+        if fields["method"] as? String == "form.validate" {
+            return try NativeApplicationBridge().request(fields)
+        }
+        return Receipt(error: requestError)
     }
 
     func poll() throws -> [BridgeEvent] {

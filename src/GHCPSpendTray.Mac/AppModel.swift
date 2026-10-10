@@ -54,6 +54,21 @@ final class AppModel: ObservableObject {
     @Published var selectedAccount: String?
     @Published var notificationPermission: NotificationPermission?
     @Published var notificationBusy = false
+    @Published var accountDraft = AccountDraft() { didSet { draftChanged() } }
+    @Published var globalDraft = GlobalDraft() { didSet { draftChanged() } }
+    @Published private(set) var formLoaded = false
+    @Published private(set) var saving = false
+    @Published private(set) var fieldErrors: [String: String] = [:]
+    @Published private(set) var formMessage: String?
+    @Published private(set) var budgetPreview: String?
+    @Published private(set) var pendingNavigation = false
+    var unsavedChangesRequested: (() -> Void)?
+    private var savedAccount: AccountDraft?
+    private var savedGlobal: GlobalDraft?
+    private var accountLoadRevision = 0
+    private var loadingDraft = false
+    private var continuation: (() -> Void)?
+    private var cancellation: (() -> Void)?
     let directory: URL
     let demo: Bool
     let updates: AppUpdates
@@ -129,12 +144,18 @@ final class AppModel: ObservableObject {
         do {
             let events = try bridge.poll()
             for event in events {
-                if let settings = event.settings { self.settings = settings }
+                if let settings = event.settings {
+                    self.settings = settings
+                    if (page == .general || page == .notifications) && formLoaded && !hasUnsavedChanges && !saving {
+                        loadGlobalDraft()
+                    }
+                }
                 switch event.kind {
                 case "state":
                     if let dashboard = event.dashboard {
                         self.dashboard = dashboard
                         dashboardChanged?(dashboard)
+                        if formLoaded && page == .accounts { refreshFormValidation(markAll: false) }
                     }
                 case "completed":
                     if let id = event.id { callbacks.removeValue(forKey: id)?(event) }
@@ -177,20 +198,27 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func openSettings(_ page: SettingsPage = .usage) {
-        self.page = page
-        showSettings?()
+    func openSettings(_ page: SettingsPage = .usage, accountKey: String? = nil) {
+        navigate {
+            self.setPage(page, accountKey: accountKey)
+            self.showSettings?()
+        }
     }
 
     func addAccount() {
         guard !busy else { return }
+        navigate { self.beginAddAccount() }
+    }
+
+    private func beginAddAccount() {
+        setPage(.accounts)
         reconnect = nil
         reconnectClientId = nil
         signInHost = "github.com"
         signInClientId = ""
         editingHost = false
         showingSignIn = true
-        openSettings(.accounts)
+        showSettings?()
         startSignIn()
     }
 
@@ -207,8 +235,17 @@ final class AppModel: ObservableObject {
     }
 
     func reconnectAccount(_ account: AccountData) {
+        guard !busy else { return }
+        navigate { self.beginReconnect(account) }
+    }
+
+    private func beginReconnect(_ account: AccountData) {
         send("account.preferences", fields: ["key": account.key]) { [weak self] event in
-            guard let self, let preferences = event.preferences else { return }
+            guard let self else { return }
+            guard let preferences = event.preferences, event.error == nil else {
+                self.error = event.error ?? "Could not load account preferences."
+                return
+            }
             self.reconnect = account
             self.reconnectClientId = preferences.clientId
             self.signInHost = account.host
@@ -369,5 +406,216 @@ final class AppModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         bridge.shutdown()
+    }
+
+    var hasUnsavedChanges: Bool {
+        guard formLoaded else { return false }
+        if page == .accounts, let savedAccount {
+            return accountDraft.activeValues != savedAccount.activeValues
+        }
+        return (page == .general || page == .notifications) && savedGlobal != nil && globalDraft != savedGlobal
+    }
+
+    var formStatus: String { saving ? "Saving..." : hasUnsavedChanges ? "Unsaved changes" : "All changes saved" }
+
+    func selectPage(_ page: SettingsPage) {
+        guard self.page != page else { return }
+        navigate { self.setPage(page) }
+    }
+
+    func selectAccount(_ key: String?) {
+        guard selectedAccount != key || page != .accounts else { return }
+        navigate { self.setPage(.accounts, accountKey: key) }
+    }
+
+    private func setPage(_ page: SettingsPage, accountKey: String? = nil) {
+        if self.page == page && selectedAccount == accountKey && formLoaded { return }
+        accountLoadRevision += 1
+        formLoaded = false
+        savedAccount = nil
+        savedGlobal = nil
+        fieldErrors = [:]
+        formMessage = nil
+        budgetPreview = nil
+        self.page = page
+        selectedAccount = accountKey
+    }
+
+    func loadAccountDraft(_ key: String) {
+        guard !formLoaded else { return }
+        accountLoadRevision += 1
+        let revision = accountLoadRevision
+        send("account.preferences", fields: ["key": key]) { [weak self] event in
+            guard let self, revision == self.accountLoadRevision, self.selectedAccount == key, self.page == .accounts else { return }
+            guard event.error == nil, let preferences = event.preferences else {
+                self.formMessage = event.error ?? "Could not load account preferences."
+                return
+            }
+            self.loadingDraft = true
+            self.accountDraft = AccountDraft(preferences)
+            self.savedAccount = self.accountDraft
+            self.loadingDraft = false
+            self.formLoaded = true
+            self.refreshFormValidation(markAll: false)
+        }
+    }
+
+    func prepareGlobalDraft() {
+        if !formLoaded { loadGlobalDraft() }
+    }
+
+    private func loadGlobalDraft() {
+        guard let settings else { return }
+        loadingDraft = true
+        globalDraft = GlobalDraft(settings)
+        savedGlobal = globalDraft
+        loadingDraft = false
+        formLoaded = true
+    }
+
+    private func draftChanged() {
+        guard formLoaded && !loadingDraft else { return }
+        notice = nil
+        refreshFormValidation(markAll: false)
+    }
+
+    @discardableResult
+    private func refreshFormValidation(markAll: Bool) -> Receipt? {
+        var form: [String: Any]
+        switch page {
+        case .accounts: form = accountDraft.form
+        case .general, .notifications:
+            form = ["page": page == .general ? "general" : "notifications",
+                    "pollMinutes": globalDraft.minutes, "thresholds": globalDraft.thresholds, "increment": globalDraft.increment]
+        default: return nil
+        }
+        var fields: [String: Any] = ["id": UUID().uuidString, "method": "form.validate", "form": form]
+        if let selectedAccount { fields["key"] = selectedAccount }
+        do {
+            let result = try bridge.request(fields)
+            if let error = result.error { throw AppError.message(error) }
+            guard let errors = result.fieldErrors else { throw AppError.message("The engine returned no form validation result.") }
+            fieldErrors = markAll ? errors : errors.filter { fieldErrors[$0.key] != nil }
+            budgetPreview = result.text
+            if fieldErrors.isEmpty && formMessage == "Correct the highlighted fields before saving." { formMessage = nil }
+            return result
+        } catch {
+            formMessage = (error as? AppError)?.errorDescription ?? "Could not validate preferences. Restart the app."
+            return nil
+        }
+    }
+
+    func cancelChanges() {
+        guard !saving else { return }
+        loadingDraft = true
+        if page == .accounts, let savedAccount { accountDraft = savedAccount }
+        else if let settings { globalDraft = GlobalDraft(settings); savedGlobal = globalDraft }
+        loadingDraft = false
+        fieldErrors = [:]
+        formMessage = nil
+        error = nil
+        notice = nil
+        refreshFormValidation(markAll: false)
+    }
+
+    func saveChanges(afterSave: (() -> Void)? = nil, onFailure: (() -> Void)? = nil) {
+        guard !busy && !saving && formLoaded else {
+            formMessage = "Wait for the current operation to finish, then save your changes."
+            onFailure?()
+            return
+        }
+        guard let result = refreshFormValidation(markAll: true) else { onFailure?(); return }
+        guard fieldErrors.isEmpty else {
+            formMessage = "Correct the highlighted fields before saving."
+            onFailure?()
+            return
+        }
+        var fields: [String: Any]
+        let method: String
+        let account = accountDraft
+        do {
+            if page == .accounts, let key = selectedAccount, let baseline = savedAccount {
+                method = "account.save"
+                fields = ["key": key, "displayName": account.name, "thresholds": account.thresholds,
+                          "showPeriodEstimate": account.showPeriodEstimate]
+                if !account.inheritIncrement { fields["spendIncrementUsd"] = NSDecimalNumber(decimal: result.incrementUsd ?? 0) }
+                if account.useCustomBudget != baseline.useCustomBudget ||
+                    (account.useCustomBudget && account.budget != baseline.budget) {
+                    fields["updateCustomBudget"] = true
+                    fields["customBudgetUsd"] = result.customBudgetUsd.map { NSDecimalNumber(decimal: $0) } ?? NSNull()
+                }
+            } else if var value = settings {
+                method = "settings.save"
+                if page == .general {
+                    guard let minutes = result.pollMinutes else { throw AppError.message("Missing validated refresh interval.") }
+                    value.pollMinutes = minutes
+                    value.startup = globalDraft.startup
+                    value.trayStyle = globalDraft.trayStyle
+                    value.trayMode = globalDraft.trayMode
+                    value.excludedTrayAccounts = globalDraft.excludedAccounts.sorted()
+                } else {
+                    value.notifications = globalDraft.notifications
+                    value.thresholds = globalDraft.thresholds
+                    value.spendIncrementUsd = result.incrementUsd
+                }
+                fields = ["settings": try jsonObject(value)]
+            } else { throw AppError.message("Preferences are not available.") }
+        } catch {
+            formMessage = error.localizedDescription
+            onFailure?()
+            return
+        }
+        saving = true
+        busy = true
+        formMessage = nil
+        error = nil
+        notice = nil
+        if send(method, fields: fields, completion: { [weak self] event in
+            guard let self else { return }
+            self.saving = false
+            self.busy = false
+            guard event.error == nil && !event.cancelled else {
+                self.formMessage = event.error ?? "Saving was cancelled. Your draft has been retained."
+                onFailure?()
+                return
+            }
+            if method == "account.save" { self.savedAccount = account }
+            else { self.loadGlobalDraft() }
+            self.notice = "Settings saved."
+            afterSave?()
+        }) == nil {
+            saving = false
+            busy = false
+            formMessage = error ?? "Could not save preferences."
+            onFailure?()
+        }
+    }
+
+    @discardableResult
+    func requestLeaving(_ action: @escaping () -> Void, cancelled: (() -> Void)? = nil) -> Bool {
+        guard !saving && !pendingNavigation else { cancelled?(); return false }
+        guard hasUnsavedChanges else { return true }
+        continuation = action
+        cancellation = cancelled
+        pendingNavigation = true
+        unsavedChangesRequested?()
+        return false
+    }
+
+    private func navigate(_ action: @escaping () -> Void) {
+        if requestLeaving(action) { action() }
+    }
+
+    func resolveUnsavedChanges(_ choice: UnsavedChangesChoice) {
+        guard pendingNavigation, let action = continuation else { return }
+        let cancelled = cancellation
+        continuation = nil
+        cancellation = nil
+        pendingNavigation = false
+        switch choice {
+        case .keepEditing: cancelled?()
+        case .discard: cancelChanges(); action()
+        case .save: saveChanges(afterSave: action, onFailure: cancelled)
+        }
     }
 }

@@ -36,16 +36,16 @@ struct AccountRow: View {
             if let percent = account.percent {
                 ProgressView(value: min(max(NSDecimalNumber(decimal: percent).doubleValue, 0), 100), total: 100)
                     .tint(percent >= 100 ? .red : .accentColor)
-                    .accessibilityLabel("Allocation consumed")
+                    .accessibilityLabel("\(account.targetLabel) consumed")
                     .accessibilityValue("\(decimalText(percent)) percent")
-                Text("\(decimalText(percent))% of \(money(account.allocationUsd)) allocation")
+                Text(account.allocationSummary)
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text(account.details.unlimited ? "Unlimited allocation" : "Allocation unavailable")
+                Text(account.allocationSummary)
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let estimate = account.periodEstimate {
-                PeriodEstimateRow(estimate: estimate)
+                PeriodEstimateRow(estimate: estimate, customBudget: account.customBudgetUsd != nil)
             }
             Text(account.freshness).font(.caption)
                 .foregroundStyle(account.freshness == "Fresh" ? Color.secondary : Color.orange)
@@ -57,6 +57,7 @@ struct AccountRow: View {
 
 struct PeriodEstimateRow: View {
     let estimate: PeriodEstimateData
+    var customBudget = false
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
@@ -68,7 +69,7 @@ struct PeriodEstimateRow: View {
             if let reason = estimate.unavailableReason {
                 Text(reason).fixedSize(horizontal: false, vertical: true)
             } else {
-                Text(estimate.summary).fixedSize(horizontal: false, vertical: true)
+                Text(estimate.summary(customBudget: customBudget)).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle((estimate.overAllocationUsd ?? 0) > 0 ? Color.orange : Color.secondary)
             }
         }
@@ -161,8 +162,7 @@ struct FlyoutView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(model.dashboard?.accounts ?? []) { account in
                             Button {
-                                model.selectedAccount = account.key
-                                model.openSettings(.accounts)
+                                model.openSettings(.accounts, accountKey: account.key)
                             } label: { AccountRow(account: account) }
                                 .buttonStyle(.plain)
                             Divider()
@@ -190,7 +190,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         NavigationSplitView {
-            List(SettingsPage.allCases, selection: $model.page) { page in
+            List(SettingsPage.allCases, selection: Binding(get: { model.page }, set: { model.selectPage($0) })) { page in
                 Label(page.rawValue, systemImage: page.icon).tag(page)
             }.navigationSplitViewColumnWidth(min: 150, ideal: 165, max: 200)
         } detail: {
@@ -296,6 +296,7 @@ struct AccountDiagnosticsView: View {
                 row("Credits used (observed)", decimalText(account.details.creditsUsed).isEmpty ? "Unavailable" : decimalText(account.details.creditsUsed))
                 row("Consumption (observed)", money(account.details.observedConsumptionUsd))
                 row("Allocation (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
+                if let budget = account.customBudgetUsd { row("Custom tracking budget", money(budget)) }
                 row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ??
                     (account.details.unlimited ? "Not applicable (unlimited allocation)" : "Unavailable"))
                 row("Current billing period", account.details.isCurrentPeriod ? "Yes" : "No")
@@ -334,11 +335,12 @@ struct AccountsView: View {
                 Button("Add Account...") { model.addAccount() }.disabled(model.busy)
             }.padding([.horizontal, .top], 24)
             if let account = model.dashboard?.accounts.first(where: { $0.key == model.selectedAccount }) {
-                Button("All Accounts") { model.selectedAccount = nil }.padding(.horizontal, 24)
+                Button("All Accounts") { model.selectAccount(nil) }.disabled(model.saving || model.pendingNavigation)
+                    .padding(.horizontal, 24)
                 AccountEditor(model: model, account: account).id(account.key)
             } else {
                 List(model.dashboard?.accounts ?? []) { account in
-                    AccountManagementRow(account: account) { model.selectedAccount = account.key }
+                    AccountManagementRow(account: account) { model.selectAccount(account.key) }
                         .listRowSeparator(.hidden).listRowBackground(Color.clear)
                 }
                 if model.dashboard?.accounts.isEmpty == true {
@@ -380,69 +382,68 @@ struct AccountManagementRow: View {
 struct AccountEditor: View {
     @ObservedObject var model: AppModel
     let account: AccountData
-    @State private var name = ""
-    @State private var thresholds = ""
-    @State private var increment = ""
-    @State private var inherit = true
-    @State private var showPeriodEstimate = false
-    @State private var loaded = false
     @State private var removing = false
     var body: some View {
-        Form {
-            Section {
-                AccountRow(account: account)
-                AccountDiagnosticsView(account: account)
-                HStack {
-                    Button("Refresh") { model.perform("account.refresh", fields: ["key": account.key]) }
-                    Button("Reconnect...") { model.reconnectAccount(account) }
-                    Button("Manage OAuth Grants") { model.openURL("https://\(account.host)/settings/applications") }
-                }.disabled(model.busy)
-            }
-            Section("Account Preferences") {
-                TextField("Display name", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Percentage alerts", text: $thresholds, prompt: Text("Inherit global thresholds"))
-                    .textFieldStyle(.roundedBorder)
-                Toggle("Inherit global USD increment", isOn: $inherit)
-                if !inherit {
-                    TextField("USD increment (0 disables)", text: $increment)
-                        .textFieldStyle(.roundedBorder)
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    AccountRow(account: account)
+                    AccountDiagnosticsView(account: account)
+                    HStack {
+                        Button("Refresh") { model.perform("account.refresh", fields: ["key": account.key]) }
+                        Button("Reconnect...") { model.reconnectAccount(account) }
+                        Button("Manage OAuth Grants") { model.openURL("https://\(account.host)/settings/applications") }
+                    }.disabled(model.busy || !model.formLoaded)
                 }
-                Toggle("Show estimated period consumption", isOn: $showPeriodEstimate)
-                    .disabled(!loaded || model.busy)
-                    .accessibilityIdentifier("ShowPeriodEstimate")
-                Text("Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Button("Save") {
-                        do {
-                            var fields: [String: Any] = ["key": account.key, "displayName": name, "thresholds": thresholds,
-                                                       "showPeriodEstimate": showPeriodEstimate]
-                            if !inherit { fields["spendIncrementUsd"] = NSDecimalNumber(decimal: try parseAmount(increment) ?? 0) }
-                            model.perform("account.save", fields: fields)
-                        } catch { model.error = error.localizedDescription }
-                    }.disabled(model.busy || !loaded)
-                    Spacer()
+                Section("Usage budget") {
+                    Picker("Tracking target", selection: $model.accountDraft.useCustomBudget) {
+                        Text("Use API allocation").tag(false)
+                        Text("Use a custom budget").tag(true)
+                    }.pickerStyle(.radioGroup).accessibilityIdentifier("BudgetMode")
+                    if model.accountDraft.useCustomBudget {
+                        PreferenceTextField("Custom budget (USD)", text: $model.accountDraft.budget,
+                                            error: model.fieldErrors["budget"], identifier: "CustomBudget")
+                        Text(model.budgetPreview ?? "Preparing budget preview...")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("BudgetPreview")
+                    }
+                    Text("Budgets are tracking targets, not spending caps. Consumption and percentage alerts use this target for the API billing period, with a calendar-month fallback. Choose Use API allocation and Save to remove the custom target.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("API allocation: \(account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Account Preferences") {
+                    PreferenceTextField("Display name", text: $model.accountDraft.name,
+                                        error: model.fieldErrors["name"], identifier: "DisplayName")
+                    PreferenceTextField("Percentage alerts", text: $model.accountDraft.thresholds,
+                                        error: model.fieldErrors["thresholds"], identifier: "AccountThresholds",
+                                        prompt: "Inherit global thresholds")
+                    Toggle("Inherit global USD increment", isOn: $model.accountDraft.inheritIncrement)
+                    if !model.accountDraft.inheritIncrement {
+                        PreferenceTextField("USD increment (0 disables)", text: $model.accountDraft.increment,
+                                            error: model.fieldErrors["increment"], identifier: "AccountIncrement")
+                    }
+                    Toggle("Show estimated period consumption", isOn: $model.accountDraft.showPeriodEstimate)
+                        .accessibilityIdentifier("ShowPeriodEstimate")
+                    Text("Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
                     Button("Remove Account...", role: .destructive) { removing = true }.disabled(model.busy)
                 }
-            }
-        }.formStyle(.grouped)
-        .onAppear {
-            model.send("account.preferences", fields: ["key": account.key]) { event in
-                guard let value = event.preferences else { return }
-                name = value.displayName
-                thresholds = value.thresholds
-                increment = decimalText(value.spendIncrementUsd)
-                inherit = value.spendIncrementUsd == nil
-                showPeriodEstimate = value.showPeriodEstimate
-                loaded = true
-            }
+            }.formStyle(.grouped).disabled(!model.formLoaded || model.saving || model.pendingNavigation)
+            FormActions(model: model)
         }
+        .onAppear { model.loadAccountDraft(account.key) }
         .confirmationDialog("Remove \(account.name) from this Mac?", isPresented: $removing) {
             Button("Remove Account", role: .destructive) {
-                model.perform("account.remove", fields: ["key": account.key]) { event in
-                    if event.error == nil { model.selectedAccount = nil; model.notice = "Account removed from this Mac." }
+                let remove = {
+                    model.perform("account.remove", fields: ["key": account.key]) { event in
+                        if event.error == nil { model.selectAccount(nil); model.notice = "Account removed from this Mac." }
+                    }
                 }
+                if model.requestLeaving(remove) { remove() }
             }
         } message: {
             Text("This deletes its local credentials, alert state, and cached avatar. Retained history and recovery copies may remain. It does not revoke the OAuth grant on GitHub.")
@@ -453,19 +454,11 @@ struct AccountEditor: View {
 struct PreferencesView: View {
     @ObservedObject var model: AppModel
     let notifications: Bool
-    @State private var minutes = "10"
-    @State private var thresholds = "50, 80, 100"
-    @State private var increment = ""
-    @State private var enabled = true
-    @State private var startup = false
-    @State private var trayStyle: TrayIconStyle = .pie
-    @State private var trayMode: TrayDisplayMode = .rollUp
-    @State private var excludedAccounts = Set<String>()
     @State private var trayPreview: TrayPresentation?
     @State private var previewRevision = 0
-    @State private var loaded = false
     var body: some View {
-        Form {
+        VStack(spacing: 0) {
+          Form {
             if notifications {
                 Section("macOS Permission") {
                     if model.demo {
@@ -485,12 +478,12 @@ struct PreferencesView: View {
                     }
                 }
                 Section("Notifications") {
-                    Toggle("Enable consumption alerts", isOn: $enabled)
-                    TextField("Percentage thresholds", text: $thresholds)
-                        .textFieldStyle(.roundedBorder)
+                    Toggle("Enable consumption alerts", isOn: $model.globalDraft.notifications)
+                    PreferenceTextField("Percentage thresholds", text: $model.globalDraft.thresholds,
+                                        error: model.fieldErrors["thresholds"], identifier: "Thresholds")
                     Text("Separate positive percentages with commas. Defaults: 50, 80, 100.").font(.caption).foregroundStyle(.secondary)
-                    TextField("USD increment", text: $increment, prompt: Text("Disabled"))
-                        .textFieldStyle(.roundedBorder)
+                    PreferenceTextField("USD increment", text: $model.globalDraft.increment,
+                                        error: model.fieldErrors["increment"], identifier: "Increment", prompt: "Disabled")
                     Text("For example, 50 alerts at $50, $100, and so on. Per-account preferences can override or disable these alerts.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Send Test Notification") { Task { await model.testNotification() } }
@@ -500,31 +493,31 @@ struct PreferencesView: View {
                 }
             } else {
                 Section("General") {
-                    TextField("Refresh interval (minutes)", text: $minutes)
-                        .textFieldStyle(.roundedBorder)
+                    PreferenceTextField("Refresh interval (minutes)", text: $model.globalDraft.minutes,
+                                        error: model.fieldErrors["minutes"], identifier: "PollMinutes")
                     Text("From 5 to 1440 minutes; default 10.").font(.caption).foregroundStyle(.secondary)
-                    Toggle("Launch at login", isOn: $startup).disabled(model.settings?.canChangeStartup != true || model.demo)
+                    Toggle("Launch at login", isOn: $model.globalDraft.startup).disabled(model.settings?.canChangeStartup != true || model.demo)
                     Text(model.settings?.startupDescription ?? "").font(.caption).foregroundStyle(.secondary)
                     Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() }.disabled(model.demo)
                     Button("Open Data Folder") { model.openDataFolder() }
                 }
                 Section("Menu Bar") {
-                    Text("Show fresh allocation usage independently of dollar totals. New accounts are included by default.")
+                    Text("Show fresh usage against custom budgets or API allocations independently of dollar totals. New accounts are included by default.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Picker("Icon style", selection: $trayStyle) {
+                    Picker("Icon style", selection: $model.globalDraft.trayStyle) {
                         Text("Pie chart").tag(TrayIconStyle.pie)
                         Text("Percentage number").tag(TrayIconStyle.percentage)
                     }
-                    Picker("Icons to show", selection: $trayMode) {
+                    Picker("Icons to show", selection: $model.globalDraft.trayMode) {
                         Text("One roll-up icon").tag(TrayDisplayMode.rollUp)
                         Text("One icon per selected account").tag(TrayDisplayMode.perAccount)
                     }
                     ForEach(model.dashboard?.accounts ?? []) { account in
                         Toggle("\(account.name) (\(account.host))", isOn: Binding(
-                            get: { !excludedAccounts.contains(account.key) },
+                            get: { !model.globalDraft.excludedAccounts.contains(account.key) },
                             set: { include in
-                                if include { excludedAccounts.remove(account.key) }
-                                else { excludedAccounts.insert(account.key) }
+                                if include { model.globalDraft.excludedAccounts.remove(account.key) }
+                                else { model.globalDraft.excludedAccounts.insert(account.key) }
                             }))
                     }
                     Text("Live Preview").font(.headline)
@@ -545,12 +538,11 @@ struct PreferencesView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Button("Save") { save() }.disabled(model.busy)
-        }.formStyle(.grouped).onAppear { load() }
-        .onChange(of: notifications) { _, _ in load() }
-        .onChange(of: trayStyle) { _, _ in preview() }
-        .onChange(of: trayMode) { _, _ in preview() }
-        .onChange(of: excludedAccounts) { _, _ in preview() }
+          }.formStyle(.grouped).disabled(!model.formLoaded || model.saving || model.pendingNavigation)
+          FormActions(model: model)
+        }.onAppear { model.prepareGlobalDraft(); preview() }
+        .onChange(of: notifications) { _, _ in model.prepareGlobalDraft(); preview() }
+        .onChange(of: model.globalDraft) { _, _ in preview() }
         .onReceive(model.$dashboard) { _ in preview() }
         .task(id: notifications) { if notifications { await model.refreshNotificationPermission() } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -558,25 +550,11 @@ struct PreferencesView: View {
         }
     }
 
-    private func load() {
-        guard let value = model.settings else { return }
-        minutes = String(value.pollMinutes)
-        thresholds = value.thresholds
-        increment = decimalText(value.spendIncrementUsd)
-        enabled = value.notifications
-        startup = value.startup
-        trayStyle = value.trayStyle
-        trayMode = value.trayMode
-        excludedAccounts = Set(value.excludedTrayAccounts ?? [])
-        loaded = true
-        preview()
-    }
-
     private func preview() {
-        guard loaded && !notifications, var value = model.settings else { return }
-        value.trayStyle = trayStyle
-        value.trayMode = trayMode
-        value.excludedTrayAccounts = Array(excludedAccounts)
+        guard model.formLoaded && !notifications, var value = model.settings else { return }
+        value.trayStyle = model.globalDraft.trayStyle
+        value.trayMode = model.globalDraft.trayMode
+        value.excludedTrayAccounts = model.globalDraft.excludedAccounts.sorted()
         previewRevision += 1
         let revision = previewRevision
         do {
@@ -586,25 +564,98 @@ struct PreferencesView: View {
         } catch { model.error = "Could not prepare the menu-bar preview." }
     }
 
-    private func save() {
-        guard var value = model.settings else { return }
-        do {
-            if notifications {
-                value.notifications = enabled
-                value.thresholds = thresholds
-                value.spendIncrementUsd = try parseAmount(increment)
-            } else {
-                guard let interval = Int(minutes), (5...1440).contains(interval) else {
-                    throw AppError.message("Enter a refresh interval from 5 through 1440 minutes.")
-                }
-                value.pollMinutes = interval
-                value.startup = startup
-                value.trayStyle = trayStyle
-                value.trayMode = trayMode
-                value.excludedTrayAccounts = Array(excludedAccounts)
+}
+
+struct PreferenceBounds: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] { [:] }
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+struct PreferenceTextField: View {
+    let title: String
+    @Binding var text: String
+    let error: String?
+    let identifier: String
+    var prompt: String = ""
+
+    init(_ title: String, text: Binding<String>, error: String?, identifier: String, prompt: String = "") {
+        self.title = title
+        _text = text
+        self.error = error
+        self.identifier = identifier
+        self.prompt = prompt
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField(title, text: $text, prompt: Text(prompt))
+                .textFieldStyle(.roundedBorder)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(error == nil ? Color.clear : Color.red, lineWidth: 2))
+                .accessibilityIdentifier(identifier)
+                .accessibilityHint(error ?? prompt)
+            if let error {
+                Label(error, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(identifier + "Error")
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { [identifier + "Error": $0] }
             }
-            model.perform("settings.save", fields: ["settings": try jsonObject(value)]) { _ in load() }
-        } catch { model.error = error.localizedDescription }
+        }
+    }
+}
+
+struct FormActions: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            if let message = model.formMessage {
+                Label(message, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("FormMessage")
+            }
+            HStack {
+                Text(model.formLoaded ? model.formStatus : "Loading preferences...")
+                    .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("FormStatus")
+                if model.saving { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel") { model.cancelChanges() }
+                    .disabled(model.saving || !model.formLoaded || model.pendingNavigation)
+                    .accessibilityIdentifier("CancelPreferences")
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["CancelPreferences": $0] }
+                Button("Save") { model.saveChanges() }.buttonStyle(.borderedProminent)
+                    .disabled(model.busy || !model.formLoaded || model.pendingNavigation)
+                    .accessibilityIdentifier("SavePreferences")
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["SavePreferences": $0] }
+            }
+        }
+        .padding([.horizontal, .bottom], 20).padding(.top, 4)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("FormActions")
+    }
+}
+
+@MainActor
+enum UnsavedChangesAlert {
+    static func make() -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Save changes before leaving?"
+        alert.informativeText = "Save your preferences, discard the draft, or keep editing. Invalid or failed saves will keep you on this page."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Keep Editing")
+        alert.buttons[2].keyEquivalent = "\u{1b}"
+        return alert
+    }
+
+    static func choice(_ response: NSApplication.ModalResponse) -> UnsavedChangesChoice {
+        switch response {
+        case .alertFirstButtonReturn: return .save
+        case .alertSecondButtonReturn: return .discard
+        default: return .keepEditing
+        }
     }
 }
 

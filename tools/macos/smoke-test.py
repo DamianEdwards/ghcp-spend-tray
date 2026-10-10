@@ -43,10 +43,10 @@ def smoke(app):
             if "PASS: native notification settings callback." not in stdout:
                 raise RuntimeError("The app did not exercise its native notification settings callback.")
             result = Path(directory, "smoke-result.txt").read_text()
-            if not result.startswith("PASS:"):
+            if not result.startswith("PASS:") or "protected close and save-before-Quit" not in result:
                 raise RuntimeError("The application did not complete its smoke assertions.")
             for page in ("Flyout", "FlyoutWithExample", "FlyoutWithEstimate", "AccountWithEstimate",
-                         "Usage", "Accounts", "General", "Notifications", "About"):
+                         "AccountWithBudget", "Usage", "Accounts", "General", "Notifications", "About"):
                 if Path(directory, f"{page}.png").stat().st_size < 1000:
                     raise RuntimeError(f"{page} did not render.")
 

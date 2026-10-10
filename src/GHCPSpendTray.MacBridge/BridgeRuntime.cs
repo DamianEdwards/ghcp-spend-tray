@@ -26,6 +26,23 @@ public sealed class BridgeRuntime : IDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (command.Method == "form.validate")
+            {
+                var input = command.Form ?? throw new ArgumentException("Missing preferences form.");
+                var result = FormValidation.Validate(input);
+                if (input.Page == "account" && input.UseCustomBudget)
+                {
+                    AccountView? account;
+                    lock (_stateGate) account = _dashboard?.Accounts.SingleOrDefault(a => a.Key == command.Key);
+                    string text = result.CustomBudgetUsd is not { } budget
+                        ? "Enter a positive USD amount with up to two decimal places."
+                        : account is { Freshness: "Fresh", ConsumptionUsd: { } used } && account.Details.IsCurrentPeriod
+                            ? FormattableString.Invariant($"Preview: ${used:0.00} consumed = {UsageBudget.Percentage(used, budget):0.##}% of ${budget:0.00} custom budget")
+                            : "Preview unavailable until fresh current-period consumption is available.";
+                    result = result with { Text = text };
+                }
+                return result;
+            }
             if (command.Method == "platform.reply")
             {
                 _platform.Complete(Required(command.TargetId), command.Reply ?? throw new ArgumentException("Missing platform reply."));
@@ -66,11 +83,13 @@ public sealed class BridgeRuntime : IDisposable
             {
                 string key = Required(command.Key);
                 var preferences = Controller.AccountSettings(key);
+                decimal? budget;
+                lock (_stateGate) budget = _dashboard?.Accounts.SingleOrDefault(a => a.Key == key)?.CustomBudgetUsd;
                 _events.Enqueue(new()
                 {
                     Kind = "completed", Id = command.Id,
                     Preferences = new(preferences.DisplayName, preferences.Thresholds, preferences.SpendIncrementUsd,
-                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate)
+                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate, budget)
                 });
                 return new();
             }
@@ -120,7 +139,8 @@ public sealed class BridgeRuntime : IDisposable
                     break;
                 case "account.save":
                     await Controller.SaveAccountAsync(Required(command.Key), command.DisplayName ?? "",
-                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate);
+                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate,
+                        command.CustomBudgetUsd, command.UpdateCustomBudget);
                     break;
                 case "account.remove":
                     await Controller.RemoveAsync(Required(command.Key));

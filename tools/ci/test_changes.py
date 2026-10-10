@@ -5,6 +5,8 @@ from changes import classify
 class ChangesTests(unittest.TestCase):
     def test_platform_boundaries(self):
         for path in ("src/GHCPSpendTray.Mac/Views.swift", "src/GHCPSpendTray.MacBridge/Exports.cs",
+                     "src/GHCPSpendTray.MacBridge/FormValidation.cs",
+                     "tests/GHCPSpendTray.MacTests/SettingsFormTests.swift",
                      "packaging/macos/Info.plist", "tests/GHCPSpendTray.MacTests/PlatformTests.swift",
                      "tools/macos/build.sh", "tools/macos/architecture.py", "tools/macos/test_architecture.py",
                      ".github/actions/setup-macos/action.yml", ".github/workflows/notarization-status.yml",
@@ -21,6 +23,7 @@ class ChangesTests(unittest.TestCase):
 
     def test_shared_and_unknown(self):
         for path in ("src/GHCPSpendTray.Core/Models.cs", "src/GHCPSpendTray.Application/UiModels.cs",
+                     "tests/GHCPSpendTray.SharedTests/BudgetBridgeTests.cs",
                      "global.json", "Directory.Build.props", ".github/workflows/verify.yml", ".github/workflows/codeql.yml",
                      "tools/ci/changes.py", "tests/GHCPSpendTray.SharedTests/Program.cs", "new-file",
                      "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",
