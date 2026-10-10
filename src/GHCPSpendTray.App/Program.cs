@@ -1078,8 +1078,10 @@ internal static class Program
         });
         await WaitForSettingsUI(shell, "tray account selections");
         (uint Id, nint Image)[] installedIcons = [];
+        bool hasTrayAccounts = false;
         await OnUI(shell, () =>
         {
+            hasTrayAccounts = shell.Session.Dashboard.Accounts.Count > 0;
             installedIcons = shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).ToArray();
             foreach (var account in shell.Session.Dashboard.Accounts)
             {
@@ -1094,9 +1096,16 @@ internal static class Program
             AssertTrayPreview(shell);
             if (!shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).SequenceEqual(installedIcons))
                 throw new InvalidOperationException("Draft exclusions changed installed tray icons.");
+            if (!hasTrayAccounts && (shell.Session.HasUnsavedChanges ||
+                Find(shell.SettingsWindow!, "SaveGeneralSettings") is not Button { IsEnabled: false } ||
+                Find(shell.SettingsWindow!, "CancelSettingsChanges") is not Button { IsEnabled: false }))
+                throw new InvalidOperationException("Empty account exclusions created a draft or enabled Save/Cancel.");
         });
-        await InvokeButtonAsync(shell, "SaveGeneralSettings");
-        await WaitForTraySave();
+        if (hasTrayAccounts)
+        {
+            await InvokeButtonAsync(shell, "SaveGeneralSettings");
+            await WaitForTraySave();
+        }
         await OnUI(shell, () =>
         {
             if (shell.TrayIcons.Count != 1 || shell.TrayIcons.First().AccountKey is not null ||
