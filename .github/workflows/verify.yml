@@ -238,7 +238,16 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-${{ runner.arch }}-macos-
       - name: Verify native bridge, arm64 app, platform tests and synthetic UI
+        id: native_verify
         run: bash tools/macos/verify.sh --app
+      - name: Retain native macOS test diagnostics
+        if: ${{ always() && steps.native_verify.outcome != 'skipped' && steps.native_verify.outcome != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-test-diagnostics
+          path: artifacts/macos-test-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Archive development app
         run: ditto -c -k --keepParent artifacts/macos/GHCPSpendTray.app artifacts/macos/GHCPSpendTray-development.zip
       - name: Retain ad-hoc signed development app

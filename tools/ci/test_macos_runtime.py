@@ -131,3 +131,26 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("static let anchorTolerance: CGFloat = 8", geometry)
         diagnostic = source.split("private func popupSmokeDiagnostic(")[1]
         self.assertIn("contentSize=\\(popover.contentSize)", diagnostic)
+
+    def test_sparkle_fixture_awaits_callbacks_and_retains_failure_diagnostics(self):
+        fixture = (ROOT / "tests/GHCPSpendTray.MacTests/SparkleTests.swift").read_text()
+        self.assertIn("try await server.start()", fixture)
+        self.assertIn("try await probe.completion.value", fixture)
+        self.assertIn("responseData == feedData", fixture)
+        self.assertNotIn("python3", fixture)
+        self.assertNotIn("Task.sleep", fixture)
+        self.assertNotIn("port.txt", fixture)
+        listener = (ROOT / "tests/GHCPSpendTray.MacTests/LoopbackAppcastServer.swift").read_text()
+        self.assertIn('parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)', listener)
+        self.assertIn("case .ready:", listener)
+        self.assertIn("readiness.complete(.success(url))", listener)
+        self.assertIn("connection.cancel()", listener)
+        for name in ("verify", "release"):
+            workflow = (ROOT / f".github/workflows/{name}.yml").read_text()
+            macos = workflow.split("\n  macos:\n")[1].split("\n  macos_")[0]
+            self.assertIn("id: native_verify", macos)
+            self.assertIn("always() && steps.native_verify.outcome", macos)
+            self.assertIn("path: artifacts/macos-test-diagnostics/", macos)
+        verify = (ROOT / "tools/macos/verify.sh").read_text()
+        self.assertIn("set -euo pipefail", verify)
+        self.assertIn("2>&1 | tee artifacts/macos-test-diagnostics/platform-tests.log", verify)
