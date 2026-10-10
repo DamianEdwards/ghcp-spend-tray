@@ -6,6 +6,8 @@ using GHCPSpendTray.Core;
 namespace GHCPSpendTray.App.UI;
 
 internal enum SettingsPage { Usage, General, Accounts, Notifications, About }
+internal enum SettingsField { PollMinutes, Thresholds, Increment, DisplayName, AccountThresholds, AccountIncrement, CustomBudget }
+internal enum UnsavedChangesChoice { Save, Discard, KeepEditing }
 
 internal sealed class AppSession : IDisposable
 {
@@ -15,12 +17,18 @@ internal sealed class AppSession : IDisposable
     private string? _notice;
     private readonly System.Threading.Timer _countdown;
     private bool _disposed;
+    private const string ValidationMessage = "Correct the highlighted fields before saving.";
+    private readonly Dictionary<SettingsField, string> _fieldErrors = [];
+    private GlobalDraft? _savedGlobal;
+    private AccountDraft? _savedAccount;
+    private Action? _pendingNavigation;
     internal IApplicationController Controller { get; }
     internal StoreUpdateSession? StoreUpdates { get; }
     internal DashboardView Dashboard { get; private set; } = new("Loading", "Loading accounts...", "GHCPSpendTray | Loading", []);
     internal SettingsPage Page { get; private set; } = SettingsPage.Usage;
     internal event Action? Changed;
     internal event Action? DashboardChanged;
+    internal event Action? UnsavedChangesRequested;
     internal Action<SettingsPage>? OpenSettings { get; set; }
     internal Action? HideFlyout { get; set; }
     internal Func<bool>? TestNotification { get; set; }
@@ -28,6 +36,7 @@ internal sealed class AppSession : IDisposable
     internal int Revision { get; private set; }
     internal bool Initialized { get; private set; }
     internal bool Busy { get; private set; }
+    internal bool Saving { get; private set; }
     internal bool SigningIn => _signIn is not null;
     internal string? Error { get; private set; }
     internal string? Notice
@@ -66,6 +75,122 @@ internal sealed class AppSession : IDisposable
     internal string AccountIncrement { get; set; } = "";
     internal bool InheritIncrement { get; set; } = true;
     internal bool ShowPeriodEstimate { get; set; }
+    internal bool UseCustomBudget { get; set; }
+    internal string CustomBudget { get; set; } = "";
+    internal string? FieldError(SettingsField field) => _fieldErrors.GetValueOrDefault(field);
+    internal bool HasFieldErrors => _fieldErrors.Count > 0;
+    internal bool HasValidationError => HasFieldErrors && Error == ValidationMessage;
+    internal bool HasEditableForm => Initialized && (Page is SettingsPage.General or SettingsPage.Notifications ||
+        Page == SettingsPage.Accounts && !ShowAddForm && SelectedAccount is { } key &&
+        Dashboard.Accounts.Any(account => account.Key == key));
+    internal bool HasUnsavedChanges => HasEditableForm && (Page == SettingsPage.Accounts
+        ? _savedAccount is not null && CurrentAccountDraft() != _savedAccount
+        : HasGlobalChanges);
+    internal bool HasPendingNavigation => _pendingNavigation is not null;
+    private bool HasGlobalChanges => _savedGlobal is not null && CurrentGlobalDraft() != _savedGlobal;
+
+    private GlobalDraft CurrentGlobalDraft() => new(PollMinutes, Thresholds, Increment, Notifications, Startup,
+        TrayStyle, TrayMode, string.Join("\n", ExcludedTrayAccounts.Order(StringComparer.Ordinal)));
+    private AccountDraft CurrentAccountDraft() => new(SelectedAccount, DisplayName, AccountThresholds,
+        InheritIncrement, InheritIncrement ? "" : AccountIncrement, ShowPeriodEstimate,
+        UseCustomBudget, UseCustomBudget ? CustomBudget : "");
+
+    private sealed record GlobalDraft(string PollMinutes, string Thresholds, string Increment, bool Notifications,
+        bool Startup, TrayIconStyle TrayStyle, TrayDisplayMode TrayMode, string ExcludedAccounts);
+    private sealed record AccountDraft(string? Key, string DisplayName, string Thresholds, bool InheritIncrement,
+        string Increment, bool ShowPeriodEstimate, bool UseCustomBudget, string Budget);
+
+    private bool CanLeaveForm(Action continuation)
+    {
+        if (Saving || HasPendingNavigation) return false;
+        if (!HasUnsavedChanges) return true;
+        _pendingNavigation = continuation;
+        Notify();
+        UnsavedChangesRequested?.Invoke();
+        return false;
+    }
+
+    internal bool TryCloseSettings(Action close) => CanLeaveForm(close);
+
+    internal void ResolveUnsavedChanges(UnsavedChangesChoice choice)
+    {
+        if (_pendingNavigation is not { } continuation) return;
+        _pendingNavigation = null;
+        switch (choice)
+        {
+            case UnsavedChangesChoice.KeepEditing: Notify(); break;
+            case UnsavedChangesChoice.Discard:
+                CancelChanges();
+                if (!HasUnsavedChanges) continuation();
+                break;
+            case UnsavedChangesChoice.Save:
+                if (Busy) { SetError("Wait for the current operation to finish, then save your changes."); break; }
+                if (Page == SettingsPage.Accounts) SaveAccount(continuation);
+                else SaveGlobal(continuation);
+                break;
+            default: throw new ArgumentOutOfRangeException(nameof(choice));
+        }
+    }
+
+    internal void CancelChanges()
+    {
+        if (Saving) return;
+        try
+        {
+            if (Page == SettingsPage.Accounts && SelectedAccount is { } key) ReloadAccount(key);
+            else ReloadSettings();
+            _fieldErrors.Clear(); Error = null; Notice = null;
+            Notify();
+        }
+        catch (AppOperationException ex) { SetError(ex.Message); }
+    }
+
+    internal void RefreshStartup()
+    {
+        if (HasGlobalChanges) return;
+        Startup = Controller.Settings.Startup;
+        _savedGlobal = CurrentGlobalDraft();
+        Notify();
+    }
+
+    internal void SetInput(SettingsField field, string value)
+    {
+        switch (field)
+        {
+            case SettingsField.PollMinutes: PollMinutes = value; break;
+            case SettingsField.Thresholds: Thresholds = value; break;
+            case SettingsField.Increment: Increment = value; break;
+            case SettingsField.DisplayName: DisplayName = value; break;
+            case SettingsField.AccountThresholds: AccountThresholds = value; break;
+            case SettingsField.AccountIncrement: AccountIncrement = value; break;
+            case SettingsField.CustomBudget: CustomBudget = value; break;
+            default: throw new ArgumentOutOfRangeException(nameof(field));
+        }
+        if (_fieldErrors.ContainsKey(field)) ValidateField(field);
+        if (_fieldErrors.Count == 0 && Error == ValidationMessage) Error = null;
+        Notice = null;
+        Notify();
+    }
+
+    internal void SetCustomBudgetEnabled(bool enabled)
+    {
+        UseCustomBudget = enabled;
+        if (!enabled) ClearFieldError(SettingsField.CustomBudget);
+        Notify();
+    }
+
+    internal void SetInheritIncrement(bool inherit)
+    {
+        InheritIncrement = inherit;
+        if (inherit) ClearFieldError(SettingsField.AccountIncrement);
+        Notify();
+    }
+
+    private void ClearFieldError(SettingsField field)
+    {
+        _fieldErrors.Remove(field);
+        if (_fieldErrors.Count == 0 && Error == ValidationMessage) Error = null;
+    }
 
     internal AppSession(IApplicationController controller, Action<Action> dispatch, IStoreUpdates? storeUpdates = null)
     {
@@ -111,6 +236,7 @@ internal sealed class AppSession : IDisposable
     });
     internal void ReloadSettings()
     {
+        _fieldErrors.Clear();
         var settings = Controller.Settings;
         PollMinutes = settings.PollMinutes.ToString(CultureInfo.InvariantCulture);
         Thresholds = settings.Thresholds;
@@ -119,9 +245,12 @@ internal sealed class AppSession : IDisposable
         TrayStyle = settings.TrayStyle; TrayMode = settings.TrayMode;
         ExcludedTrayAccounts.Clear();
         ExcludedTrayAccounts.UnionWith(settings.ExcludedTrayAccounts ?? []);
+        _savedGlobal = CurrentGlobalDraft();
     }
     internal void Navigate(SettingsPage page)
     {
+        if (page != Page && !CanLeaveForm(() => Navigate(page))) return;
+        _fieldErrors.Clear();
         if (SigningIn) CancelSignIn();
         Page = page; Error = null; Notice = null; ConfirmRemove = false;
         if (page == SettingsPage.About) StoreUpdates?.Check();
@@ -129,6 +258,7 @@ internal sealed class AppSession : IDisposable
     }
     internal void AddAccount()
     {
+        if (!CanLeaveForm(AddAccount)) return;
         CancelSignIn();
         Page = SettingsPage.Accounts; ShowAddForm = true; SelectedAccount = null;
         ReconnectKey = null; Host = "github.com"; CustomHost = false; ClientId = "";
@@ -139,23 +269,35 @@ internal sealed class AppSession : IDisposable
     }
     internal void EditAccount(string key)
     {
+        if (!CanLeaveForm(() => EditAccount(key))) return;
         try
         {
             CancelSignIn();
-            var account = Controller.AccountSettings(key);
+            _fieldErrors.Clear();
             SelectedAccount = key; ShowAddForm = false; ConfirmRemove = false;
             ShowAdvancedDetails = false;
-            DisplayName = account.DisplayName; AccountThresholds = account.Thresholds;
-            InheritIncrement = account.SpendIncrementUsd is null;
-            AccountIncrement = account.SpendIncrementUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
-            ShowPeriodEstimate = account.ShowPeriodEstimate;
+            ReloadAccount(key);
             Page = SettingsPage.Accounts; Error = null; Notice = null;
             OpenSettings?.Invoke(SettingsPage.Accounts); Notify();
         }
         catch (AppOperationException ex) { SetError(ex.Message); }
     }
+    private void ReloadAccount(string key)
+    {
+        var account = Controller.AccountSettings(key);
+        var view = Dashboard.Accounts.FirstOrDefault(a => a.Key == key)
+            ?? throw new AppOperationException("That account is no longer configured.");
+        DisplayName = account.DisplayName; AccountThresholds = account.Thresholds;
+        InheritIncrement = account.SpendIncrementUsd is null;
+        AccountIncrement = account.SpendIncrementUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
+        ShowPeriodEstimate = account.ShowPeriodEstimate;
+        UseCustomBudget = view.CustomBudgetUsd is not null;
+        CustomBudget = view.CustomBudgetUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
+        _savedAccount = CurrentAccountDraft();
+    }
     internal void Reconnect(AccountView account)
     {
+        if (!CanLeaveForm(() => Reconnect(account))) return;
         CancelSignIn();
         try
         {
@@ -198,55 +340,97 @@ internal sealed class AppSession : IDisposable
         Notify();
     }
     internal void SetClientId(string value) { ClientId = value; Notify(); }
-    internal void Run(Func<Task> operation, Action? success = null, Action? failure = null)
+    internal void Run(Func<Task> operation, Action? success = null, Action? failure = null, bool saving = false)
     {
         if (Busy) return;
-        Busy = true; Error = null; Notice = null; Notify();
+        Busy = true; Saving = saving; Error = null; Notice = null; Notify();
         _ = Task.Run(async () =>
         {
             try
             {
                 await operation().ConfigureAwait(false);
-                Post(() => success?.Invoke());
+                Post(() => { Saving = false; success?.Invoke(); });
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Post(() => { failure?.Invoke(); SetError(SafeMessage(ex)); }); }
-            finally { Post(() => { Busy = false; Notify(); }); }
+            catch (Exception ex) { Post(() => { Saving = false; failure?.Invoke(); SetError(SafeMessage(ex)); }); }
+            finally { Post(() => { Busy = false; Saving = false; Notify(); }); }
         });
     }
     internal void Refresh(string? key = null) => Run(() => Controller.RefreshAsync(key));
     internal void RefreshAccount(string key) => Run(() => Controller.RefreshAccountAsync(key));
-    internal void SaveGlobal()
+    internal void SaveGlobal() => SaveGlobal(null);
+    private void SaveGlobal(Action? continuation)
     {
-        if (!int.TryParse(PollMinutes, out var minutes) || minutes is < 5 or > 1440)
-        { SetError("Enter a polling interval from 5 through 1440 minutes."); return; }
-        if (!TryAmount(Increment, out var increment)) return;
+        if (!ValidateFields(SettingsField.PollMinutes, SettingsField.Thresholds, SettingsField.Increment)) return;
+        int minutes = int.Parse(PollMinutes, CultureInfo.InvariantCulture);
+        decimal? increment = ParseAmount(Increment);
         var next = new SettingsView(minutes, Thresholds, Notifications, Startup, increment,
             TrayStyle: TrayStyle, TrayMode: TrayMode, ExcludedTrayAccounts: ExcludedTrayAccounts.ToArray());
         Run(() => Controller.SaveSettingsAsync(next),
-            () => { ReloadSettings(); Notice = "Settings saved."; },
-            () => Startup = Controller.Settings.Startup);
+            () => { ReloadSettings(); Notice = "Settings saved."; continuation?.Invoke(); }, saving: true);
     }
-    internal void SaveAccount()
+    internal void SaveAccount() => SaveAccount(null);
+    private void SaveAccount(Action? continuation)
     {
         if (SelectedAccount is not { } key) return;
-        decimal? amount = null;
-        if (!InheritIncrement && !TryAmount(AccountIncrement, out amount)) return;
-        if (!InheritIncrement) amount ??= 0;
+        if (!ValidateFields(SettingsField.DisplayName, SettingsField.AccountThresholds,
+            SettingsField.AccountIncrement, SettingsField.CustomBudget)) return;
+        decimal? amount = InheritIncrement ? null : ParseAmount(AccountIncrement) ?? 0;
         string name = DisplayName, thresholds = AccountThresholds;
         bool showPeriodEstimate = ShowPeriodEstimate;
-        Run(() => Controller.SaveAccountAsync(key, name, thresholds, amount, showPeriodEstimate),
-            () => Notice = "Account settings saved.");
+        decimal? budget = UseCustomBudget ? ParseAmount(CustomBudget) : null;
+        var saved = CurrentAccountDraft();
+        Run(() => Controller.SaveAccountAsync(key, name, thresholds, amount, showPeriodEstimate, budget, updateCustomBudget: true),
+            () => { _savedAccount = saved; Notice = "Account settings saved."; continuation?.Invoke(); }, saving: true);
     }
-    private bool TryAmount(string text, out decimal? amount)
+    private static decimal? ParseAmount(string text) => string.IsNullOrWhiteSpace(text) ? null :
+        decimal.Parse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
+
+    private bool ValidateFields(params SettingsField[] fields)
     {
-        amount = null;
-        if (string.IsNullOrWhiteSpace(text)) return true;
-        if (!decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed) ||
-            parsed < 0 || decimal.Round(parsed, 2) != parsed)
-        { SetError("Enter a USD increment with at most two decimal places, such as 50 or 12.50. Use 0 to disable."); return false; }
-        amount = parsed;
-        return true;
+        _fieldErrors.Clear();
+        foreach (var field in fields) ValidateField(field);
+        if (_fieldErrors.Count == 0) return true;
+        SetError(ValidationMessage);
+        return false;
+    }
+
+    private void ValidateField(SettingsField field)
+    {
+        string? error = field switch
+        {
+            SettingsField.PollMinutes => int.TryParse(PollMinutes, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) &&
+                minutes is >= 5 and <= 1440
+                ? null : "Enter a refresh interval from 5 through 1440 minutes.",
+            SettingsField.Thresholds => ThresholdError(Thresholds, inherit: false),
+            SettingsField.AccountThresholds => ThresholdError(AccountThresholds, inherit: true),
+            SettingsField.DisplayName => DisplayName.Trim() is { } name && (name.Length > 128 || name.Any(char.IsControl))
+                ? "Use at most 128 characters with no control characters." : null,
+            SettingsField.Increment => AmountError(Increment),
+            SettingsField.AccountIncrement => InheritIncrement ? null : AmountError(AccountIncrement),
+            SettingsField.CustomBudget => UseCustomBudget ? AmountError(CustomBudget, budget: true) : null,
+            _ => throw new ArgumentOutOfRangeException(nameof(field))
+        };
+        if (error is null) _fieldErrors.Remove(field);
+        else _fieldErrors[field] = error;
+    }
+
+    private static string? AmountError(string text, bool budget = false)
+    {
+        if (!budget && string.IsNullOrWhiteSpace(text)) return null;
+        if (decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) &&
+            (budget ? value > 0 : value >= 0) && decimal.Round(value, 2) == value) return null;
+        return budget
+            ? "Enter a budget greater than $0 with at most two decimal places, such as 500 or 12.50."
+            : "Enter a USD increment with at most two decimal places, such as 50 or 12.50. Use 0 to disable.";
+    }
+
+    private static string? ThresholdError(string text, bool inherit)
+    {
+        if (inherit && string.IsNullOrWhiteSpace(text)) return null;
+        try { _ = GHCPSpendTray.Shared.ApplicationController.ParseThresholds(text); return null; }
+        catch (AppOperationException ex) { return ex.Message; }
+        catch (ArgumentException ex) { return ex.Message; }
     }
     internal void RemoveAccount()
     {
@@ -338,10 +522,15 @@ internal sealed class AppSession : IDisposable
         Prompt = null; ConnectingAccount = false; CodeCopied = false; ClipboardError = null;
         Notify();
     }
-    internal void CloseSettings() { CancelSignIn(); ShowAddForm = false; SelectedAccount = null; }
+    internal void CloseSettings()
+    {
+        CancelSignIn(); ShowAddForm = false; SelectedAccount = null;
+        _fieldErrors.Clear(); _savedAccount = null; _pendingNavigation = null;
+    }
     internal bool TryGoBack()
     {
         if (!CanGoBack) return false;
+        if (!CanLeaveForm(() => TryGoBack())) return true;
         if (ShowAddForm && SigningIn) CancelSignIn();
         else { CloseSettings(); Navigate(SettingsPage.Accounts); }
         return true;

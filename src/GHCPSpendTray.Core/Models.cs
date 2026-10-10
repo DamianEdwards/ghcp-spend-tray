@@ -15,6 +15,7 @@ public sealed record Account
     public decimal? SpendIncrementUsd { get; init; }
     public bool ExcludeFromTray { get; init; }
     public bool ShowPeriodEstimate { get; init; }
+    public decimal? CustomBudgetUsd { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
 
     public void Validate()
@@ -28,6 +29,31 @@ public sealed record Account
         if (ThresholdOverrides is not null)
             AppSettings.ValidateThresholds(ThresholdOverrides);
         AppSettings.ValidateSpendIncrement(SpendIncrementUsd);
+        UsageBudget.Validate(CustomBudgetUsd);
+    }
+}
+
+public static class UsageBudget
+{
+    public static void Validate(decimal? amount)
+    {
+        if (amount is { } value && (value <= 0 || decimal.Round(value, 2) != value))
+            throw new ArgumentException("Custom budgets must be positive USD amounts with at most two decimal places.");
+    }
+
+    public static decimal? Allocation(Account account, UsageSnapshot snapshot) =>
+        account.CustomBudgetUsd ?? (snapshot.Unlimited ? null : snapshot.AllocationUsd);
+
+    public static decimal? Percentage(Account account, UsageSnapshot snapshot) =>
+        account.CustomBudgetUsd is { } budget ? Percentage(snapshot.ConsumptionUsd, budget) : snapshot.PercentConsumed;
+
+    public static decimal Percentage(decimal consumption, decimal budget)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(consumption);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(budget);
+        try { return checked(consumption / budget * 100m); }
+        // Keep an extreme over-budget value representable without hiding available consumption.
+        catch (OverflowException) { return decimal.MaxValue; }
     }
 }
 

@@ -6,7 +6,7 @@ public enum TrayIconStyle { Pie, Percentage }
 public enum TrayDisplayMode { RollUp, PerAccount }
 
 public sealed record TrayAccountUsage(string Key, string Name, string Host, double? Percent, string? Exclusion,
-    bool IsUnlimited = false);
+    bool IsUnlimited = false, bool IsCustomBudget = false);
 
 public sealed record TrayIndicator(string? AccountKey, string Name, double? Percent,
     int IncludedAccounts, int SelectedAccounts, string Details, string Tooltip, bool IsUnlimited = false)
@@ -52,15 +52,16 @@ public static class TrayUsage
         foreach (var account in selected)
         {
             byKey.TryGetValue(account.Key, out var state);
-            string? exclusion = Exclusion(state, now, TimeSpan.FromMinutes(settings.PollIntervalMinutes));
-            bool isUnlimited = exclusion is null && state!.Snapshot!.Unlimited;
+            string? exclusion = Exclusion(state, account, now, TimeSpan.FromMinutes(settings.PollIntervalMinutes));
+            bool isUnlimited = exclusion is null && state!.Snapshot!.Unlimited && account.CustomBudgetUsd is null;
             double? percent = null;
             if (exclusion is null && !isUnlimited)
             {
                 var snapshot = state!.Snapshot!;
                 // Keep normal accounting exact (e.g. 0.1 + 0.2 == 0.3), while
                 // retaining finite display values if aggregate decimal sums overflow.
-                double accountAllocation = (double)snapshot.AllocationUsd!.Value;
+                decimal effectiveAllocation = UsageBudget.Allocation(account, snapshot)!.Value;
+                double accountAllocation = (double)effectiveAllocation;
                 double accountUsed = (double)snapshot.ConsumptionUsd;
                 used += accountUsed;
                 allocation += accountAllocation;
@@ -69,14 +70,14 @@ public static class TrayUsage
                     try
                     {
                         exactUsed += snapshot.ConsumptionUsd;
-                        exactAllocation += snapshot.AllocationUsd.Value;
+                        exactAllocation += effectiveAllocation;
                     }
                     catch (OverflowException) { exactTotals = false; }
                 }
-                percent = Percentage(snapshot.ConsumptionUsd, snapshot.AllocationUsd.Value);
+                percent = Percentage(snapshot.ConsumptionUsd, effectiveAllocation);
             }
             accounts.Add(new(account.Key, account.DisplayName ?? account.Login, account.Host, percent,
-                isUnlimited ? "unlimited allocation" : exclusion, isUnlimited));
+                isUnlimited ? "unlimited allocation" : exclusion, isUnlimited, account.CustomBudgetUsd is not null));
         }
         int included = accounts.Count(a => a.Percent is not null);
         int unlimited = accounts.Count(a => a.IsUnlimited);
@@ -91,17 +92,18 @@ public static class TrayUsage
         var rollUp = Indicator(null, "GHCPSpendTray", included == 0 ? null :
             exactTotals ? Percentage(exactUsed, exactAllocation) : used / allocation * 100,
             unlimitedRollUp ? unlimited : included, selected.Length, details, reasons,
-            unlimited: unlimitedRollUp);
+            unlimited: unlimitedRollUp, customBudget: accounts.Any(a => a.IsCustomBudget));
         var icons = settings.TrayMode == TrayDisplayMode.PerAccount && accounts.Count > 0
             ? accounts.Select(a => Indicator(a.Key, a.Name, a.Percent, a.Percent is not null || a.IsUnlimited ? 1 : 0, 1,
                 $"{a.Name} ({a.Host}): {AccountValue(a)}",
-                a.IsUnlimited ? "" : a.Exclusion ?? "", a.Host, a.IsUnlimited)).ToArray()
+                a.IsUnlimited ? "" : a.Exclusion ?? "", a.Host, a.IsUnlimited, a.IsCustomBudget)).ToArray()
             : [rollUp];
         return new(settings.TrayStyle, rollUp, icons, accounts);
     }
 
     private static string AccountValue(TrayAccountUsage account) => account.IsUnlimited
-        ? "Unlimited allocation" : account.Exclusion ?? TrayIndicator.FormatPercent(account.Percent!.Value);
+        ? "Unlimited allocation" : account.Exclusion ??
+            TrayIndicator.FormatPercent(account.Percent!.Value) + (account.IsCustomBudget ? " of custom budget" : "");
 
     private static double Percentage(decimal used, decimal allocation)
     {
@@ -113,7 +115,7 @@ public static class TrayUsage
         catch (OverflowException) { return (double)used / (double)allocation * 100; }
     }
 
-    private static string? Exclusion(AccountState? state, DateTimeOffset now, TimeSpan freshness)
+    private static string? Exclusion(AccountState? state, Account account, DateTimeOffset now, TimeSpan freshness)
     {
         if (state is null) return "awaiting data";
         if (state.Status != AccountStatus.Fresh)
@@ -135,23 +137,24 @@ public static class TrayUsage
         if (snapshot.AccountKey != state.Account.Key) return "invalid identity";
         if (!BillingPeriods.IsCurrent(snapshot, now)) return "outside current period";
         if (now - snapshot.FetchedAtUtc > freshness) return "stale";
-        if (snapshot.Unlimited) return null;
+        if (account.CustomBudgetUsd is not null || snapshot.Unlimited) return null;
         if (snapshot.AllocationUsd is null) return "unknown allocation";
         if (snapshot.AllocationUsd <= 0) return "zero allocation";
         return null;
     }
 
     private static TrayIndicator Indicator(string? key, string name, double? percent, int included,
-        int selected, string details, string reasons, string? host = null, bool unlimited = false)
+        int selected, string details, string reasons, string? host = null, bool unlimited = false, bool customBudget = false)
     {
         string value = unlimited ? "Unlimited allocation" :
             percent is { } p ? TrayIndicator.FormatPercent(p) : "Unavailable";
         string qualifier = included > 0 && included < selected ? "Partial ! | " : "";
-        string over = percent > 100 ? " | Over allocation" : "";
+        string over = percent > 100 ? customBudget ? " | Over budget" : " | Over allocation" : "";
         string counts = $"{included}/{selected} included";
         // Put truth qualifiers before potentially long user-controlled account names.
         string tooltip = $"{qualifier}{value}{over} | {counts}";
         if (reasons.Length > 0) tooltip += "\n" + reasons;
+        if (customBudget) tooltip += "\n" + (key is null ? "Includes custom budgets" : "Custom budget");
         tooltip += "\n" + name + (host is null ? "" : " (" + host + ")");
         if (selected == 0) tooltip += "\n" + details;
         return new(key, name, percent, included, selected,

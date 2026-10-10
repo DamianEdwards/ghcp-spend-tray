@@ -15,6 +15,7 @@ public sealed record AlertLedger
                 string.IsNullOrWhiteSpace(entry.PeriodId) || entry.LastSubmittedUtc == default)
                 throw new ArgumentException("Invalid alert ledger entry.");
             AppSettings.ValidateThresholds(entry.SubmittedThresholds);
+            UsageBudget.Validate(entry.CustomBudgetUsd);
             if (entry.SubmittedSpendUsd < 0) throw new ArgumentException("Invalid spend notification ledger.");
         }
     }
@@ -26,6 +27,7 @@ public sealed record AlertLedgerEntry
     [JsonRequired] public decimal[] SubmittedThresholds { get; init; } = [];
     [JsonRequired] public DateTimeOffset LastSubmittedUtc { get; init; }
     public decimal SubmittedSpendUsd { get; init; }
+    public decimal? CustomBudgetUsd { get; init; }
 }
 
 public sealed record UsageAlert(Account Account, UsageSnapshot Snapshot, decimal HighestThreshold,
@@ -67,9 +69,11 @@ public sealed class AlertService(JsonStore store, INotificationSink notification
             _ledger.Accounts.TryGetValue(account.Key, out AlertLedgerEntry? previous);
             // Ignore out-of-order observations: an old sample cannot roll the durable period backwards.
             if (previous is not null && snapshot.FetchedAtUtc < previous.LastSubmittedUtc) return false;
-            decimal[] submitted = previous?.PeriodId == snapshot.PeriodId ? previous.SubmittedThresholds : [];
+            decimal[] submitted = previous?.PeriodId == snapshot.PeriodId &&
+                previous.CustomBudgetUsd == account.CustomBudgetUsd ? previous.SubmittedThresholds : [];
+            decimal? percent = UsageBudget.Percentage(account, snapshot);
             decimal[] reached = (account.ThresholdOverrides ?? settings.AlertThresholds)
-                .Where(t => snapshot.PercentConsumed is { } percent && t <= percent && !submitted.Contains(t)).ToArray();
+                .Where(t => percent is { } value && t <= value && !submitted.Contains(t)).ToArray();
             decimal previousSpend = previous?.PeriodId == snapshot.PeriodId ? previous.SubmittedSpendUsd : 0;
             decimal? increment = account.SpendIncrementUsd ?? settings.SpendIncrementUsd;
             decimal? milestone = increment > 0
@@ -99,7 +103,8 @@ public sealed class AlertService(JsonStore store, INotificationSink notification
                 {
                     PeriodId = snapshot.PeriodId, LastSubmittedUtc = snapshot.FetchedAtUtc,
                     SubmittedThresholds = submitted.Concat(reached).Distinct().Order().ToArray(),
-                    SubmittedSpendUsd = milestone ?? previousSpend
+                    SubmittedSpendUsd = milestone ?? previousSpend,
+                    CustomBudgetUsd = account.CustomBudgetUsd
                 }
             };
             var updated = _ledger with { Accounts = entries };

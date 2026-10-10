@@ -199,6 +199,26 @@ The default refresh interval
 is 10 minutes (configurable from 5 to 1440), and the default allocation alerts
 are 50%, 80%, and 100%.
 
+On Windows, open **Settings > Accounts > Manage > Usage budget** to choose
+**Use a custom budget** and enter a positive USD amount (up to two decimal
+places). **Save account** applies it to that account's usage percentage, tray
+icon, estimated excess, and percentage alerts. The draft shows a preview before
+saving. Budgets follow the API billing period (or the calendar-month fallback);
+they are tracking targets, not spending caps or changes to your GitHub quota.
+The API allocation remains available in **Advanced details**. Select **Use API
+allocation** and save to remove the override. Budget editing is Windows-only for
+now; accounts without overrides behave as before. Changing the budget rearms
+percentage alerts for the new target on the next successful refresh, without
+repeating already-notified dollar milestones.
+Invalid Windows settings inputs are outlined in red with a message immediately
+below the field and a reminder beside Save. Correcting a value clears its error;
+invalid drafts are never saved.
+Windows account, General, and Notifications forms keep **Save** and **Cancel**
+visible in a fixed footer, with an **Unsaved changes** indicator. Cancel restores
+the saved values. Leaving a changed form with Back, switching pages or accounts,
+closing Settings, or quitting prompts **Save**, **Discard**, or **Keep editing**.
+Failed or invalid saves retain the draft and keep the form open.
+
 In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
 number**, one roll-up or per-account icons, and the connected accounts to include.
 Choose **Save changes** to apply and persist the preferences. By default all
@@ -214,10 +234,12 @@ refresh, Settings, notifications and Exit remain available. If no accounts are
 selected or connected, a neutral access icon remains.
 
 The roll-up percentage is **eligible consumption divided by the same accounts'
-eligible allocation**, not an average of account percentages. Only valid, fresh,
+eligible allocation (or custom budget)**, not an average of account percentages. Only valid, fresh,
 current-period observations with known, finite positive allocation qualify.
 Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
-excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
+excluded from both sides unless a custom budget supplies a finite positive
+target. A budget never makes stale or unavailable consumption eligible.
+`!` marks a partial roll-up; `?` means no percentage is
 available, not zero. Fresh unlimited accounts show an infinity sign in either
 icon style, with an **Unlimited allocation** tooltip. A roll-up shows infinity
 when its usable accounts are all unlimited; unavailable accounts still cause a

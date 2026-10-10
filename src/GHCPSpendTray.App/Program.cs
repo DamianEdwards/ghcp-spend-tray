@@ -192,6 +192,8 @@ internal static class Program
             RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
             await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
+            await SmokeFormValidationAsync(shell);
+            await SmokeDirtyFormsAsync(shell);
             RecordSmokePhase(directory, "Testing flyout focus transitions and account onboarding");
             await OnUI(shell, () => SendTraySelection(shell, Win32.NIN_KEYSELECT));
             await WaitForFlyoutVisibility(shell, true, "after opening from settings");
@@ -329,7 +331,9 @@ internal static class Program
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 RecordSmokePhase(directory, "All synthetic smoke assertions passed; exiting Reactor");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
-                    "PASS: immediate semantic mouse/keyboard tray toggle, raw mouse callbacks ignored, no double-click shortcut, " +
+                    "PASS: fixed Save/Cancel footer, dirty Back/page/close/quit prompts and safe draft decisions, " +
+                    "inline settings validation borders, field messages and accessible help text, correction and override reset, " +
+                    "immediate semantic mouse/keyboard tray toggle, raw mouse callbacks ignored, no double-click shortcut, " +
                     "popup settings gear, hide/reopen and focus transitions, synchronized automation and committed UI layout, " +
                     "Reactor cost flyout, usage-first settings without sampled chart, independent collapsed account diagnostics, " +
                     "per-account estimate opt-in/off/unavailable, UTC disclosure and unchanged observed totals/tray, " +
@@ -439,6 +443,242 @@ internal static class Program
         internal DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
     }
+    private static async Task SmokeDirtyFormsAsync(ReactorShell shell)
+    {
+        if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        var account = shell.Session.Dashboard.Accounts[0];
+        await OnUI(shell, () => shell.Session.EditAccount(account.Key));
+        await WaitForSettingsUI(shell, "fixed account actions");
+        double footerY = 0;
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            var root = (FrameworkElement)window.NativeWindow.Content;
+            var footer = (FrameworkElement)Find(window, "SettingsFormActions")!;
+            if (Find(window, "SaveAccount") is not Button { IsEnabled: false } ||
+                Find(window, "CancelSettingsChanges") is not Button { IsEnabled: false })
+                throw new InvalidOperationException("Clean forms must have visible, disabled Save and Cancel actions.");
+            for (DependencyObject? parent = VisualTreeHelper.GetParent(footer); parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                if (ReferenceEquals(parent, Find(window, "SettingsScroll")))
+                    throw new InvalidOperationException("Save and Cancel must not be inside scrolling form content.");
+            footerY = footer.TransformToVisual(root).TransformPoint(new Windows.Foundation.Point()).Y;
+            ((ScrollView)Find(window, "SettingsScroll")!).ScrollTo(0, double.MaxValue,
+                new ScrollingScrollOptions(ScrollingAnimationMode.Disabled, ScrollingSnapPointsMode.Ignore));
+        });
+        await WaitForUI(shell, "account form actually scrolled", () =>
+            Find(shell.SettingsWindow!, "SettingsScroll") is ScrollView { VerticalOffset: > 0 });
+        await WaitForSettingsUI(shell, "scrolled account form");
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            var root = (FrameworkElement)window.NativeWindow.Content;
+            var footer = (FrameworkElement)Find(window, "SettingsFormActions")!;
+            double y = footer.TransformToVisual(root).TransformPoint(new Windows.Foundation.Point()).Y;
+            if (Math.Abs(y - footerY) > 1 || y + footer.ActualHeight > root.ActualHeight + 1)
+                throw new InvalidOperationException("Scrolling must leave the form action footer visible and stationary.");
+            ((TextBox)Find(window, "DisplayName")!).Text = "Unsaved native draft";
+        });
+        await WaitForSettingsUI(shell, "dirty account status");
+        await InvokeButtonAsync(shell, "AccountBack");
+        await ChooseDialog("Keep editing");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.SelectedAccount != account.Key || shell.Session.DisplayName != "Unsaved native draft" ||
+                Find(shell.SettingsWindow!, "SettingsDraftStatus") is not TextBlock { Text: "Unsaved changes" })
+                throw new InvalidOperationException("Keep editing must preserve the form and its dirty draft.");
+            var navigation = FindNode<NavigationView>((DependencyObject)shell.SettingsWindow!.NativeWindow.Content)!;
+            navigation.SelectedItem = navigation.MenuItems.OfType<NavigationViewItem>().Single(item => Equals(item.Tag, "General"));
+        });
+        await ChooseDialog("Keep editing");
+        await OnUI(shell, () =>
+        {
+            var navigation = FindNode<NavigationView>((DependencyObject)shell.SettingsWindow!.NativeWindow.Content)!;
+            if (shell.Session.Page != SettingsPage.Accounts ||
+                navigation.SelectedItem is not NavigationViewItem item || !Equals(item.Tag, "Accounts"))
+                throw new InvalidOperationException("Canceled navigation must keep both content and selected page on Accounts.");
+        });
+        await InvokeButtonAsync(shell, "CancelSettingsChanges");
+        await WaitForSettingsUI(shell, "canceled account draft");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.HasUnsavedChanges || shell.Session.DisplayName != shell.Session.Controller.AccountSettings(account.Key).DisplayName)
+                throw new InvalidOperationException("The fixed Cancel action must restore saved account settings.");
+            ((ComboBox)Find(shell.SettingsWindow!, "BudgetBasis")!).SelectedIndex = 1;
+        });
+        await WaitForSettingsUI(shell, "budget input before guarded Save");
+        await OnUI(shell, () => ((TextBox)Find(shell.SettingsWindow!, "CustomBudget")!).Text = "test");
+        await WaitForUI(shell, "invalid budget draft becomes dirty", () => shell.Session.CustomBudget == "test" && shell.Session.HasUnsavedChanges);
+        await InvokeButtonAsync(shell, "AccountBack");
+        await ChooseDialog("Save");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.SelectedAccount != account.Key || !shell.Session.HasUnsavedChanges ||
+                Find(shell.SettingsWindow!, "CustomBudgetError") is not TextBlock ||
+                shell.Session.Dashboard.Accounts[0].CustomBudgetUsd is not null)
+                throw new InvalidOperationException("Save from the leave prompt must retain and highlight an invalid draft without navigating.");
+        });
+        await InvokeButtonAsync(shell, "CancelSettingsChanges");
+        await WaitForSettingsUI(shell, "invalid guarded draft canceled");
+        string originalName = shell.Session.Controller.AccountSettings(account.Key).DisplayName;
+        foreach (string name in new[] { "Saved native draft", originalName })
+        {
+            await OnUI(shell, () => ((TextBox)Find(shell.SettingsWindow!, "DisplayName")!).Text = name);
+            await WaitForUI(shell, "account name draft becomes dirty", () => shell.Session.DisplayName == name && shell.Session.HasUnsavedChanges);
+            await InvokeButtonAsync(shell, "AccountBack");
+            await ChooseDialog("Save");
+            await OnUI(shell, () =>
+            {
+                if (shell.Session.SelectedAccount is not null || shell.Session.Controller.AccountSettings(account.Key).DisplayName != name)
+                    throw new InvalidOperationException("Save from the leave prompt must persist the draft before navigating Back.");
+                shell.Session.EditAccount(account.Key);
+            });
+            await WaitForSettingsUI(shell, "saved account reopened");
+        }
+        await OnUI(shell, () =>
+        {
+            shell.Session.Navigate(SettingsPage.General);
+        });
+        await WaitForSettingsUI(shell, "fixed global actions");
+        await OnUI(shell, () => ((TextBox)Find(shell.SettingsWindow!, "PollMinutes")!).Text = "20");
+        await WaitForUI(shell, "global draft becomes dirty", () => shell.Session.HasUnsavedChanges);
+        await OnUI(shell, shell.Exit);
+        await ChooseDialog("Keep editing");
+        var settings = shell.SettingsWindow!;
+        await OnUI(shell, RequestSettingsClose);
+        await ChooseDialog("Keep editing");
+        await OnUI(shell, () =>
+        {
+            if (!ReferenceEquals(shell.SettingsWindow, settings) || shell.Session.PollMinutes != "20")
+                throw new InvalidOperationException("Keep editing must cancel Settings close and app quit without losing the draft.");
+            RequestSettingsClose();
+        });
+        await ChooseDialog("Discard");
+        await WaitForUI(shell, "discarded settings window closes", () => shell.SettingsWindow is null);
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Controller.Settings.PollMinutes != 10)
+                throw new InvalidOperationException("Discard must not save the global draft.");
+            shell.ShowSettings(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "settings reopened after protected close");
+
+        void RequestSettingsClose() => Win32.SendMessage(
+            WinRT.Interop.WindowNative.GetWindowHandle(settings.NativeWindow), Win32.WM_CLOSE, 0, 0);
+
+        async Task ChooseDialog(string label)
+        {
+            await WaitForUI(shell, "unsaved changes dialog opens", () => LiveDialog() is { IsLoaded: true, ActualWidth: > 0 });
+            try
+            {
+                await InvokeButtonAsync(shell, "Unsaved changes: " + label, findButton: () =>
+                    LiveDialog() is { } dialog ? FindDialogButton(dialog, label) : null);
+            }
+            catch (TimeoutException ex)
+            {
+                string details = "";
+                await OnUI(shell, () =>
+                {
+                    if (LiveDialog() is { } dialog)
+                        details = $"primary={dialog.PrimaryButtonText}, secondary={dialog.SecondaryButtonText}, close={dialog.CloseButtonText}; " +
+                            string.Join("; ", DialogControls(dialog));
+                });
+                throw new TimeoutException("Unsaved changes dialog did not expose the requested action: " + details, ex);
+            }
+            await WaitForUI(shell, "unsaved changes decision completes", () => !shell.Session.HasPendingNavigation && LiveDialog() is null);
+            if (shell.SettingsWindow is not null) await WaitForSettingsUI(shell, "unsaved changes decision renders");
+        }
+        ContentDialog? LiveDialog()
+        {
+            if (shell.SettingsWindow?.NativeWindow.Content is not FrameworkElement root) return null;
+            return VisualTreeHelper.GetOpenPopupsForXamlRoot(root.XamlRoot)
+                .Select(popup => popup.Child is { } child ? FindNode<ContentDialog>(child) : null)
+                .FirstOrDefault(dialog => dialog is not null);
+        }
+        static T? FindNode<T>(DependencyObject node) where T : DependencyObject
+        {
+            if (node is T result) return result;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                if (FindNode<T>(VisualTreeHelper.GetChild(node, i)) is { } child) return child;
+            return null;
+        }
+        static Button? FindDialogButton(DependencyObject node, string label)
+        {
+            if (node is Button button && (Equals(button.Content, label) ||
+                new ButtonAutomationPeer(button).GetName() == label)) return button;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                if (FindDialogButton(VisualTreeHelper.GetChild(node, i), label) is { } child) return child;
+            return null;
+        }
+        static IEnumerable<string> DialogControls(DependencyObject node)
+        {
+            if (node is Button button)
+                yield return $"button={new ButtonAutomationPeer(button).GetName()}, name={button.Name}, " +
+                    $"enabled={button.IsEnabled}, loaded={button.IsLoaded}, size={button.ActualWidth}x{button.ActualHeight}";
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                foreach (string value in DialogControls(VisualTreeHelper.GetChild(node, i))) yield return value;
+        }
+    }
+
+    private static async Task SmokeFormValidationAsync(ReactorShell shell)
+    {
+        if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        var account = shell.Session.Dashboard.Accounts[0];
+        await OnUI(shell, () => shell.Session.EditAccount(account.Key));
+        await WaitForSettingsUI(shell, "budget validation preferences");
+        await OnUI(shell, () => ((ComboBox)Find(shell.SettingsWindow!, "BudgetBasis")!).SelectedIndex = 1);
+        await WaitForSettingsUI(shell, "custom budget input");
+        TextBox? budgetInput = null;
+        await OnUI(shell, () =>
+        {
+            budgetInput = (TextBox)Find(shell.SettingsWindow!, "CustomBudget")!;
+            budgetInput.Text = "test";
+        });
+        await WaitForSettingsUI(shell, "invalid budget draft");
+        await InvokeButtonAsync(shell, "SaveAccount");
+        await WaitForSettingsUI(shell, "inline budget validation");
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "CustomBudgetError") is not TextBlock message || !message.Text.Contains("greater than $0") ||
+                Find(window, "CustomBudgetValidationBorder") is not Border { BorderThickness.Left: 2, BorderBrush: not null } ||
+                Find(window, "CustomBudget") is not TextBox input || AutomationProperties.GetHelpText(input) != message.Text ||
+                Find(window, "SettingsValidationFeedback") is null || shell.Session.Busy ||
+                shell.Session.Dashboard.Accounts[0].CustomBudgetUsd is not null)
+                throw new InvalidOperationException("Invalid budget must have a visible field border, local error and accessible help without saving.");
+            input.Text = "50";
+        });
+        await WaitForSettingsUI(shell, "corrected budget validation");
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "CustomBudgetError") is not null ||
+                Find(window, "CustomBudgetValidationBorder") is not Border { BorderThickness.Left: 0 } ||
+                Find(window, "SettingsValidationFeedback") is not null ||
+                Find(window, "CustomBudget") is not TextBox input || AutomationProperties.GetHelpText(input) != "" ||
+                !ReferenceEquals(input, budgetInput))
+                throw new InvalidOperationException("Correction must clear validation without replacing the active input. " +
+                    $"error={Find(window, "CustomBudgetError") is not null}, " +
+                    $"border={(Find(window, "CustomBudgetValidationBorder") as Border)?.BorderThickness.Left}, " +
+                    $"summary={Find(window, "SettingsValidationFeedback") is not null}, " +
+                    $"help={(Find(window, "CustomBudget") is TextBox value ? AutomationProperties.GetHelpText(value) : "missing")}, " +
+                    $"retained={ReferenceEquals(Find(window, "CustomBudget"), budgetInput)}.");
+            input.Text = "test";
+        });
+        await WaitForSettingsUI(shell, "invalid budget again");
+        await InvokeButtonAsync(shell, "SaveAccount");
+        await WaitForSettingsUI(shell, "budget override reset");
+        await OnUI(shell, () => ((ComboBox)Find(shell.SettingsWindow!, "BudgetBasis")!).SelectedIndex = 0);
+        await WaitForSettingsUI(shell, "API allocation reset");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.HasFieldErrors || Find(shell.SettingsWindow!, "CustomBudgetError") is not null ||
+                Find(shell.SettingsWindow!, "SettingsValidationFeedback") is not null)
+                throw new InvalidOperationException("An inactive budget must not retain its validation error.");
+            shell.Session.Navigate(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "Usage after validation");
+    }
+
     private static async Task SmokePeriodEstimateAsync(ReactorShell shell, SmokeTimeProvider time, Action<string> phase)
     {
         if (shell.Session.Dashboard.Accounts.Count == 0) return;
@@ -770,7 +1010,21 @@ internal static class Program
             if (complete) return;
             await Task.Delay(25);
         } while (elapsed.Elapsed < TimeSpan.FromSeconds(5));
-        throw new TimeoutException($"UI readiness timed out at {stage} after {elapsed.Elapsed.TotalSeconds:F2}s: {state}");
+        string renderFailure = "";
+        if (shell.SettingsRenderedRevision < 0 && shell.SettingsWindow is { } failedWindow)
+            await OnUI(shell, () =>
+            {
+                if (failedWindow.NativeWindow.Content is DependencyObject root)
+                    renderFailure = " | Rendered text: " + string.Join(" | ", TextInTree(root));
+            });
+        throw new TimeoutException($"UI readiness timed out at {stage} after {elapsed.Elapsed.TotalSeconds:F2}s: {state}{renderFailure}");
+
+        static IEnumerable<string> TextInTree(DependencyObject node)
+        {
+            if (node is TextBlock text) yield return text.Text;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                foreach (string fragment in TextInTree(VisualTreeHelper.GetChild(node, i))) yield return fragment;
+        }
     }
 
     private static async Task SmokeTraySettingsAsync(ReactorShell shell)
@@ -824,8 +1078,10 @@ internal static class Program
         });
         await WaitForSettingsUI(shell, "tray account selections");
         (uint Id, nint Image)[] installedIcons = [];
+        bool hasTrayAccounts = false;
         await OnUI(shell, () =>
         {
+            hasTrayAccounts = shell.Session.Dashboard.Accounts.Count > 0;
             installedIcons = shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).ToArray();
             foreach (var account in shell.Session.Dashboard.Accounts)
             {
@@ -840,9 +1096,16 @@ internal static class Program
             AssertTrayPreview(shell);
             if (!shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).SequenceEqual(installedIcons))
                 throw new InvalidOperationException("Draft exclusions changed installed tray icons.");
+            if (!hasTrayAccounts && (shell.Session.HasUnsavedChanges ||
+                Find(shell.SettingsWindow!, "SaveGeneralSettings") is not Button { IsEnabled: false } ||
+                Find(shell.SettingsWindow!, "CancelSettingsChanges") is not Button { IsEnabled: false }))
+                throw new InvalidOperationException("Empty account exclusions created a draft or enabled Save/Cancel.");
         });
-        await InvokeButtonAsync(shell, "SaveGeneralSettings");
-        await WaitForTraySave();
+        if (hasTrayAccounts)
+        {
+            await InvokeButtonAsync(shell, "SaveGeneralSettings");
+            await WaitForTraySave();
+        }
         await OnUI(shell, () =>
         {
             if (shell.TrayIcons.Count != 1 || shell.TrayIcons.First().AccountKey is not null ||
@@ -945,9 +1208,9 @@ internal static class Program
     private static void SendTraySelection(ReactorShell shell, int notification, uint id = 1) =>
         Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((id << 16) | (uint)notification));
 
-    private static async Task InvokeButtonAsync(ReactorShell shell, string id, bool flyout = false)
+    private static async Task InvokeButtonAsync(ReactorShell shell, string id, bool flyout = false, Func<Button?>? findButton = null)
     {
-        Button? FindButton() => (flyout ? shell.Flyout : shell.SettingsWindow) is { } window
+        Button? FindButton() => findButton is not null ? findButton() : (flyout ? shell.Flyout : shell.SettingsWindow) is { } window
             ? Find(window, id) as Button : null;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Button? button = null;

@@ -58,6 +58,9 @@ internal static class PeriodEstimateTests
         Check(session.ShowPeriodEstimate, "Returning to account settings reloads saved opt-in.");
         session.ShowPeriodEstimate = false;
         session.EditAccount(session.Dashboard.Accounts[1].Key);
+        Check(session.HasPendingNavigation && session.SelectedAccount == account.Key,
+            "Changing accounts protects the unsaved estimate draft.");
+        session.ResolveUnsavedChanges(UnsavedChangesChoice.Discard);
         Check(!session.ShowPeriodEstimate, "Opening another account does not leak the previous account's draft.");
         session.EditAccount(account.Key);
         Check(session.ShowPeriodEstimate, "Abandoning a draft leaves the saved preference intact.");
@@ -84,6 +87,39 @@ internal static class PeriodEstimateTests
         await Until(() => !session.Busy);
         Check(!controller.AccountSettings(account.Key).ShowPeriodEstimate &&
             session.Dashboard.Accounts[0].PeriodEstimate is null, "Windows Save explicitly disables the forecast.");
+        var work = session.Dashboard.Accounts[1];
+        session.EditAccount(work.Key);
+        Check(!session.UseCustomBudget && session.CustomBudget == "", "Budgets default to the API allocation.");
+        session.UseCustomBudget = true;
+        session.CustomBudget = "50";
+        Check(session.Dashboard.Accounts[1].Percent == 16.5m, "Budget drafts do not change saved usage.");
+        session.SaveAccount();
+        await Until(() => !session.Busy);
+        work = session.Dashboard.Accounts[1];
+        Check(session.Error is null && work.CustomBudgetUsd == 50m && work.AllocationUsd == 50m &&
+            work.Percent == 33m && work.Details.ObservedAllocationUsd == 100m &&
+            work.Details.ObservedPercentConsumed == 16.5m, "Windows Save changes the target, never the observed API values.");
+        Check(UI.UsagePercentage(work) == "33% of $50.00 custom budget" &&
+            UI.EstimateContext(new(OverAllocationUsd: 2m), true) == "About $2 over custom budget",
+            "Windows percentage and excess labels identify the budget basis.");
+        Check(session.Dashboard.Tray!.RollUp.Percent == 57d && session.Dashboard.ConsumptionUsd == 42.75m,
+            "Budget updates the weighted tray immediately without changing dollar totals.");
+        session.EditAccount(account.Key);
+        Check(!session.UseCustomBudget, "Budget settings do not leak between accounts.");
+        session.EditAccount(work.Key);
+        Check(session.UseCustomBudget && session.CustomBudget == "50", "Opening an account reloads its saved budget.");
+        foreach (string invalid in new[] { "", "0", "-1", "12.345", "abc" })
+        {
+            session.CustomBudget = invalid;
+            session.SaveAccount();
+            Check(!session.Busy && session.Error is not null && session.Dashboard.Accounts[1].CustomBudgetUsd == 50m,
+                "Invalid budget input reports an error and preserves the saved target.");
+        }
+        session.UseCustomBudget = false;
+        session.SaveAccount();
+        await Until(() => !session.Busy);
+        Check(session.Error is null && session.Dashboard.Accounts[1].CustomBudgetUsd is null &&
+            session.Dashboard.Accounts[1].Percent == 16.5m, "Choosing API allocation removes the budget override.");
         Check(!Directory.Exists(directory), "Synthetic forecast preferences never write real data.");
         return assertions;
 

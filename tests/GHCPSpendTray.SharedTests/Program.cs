@@ -158,6 +158,24 @@ try
             "Explicit disable persists and completely removes the estimate.");
         handler.UserId = "1";
         await controller.RefreshAccountAsync("github.com:1");
+        await controller.SaveAccountAsync("github.com:1", "Example", "", customBudgetUsd: 50m, updateCustomBudget: true);
+        Check(dashboard!.Accounts[0] is { Percent: 52.5m, AllocationUsd: 50m, CustomBudgetUsd: 50m } &&
+            dashboard.Accounts[0].Details is { ObservedAllocationUsd: 25m, ObservedPercentConsumed: 105m },
+            "Shared budget view preserves the original API diagnostics.");
+        Check((await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].CustomBudgetUsd == 50m,
+            "Custom budget persists through the generated settings serializer.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "");
+        await controller.SaveSettingsAsync(controller.Settings);
+        await controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default);
+        Check(dashboard!.Accounts[0].CustomBudgetUsd == 50m &&
+            (await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].CustomBudgetUsd == 50m,
+            "Account saves without budget arguments, global saves and reconnect preserve the budget.");
+        await Reject<AppOperationException>(() => controller.SaveAccountAsync("github.com:1", "Example", "",
+            customBudgetUsd: 0m, updateCustomBudget: true));
+        Check(dashboard!.Accounts[0].CustomBudgetUsd == 50m, "Rejected budgets leave the saved target intact.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "", updateCustomBudget: true);
+        Check(dashboard!.Accounts[0] is { CustomBudgetUsd: null, Percent: 105m },
+            "Explicitly clearing a budget restores API percentages.");
         var persisted = await new JsonStore(root).LoadSettingsAsync();
         Check(persisted.Value.Accounts[0].AvatarUrl is null, "Avatar URLs are not persisted.");
         credentials.FailDelete = true;
