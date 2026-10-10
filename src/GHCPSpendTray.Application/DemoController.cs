@@ -10,6 +10,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     private readonly List<AccountView> _examples = [];
     private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
         bool ShowPeriodEstimate)> _preferences = [];
+    private readonly Dictionary<string, decimal?> _budgets = [];
     public string DataDirectory => directory;
     public bool Portable => true;
     public event Action<DashboardView>? Changed;
@@ -55,6 +56,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             Host = a.Host, UserId = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
             Login = a.Login, DisplayName = a.Name,
             ShowPeriodEstimate = _preferences.GetValueOrDefault(a.Key).ShowPeriodEstimate,
+            CustomBudgetUsd = _budgets.GetValueOrDefault(a.Key),
             ExcludeFromTray = Settings.ExcludedTrayAccounts?.Contains(a.Key, StringComparer.Ordinal) == true
         }).ToArray();
         var states = accounts.Select((a, i) => new AccountState
@@ -73,7 +75,10 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         {
             Accounts = dashboard.Accounts.Select((account, i) => account with
             {
-                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes))
+                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes)),
+                CustomBudgetUsd = accounts[i].CustomBudgetUsd,
+                AllocationUsd = accounts[i].CustomBudgetUsd ?? account.AllocationUsd,
+                Percent = UsageBudget.Percentage(accounts[i], states[i].Snapshot!)
             }).ToArray(),
             Tray = TrayUsage.Create(new()
             {
@@ -99,14 +104,16 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         return RefreshAsync();
     }
     public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
-        bool? showPeriodEstimate = null)
+        bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false)
     {
         var previous = AccountSettings(key);
         displayName = displayName.Trim();
         if (displayName.Length > 128 || displayName.Any(char.IsControl))
             throw new AppOperationException("Display names must be at most 128 characters and contain no control characters.");
         AppSettings.ValidateSpendIncrement(spendIncrementUsd);
+        UsageBudget.Validate(customBudgetUsd);
         _preferences[key] = (displayName, thresholds, spendIncrementUsd, showPeriodEstimate ?? previous.ShowPeriodEstimate);
+        if (updateCustomBudget) _budgets[key] = customBudgetUsd;
         return RefreshAsync();
     }
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key)

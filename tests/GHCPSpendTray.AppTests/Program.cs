@@ -462,6 +462,8 @@ try
     assertions += await BackNavigationTests.RunAsync(root);
     assertions += await StoreUpdateTests.RunAsync();
     assertions += await PeriodEstimateTests.RunAsync(Path.Combine(root, "estimates"));
+    assertions += await FormValidationTests.RunAsync(Path.Combine(root, "form-validation"));
+    assertions += await DirtyFormsTests.RunAsync(Path.Combine(root, "dirty-forms"));
     assertions += await AccountSignInTests.RunAsync(Path.Combine(root, "sign-in"));
     Console.WriteLine($"PASS: {assertions} application integration assertions (synthetic HTTP and credentials only).");
 

@@ -194,7 +194,7 @@ public class ApplicationController : IApplicationController, INotificationSink
             account.SpendIncrementUsd, account.ShowPeriodEstimate);
     }
     public async Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
-        bool? showPeriodEstimate = null)
+        bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false)
     {
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
@@ -205,12 +205,14 @@ public class ApplicationController : IApplicationController, INotificationSink
                 throw new AppOperationException("Display names must be at most 128 characters and contain no control characters.");
             var overrides = string.IsNullOrWhiteSpace(thresholds) ? null : ParseThresholds(thresholds);
             AppSettings.ValidateSpendIncrement(spendIncrementUsd);
+            UsageBudget.Validate(customBudgetUsd);
             if (!_settings.Accounts.Any(a => a.Key == key)) throw new AppOperationException("That account is no longer configured.");
             var next = _settings with
             {
                 Accounts = _settings.Accounts.Select(a => a.Key == key ? a with
                     { DisplayName = displayName.Length == 0 ? null : displayName, ThresholdOverrides = overrides,
                       SpendIncrementUsd = spendIncrementUsd,
+                      CustomBudgetUsd = updateCustomBudget ? customBudgetUsd : a.CustomBudgetUsd,
                       ShowPeriodEstimate = showPeriodEstimate ?? a.ShowPeriodEstimate } : a).ToArray()
             };
             await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
@@ -331,7 +333,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                     account = account with { DisplayName = previous.DisplayName, ThresholdOverrides = previous.ThresholdOverrides,
                         SpendIncrementUsd = previous.SpendIncrementUsd,
                         ExcludeFromTray = previous.ExcludeFromTray,
-                        ShowPeriodEstimate = previous.ShowPeriodEstimate,
+                        ShowPeriodEstimate = previous.ShowPeriodEstimate, CustomBudgetUsd = previous.CustomBudgetUsd,
                         OAuthClientId = previous.OAuthClientId ?? account.OAuthClientId };
                     await _monitor!.PauseAccountAsync(account.Key, token).ConfigureAwait(false);
                 }
@@ -416,11 +418,12 @@ public class ApplicationController : IApplicationController, INotificationSink
         var notify = _notify ?? throw new AppOperationException("The notification surface is not initialized.");
         var message = $"{alert.Account.DisplayName ?? alert.Account.Login}: {Money(alert.Snapshot.ConsumptionUsd)} consumed.";
         if (alert.ReachedThresholds.Length > 0)
-            message += $" {alert.HighestThreshold:0.##}% of {Money(alert.Snapshot.AllocationUsd!.Value)} allocation reached.";
+            message += $" {alert.HighestThreshold:0.##}% of {Money(UsageBudget.Allocation(alert.Account, alert.Snapshot)!.Value)} " +
+                (alert.Account.CustomBudgetUsd is not null ? "custom budget reached." : "allocation reached.");
         if (alert.SpendMilestoneUsd is { } milestone)
             message += $" Passed the {Money(milestone)} spending milestone.";
         return await notify(new(alert.Account.Key, "GHCPSpendTray consumption alert", message,
-            alert.Snapshot.PercentConsumed, alert.SpendMilestoneUsd))
+            UsageBudget.Percentage(alert.Account, alert.Snapshot), alert.SpendMilestoneUsd))
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
     private void StateChanged(AccountState state) => _ = PublishAsync();
@@ -473,11 +476,13 @@ public class ApplicationController : IApplicationController, INotificationSink
                     }
                     accountViews.Add(new(state.Account.Key, state.Account.DisplayName ?? state.Account.Login,
                         state.Account.Login, state.Account.Host, details,
-                        current ? snapshot?.PercentConsumed : null,
-                        current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
+                        current ? UsageBudget.Percentage(state.Account, snapshot!) : null,
+                        current ? snapshot?.ConsumptionUsd : null,
+                        current ? state.Account.CustomBudgetUsd ?? snapshot?.AllocationUsd : null,
                         visibleStatus, snapshot?.FetchedAtUtc,
                         avatar ?? AccountAvatar.Resolve(state.Account),
-                        PeriodEstimates.Create(state, now, TimeSpan.FromMinutes(_settings.PollIntervalMinutes))));
+                        PeriodEstimates.Create(state, now, TimeSpan.FromMinutes(_settings.PollIntervalMinutes)),
+                        state.Account.CustomBudgetUsd));
                 }
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);
@@ -501,7 +506,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                 "GHCPSpendTray | Consumption unavailable", []));
         }
     }
-    private static decimal[] ParseThresholds(string value)
+    public static decimal[] ParseThresholds(string value)
     {
         var parts = value.Split(',', StringSplitOptions.TrimEntries);
         if (parts.Length == 0 || parts.Any(p => p.Length == 0))

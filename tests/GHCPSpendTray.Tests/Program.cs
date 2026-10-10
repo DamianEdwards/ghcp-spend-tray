@@ -21,6 +21,7 @@ internal static partial class Program
         try
         {
             await DomainTests();
+            await BudgetTests();
             await PeriodEstimateTests();
             await TrayTests();
             await HttpTests();

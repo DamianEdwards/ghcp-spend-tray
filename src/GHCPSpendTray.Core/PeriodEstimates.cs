@@ -52,8 +52,9 @@ public static class PeriodEstimates
             decimal periodDays = (decimal)(reset - start).Ticks / TimeSpan.TicksPerDay;
             decimal projected = snapshot.ConsumptionUsd * periodDays / elapsedDays;
             decimal daily = snapshot.ConsumptionUsd / elapsedDays;
-            decimal? over = !snapshot.Unlimited && snapshot.AllocationUsd is > 0
-                ? Math.Max(0, projected - snapshot.AllocationUsd.Value) : null;
+            decimal? allocation = UsageBudget.Allocation(state.Account, snapshot);
+            decimal? over = allocation is > 0
+                ? Math.Max(0, projected - allocation.Value) : null;
             return estimate with
             {
                 EstimatedConsumptionUsd = projected, AverageDailyConsumptionUsd = daily,

@@ -199,14 +199,17 @@ internal sealed class ReactorShell : IDisposable
             _settings.Closed += (_, _) => { _settings = null; _settingsComponent = null; _session.CloseSettings(); };
             _settings.Closing += (_, e) =>
             {
-                if (!_exiting && !_sessionEnding && _session.StoreUpdates is { Updating: true }) e.Cancel = true;
+                if (_exiting || _sessionEnding) return;
+                var settings = _settings;
+                if (_session.StoreUpdates is { Updating: true } ||
+                    settings is not null && !_session.TryCloseSettings(settings.Close))
+                    e.Cancel = true;
             };
             _settings.NativeWindow.Activated += (_, e) =>
             {
                 if (e.WindowActivationState != WindowActivationState.Deactivated && !_session.Busy)
                 {
-                    _session.Startup = _session.Controller.Settings.Startup;
-                    _session.Notify();
+                    _session.RefreshStartup();
                 }
             };
         }
@@ -227,6 +230,7 @@ internal sealed class ReactorShell : IDisposable
     }
     internal void Exit()
     {
+        if (!_sessionEnding && !_session.TryCloseSettings(Exit)) return;
         _exiting = true;
         _session.CancelSignIn();
         ReactorApp.Exit();
