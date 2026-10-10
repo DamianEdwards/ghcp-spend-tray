@@ -425,10 +425,14 @@ actual totals, allocation meters, menu-bar icons, or alert thresholds.
 
 The shared C# calculation explicitly assumes UTC calendar months and rejects
 provider resets that disagree with the next month boundary. Source observation
-time is used when supplied, otherwise fetch time; frozen data never changes its
-pace estimate merely because the clock advances. Freshness and rollover still
-invalidate it. Estimates are unavailable before 24 elapsed hours and marked
-early before 72 hours. Unknown/unlimited allocation does not prevent a dollar
+time is used when supplied, otherwise fetch time. A source timestamp up to one
+minute ahead of the local fetch is clamped to fetch time for the estimate to
+tolerate server/client clock skew; the saved source timestamp is unchanged.
+Larger future timestamps and previous-period observations remain unavailable.
+Frozen data never changes its pace estimate merely because the clock advances.
+Freshness and rollover still invalidate it. Estimates are unavailable before
+24 elapsed hours and marked early before 72 hours. Unknown/unlimited allocation
+does not prevent a dollar
 projection. These are transparent estimation assumptions, not a verified
 provider billing contract or a promise about invoices.
 
