@@ -1,5 +1,52 @@
 # GHCPSpendTray validation and release gates
 
+## Local real-app Sparkle replacement rehearsal (October 9, 2026)
+
+`python3 tools/macos/rehearsal.py --signing-identity '<Developer ID identity>'`
+now runs a repeatable, opt-in update exercise with two different builds of the
+actual SwiftUI/AppKit app and Native AOT bridge. All embedded code is arm64,
+Developer ID signed with hardened runtime, and timestamped. The local runner
+uses disposable bundle identities, ephemeral Ed25519 keys, authenticated feeds
+and signed DMGs, and downloads solely through a native loopback listener.
+It neither publishes a release nor changes production updater configuration.
+
+Local macOS 26 / Apple-silicon execution passes eight real-engine scenarios:
+manual download/install/relaunch, background download followed by the existing
+Install and Relaunch action, install on quit, cancel download, cancel prepared
+installation, corrupted archive, archive signed by a wrong key, and interrupted
+download. Each successful case checks exact candidate file hashes, executable
+permissions/framework symlinks, a new process at the same installation path,
+preservation of synthetic external settings/history files and a device-local
+Keychain item, and native update-check/download preferences. The installed B
+then rejects an authenticated older A feed without replacing itself. Negative
+cases require signature-validation/download error codes or explicit
+cancellation and an unchanged, correctly signed, runnable A. Reports and
+callback traces remain under `artifacts/macos-rehearsal/<run-id>`.
+
+The rehearsal initially exposed two fixture assumptions: ad-hoc A/B binaries
+do not have stable cross-version Keychain trust, and background-install
+readiness can temporarily toggle during Sparkle's installer-status probe.
+Developer ID signing resolves the former; the latter now waits on actual
+readiness notifications and rechecks state at dispatch, rather than delaying
+or treating a transient ready sample as final. Neither required relaxing
+production signature validation or increasing deadlines.
+
+Automation uses a supported custom Sparkle user driver in the real app; normal
+builds retain the standard controller/dialogs. Rehearsal code lives outside the
+shipping Swift glob, requires explicit development-only compiler flags, is
+rejected by production package validation, and removes only its unique
+synthetic Keychain/defaults data. The ordinary development bundle is rebuilt
+after the runner finishes. Private seeds are never retained in evidence.
+
+This is strong evidence for the actual downloader, helpers, replacement and
+relaunch, **not** a full production acceptance result: these builds are not
+notarized, use local HTTP, have unique synthetic identities/state, and automate
+choices instead of clicking the standard UI. Notarization/quarantine/Gatekeeper,
+privileged/read-only install paths, normal update-dialog interaction, macOS 15
+full replacement, real account/schema migration, and public Pages/HTTPS delivery
+remain distinct gates. Production Sparkle signing keys, notarization credentials,
+tags and public assets were not used for the rehearsal.
+
 ## Microsoft Store update detection and installation (October 9, 2026)
 
 Synthetic Windows tests cover periodic/throttled checks, unavailable vs current
@@ -235,6 +282,68 @@ Release-tooling checks, the Release solution build and all four managed
 harnesses passed. The instrumented Store x64 Native AOT app also passed both
 local packaged smoke scenarios, retained their final phase, and removed its
 isolated development registration. Hosted confirmation remains required.
+
+## macOS Sparkle updates (October 3, 2026)
+
+The native Swift frontend now embeds checksum-pinned Sparkle 2.10.0 without
+changing the `swiftc`/Native AOT build model. Every embedded Sparkle Mach-O
+file is thinned to arm64 before inside-out signing. Package inspection covers
+framework/helper presence, executable permissions, architecture, dependency
+paths, signed-feed/verification configuration and consent/profiling defaults.
+Public builds use a retained standard updater controller; development, demo
+and smoke modes do not instantiate it or read/write updater preferences.
+
+Local full `bash tools/macos/verify.sh` passes the existing 170 Core tests and
+81 shared controller/bridge assertions in managed and executed arm64 Native
+AOT, 17 CI-routing tests, 30 release-planning/workflow tests and 52 Mac tooling
+tests, plus native Swift fixtures and both populated/empty UI smoke runs.
+Updater fixtures cover isolation, duplicate startup, preference forwarding,
+disabled actions, update reminders, downloaded/install-on-quit relaunch
+availability, startup failure and explicit errors. The real Sparkle updater
+reads signed synthetic appcasts from a loopback-only native fixture server and
+rejects tampered/unsigned feeds and incompatible OS requirements without
+downloading or installing an archive. Test preferences use unique synthetic
+defaults domains, and fixture servers/files are removed after each case.
+
+PR #62's first hosted macOS 26 run failed while the Sparkle fixture awaited
+Python subprocess/file-sentinel readiness, not in a navigation/UI assertion.
+The generic startup error and absent retained diagnostics did not establish
+whether Python exited or missed its deadline. The fixture now uses an
+in-process Network.framework listener bound exclusively to `127.0.0.1` and
+awaits its ready callback and Sparkle's completion callback directly. An actual
+HTTP request verifies the listener serves the exact feed bytes before starting
+Sparkle. There are no fixture polling loops or unconditional settling delays;
+ten-second deadlines only guard missing callbacks. Callback fixtures cover
+early completion, duplicate completion, timeout and cancellation.
+
+Per-scenario progress, listener states, HTTP responses, signing exit status and
+Sparkle callback errors go to stderr and `artifacts/macos-test-diagnostics`.
+The native harness exits with a readable failure instead of trapping on an
+uncaught Swift error, and Verify/Release retain these synthetic logs on failure.
+The signed/tampered/unsigned/OS-incompatible cases still execute the real
+Sparkle updater, and negative cases assert appcast-verification callbacks and
+the precise signature-validation/OS-incompatibility error codes rather than
+accepting an arbitrary transport failure as success. The existing UI geometry
+assertions, readiness thresholds and job limits are unchanged. Hosted
+confirmation of the revised fixture remains required.
+
+Real Sparkle signing tools also generate an appcast from a synthetic arm64 DMG.
+Fixtures verify the signature of the exact archive bytes, tampered-feed/archive
+rejection, private/public-key mismatch, immutable versioned download URLs,
+stable-only numeric ordering, preview/Windows/draft exclusion, metadata
+constraints, retention of older entries, missing-latest-feed failure, and feed
+retry orchestration after an already-published release. Only public test-vector
+or ephemeral synthetic keys are used.
+
+Production Apple signing/notarization with the new embedded helpers, GitHub
+Pages deployment, macOS 15 execution, and replacement/relaunch between two
+Developer ID signed/notarized versions remain release acceptance gates.
+Configure the dedicated production Sparkle key pair and Actions-based Pages
+site as described in [RELEASING.md](RELEASING.md) before publishing. Exercise
+manual and opt-in automatic updates, read-only/translocated installations,
+declined authorization, unavailable feeds, login startup, and preservation of
+synthetic history/settings/Keychain items. No production keys were generated
+or cloud configuration changed during local implementation.
 
 ## macOS per-account period estimates (October 3, 2026)
 

@@ -72,6 +72,33 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('release_metadata(os.environ["GHCP_MAC_VERSION"], os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"])', signing)
         self.assertIn("releaseRunId=run_id", (ROOT / "tools/macos/release.py").read_text())
 
+    def test_update_feed_is_retryable_after_mac_release_already_published(self):
+        job = self.job("macos_updates")
+        self.assertIn("needs: [plan, macos]", job)
+        self.assertIn("always()", job)
+        self.assertIn("needs.plan.outputs.macos_version != ''", job)
+        self.assertIn("!inputs.prerelease", job)
+        self.assertIn("needs.macos.result == 'skipped'", job)
+        self.assertIn("uses: ./.github/workflows/macos-updates.yml", job)
+        feed = (ROOT / ".github/workflows/macos-updates.yml").read_text()
+        for text in ("workflow_call:", "workflow_dispatch:", "cancel-in-progress: false",
+                     "if: github.ref == 'refs/heads/main'", "environment: production",
+                     "updates.py feed", "actions/upload-pages-artifact@", "actions/deploy-pages@"):
+            self.assertIn(text, feed)
+        self.assertIn("needs: generate", feed)
+        self.assertNotIn("release.py publish", feed)
+        self.assertNotIn("notarize.sh", feed)
+        self.assertNotIn("contents: write", feed)
+
+    def test_sparkle_signs_final_notarized_dmg_before_checksums(self):
+        signing = (ROOT / "tools/macos/sign-package.sh").read_text()
+        self.assertLess(signing.index('stapler staple "$dmg"'), signing.index("updates.py generate"))
+        self.assertLess(signing.index("updates.py generate"), signing.index('root.joinpath("SHA256SUMS")'))
+        self.assertIn("SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}", self.job("macos"))
+        self.assertIn("SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}", self.job("macos"))
+        self.assertNotIn("SPARKLE_", self.job("plan"))
+        self.assertNotIn("SPARKLE_", self.job("windows"))
+
 
 if __name__ == "__main__":
     unittest.main()

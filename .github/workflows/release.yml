@@ -293,6 +293,8 @@ jobs:
       RELEASE_VERSION: ${{ needs.plan.outputs.macos_version }}
       PRERELEASE: ${{ inputs.prerelease }}
       GH_TOKEN: ${{ github.token }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+      MACOS_UPDATE_FEED_URL: ${{ vars.MACOS_UPDATE_FEED_URL }}
     steps:
       - name: Checkout pinned main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -306,7 +308,16 @@ jobs:
         with:
           global-json-file: global.json
       - name: Verify shared engine and arm64 native app
+        id: native_verify
         run: bash tools/macos/verify.sh
+      - name: Retain native macOS test diagnostics
+        if: ${{ always() && steps.native_verify.outcome != 'skipped' && steps.native_verify.outcome != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-test-diagnostics
+          path: artifacts/macos-test-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Build release version
         run: |
           channel=Stable
@@ -321,6 +332,7 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: bash tools/macos/sign-package.sh "$RELEASE_VERSION"
       - name: Retain notarization submission IDs and status
         if: ${{ always() && steps.sign.outcome != 'skipped' && steps.sign.outcome != '' }}
@@ -340,3 +352,14 @@ jobs:
         run: |
           python3 tools/macos/release.py publish "$RELEASE_VERSION"
           echo "Published notarized [macOS $RELEASE_VERSION]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/macos-v$RELEASE_VERSION) from [$GITHUB_SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)." >> "$GITHUB_STEP_SUMMARY"
+
+  macos_updates:
+    name: Publish macOS update feed
+    needs: [plan, macos]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.macos_version != '' && !inputs.prerelease && (needs.macos.result == 'success' || needs.macos.result == 'skipped') }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/macos-updates.yml
+    secrets: inherit
