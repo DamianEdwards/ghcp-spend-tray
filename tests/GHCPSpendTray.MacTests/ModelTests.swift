@@ -164,6 +164,9 @@ final class FixtureBridge: ApplicationBridge {
 
     func request(_ fields: [String: Any]) throws -> Receipt {
         requests.append(fields)
+        if fields["method"] as? String == "form.validate" {
+            return try NativeApplicationBridge().request(fields)
+        }
         return Receipt(error: nil)
     }
 

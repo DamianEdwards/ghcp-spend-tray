@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Darwin
 import SwiftUI
 import UserNotifications
@@ -18,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var activationObserver: NSObjectProtocol?
     private var smoke = false
     private var empty = false
+    private var poweringOff = false
+    private var powerObserver: NSObjectProtocol?
     #if UPDATE_REHEARSAL
     private var rehearsal: UpdateRehearsal?
     #endif
@@ -81,11 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let model = AppModel(directory: directory, demo: demo, updates: updates)
             self.model = model
             model.showSettings = { [weak self] in self?.openSettings() }
+            model.unsavedChangesRequested = { [weak self] in self?.confirmLeaving() }
             model.dashboardChanged = { [weak self] dashboard in self?.updateMenuBar(dashboard.tray) }
             setupMenuBar(model)
             UNUserNotificationCenter.current().delegate = self
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak model] _ in
                 MainActor.assumeIsolated { if model?.initialized == true { model?.perform("resume") } }
+            }
+            powerObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.poweringOff = true }
             }
             if !demo {
                 activationObserver = DistributedNotificationCenter.default().addObserver(forName: activationName, object: nil, queue: .main) { [weak self] _ in
@@ -200,8 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             button.performClick(nil)
             item.menu = nil
         } else if let key = statusItems.first(where: { $0.value === item })?.key, key != "rollup" {
-            model?.selectedAccount = key
-            model?.openSettings(.accounts)
+            model?.openSettings(.accounts, accountKey: key)
         } else if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -254,12 +260,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
-        if model.initialized && !model.busy && !model.showingSignIn { model.perform("resume") }
+        if model.initialized && !model.busy && !model.showingSignIn && !model.pendingNavigation { model.perform("resume") }
     }
 
     func windowWillClose(_ notification: Notification) {
         model?.cancelSignIn()
         model?.showingSignIn = false
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let model else { return true }
+        return model.requestLeaving { [weak sender] in sender?.close() }
+    }
+
+    private func confirmLeaving() {
+        guard let model else { return }
+        openSettings()
+        guard let window = settingsWindow, window.attachedSheet == nil else {
+            model.resolveUnsavedChanges(.keepEditing)
+            return
+        }
+        UnsavedChangesAlert.make().beginSheetModal(for: window) { response in
+            model.resolveUnsavedChanges(UnsavedChangesAlert.choice(response))
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -268,7 +291,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        model?.cancelSignIn()
+        // Logout/restart/shutdown must not wait for an interactive settings sheet.
+        let quitReason = NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue ?? 0
+        if poweringOff || isSystemTermination(quitReason) {
+            model?.cancelSignIn()
+            return .terminateNow
+        }
+        guard let model else { return .terminateNow }
+        guard !model.saving && !model.pendingNavigation else { return .terminateCancel }
+        if !model.requestLeaving({ sender.reply(toApplicationShouldTerminate: true) },
+                                 cancelled: { sender.reply(toApplicationShouldTerminate: false) }) {
+            return .terminateLater
+        }
+        model.cancelSignIn()
         return .terminateNow
     }
 
@@ -276,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model?.shutdown()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         if let activationObserver { DistributedNotificationCenter.default().removeObserver(activationObserver) }
+        if let powerObserver { NSWorkspace.shared.notificationCenter.removeObserver(powerObserver) }
         if instanceLock >= 0 { Darwin.close(instanceLock) }
     }
 
@@ -288,8 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let key = response.notification.request.content.userInfo["accountKey"] as? String
         Task { @MainActor [weak self] in
-            self?.model?.selectedAccount = key
-            self?.model?.openSettings(key == nil ? .usage : .accounts)
+            self?.model?.openSettings(key == nil ? .usage : .accounts, accountKey: key)
         }
         completionHandler()
     }
@@ -368,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             try await waitUntil { !model.busy }
             for page in SettingsPage.allCases {
                 progress("rendering \(page.rawValue)")
-                model.page = page
+                model.selectPage(page)
                 try await Task.sleep(for: .milliseconds(250))
                 try saveSettingsSnapshot(page.rawValue)
             }
@@ -470,8 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 throw AppError.message("Account estimate preference did not round-trip.")
             }
             popover.performClose(nil)
-            model.selectedAccount = example.key
-            model.openSettings(.accounts)
+            model.openSettings(.accounts, accountKey: example.key)
             try await Task.sleep(for: .milliseconds(500))
             guard model.error == nil else { throw AppError.message("Account estimate settings did not load.") }
             try saveSettingsSnapshot("AccountWithEstimate")
@@ -480,6 +514,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             try await waitUntil { !model.busy }
             guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate == nil else {
                 throw AppError.message("Disabling an account estimate must remove the forecast.")
+            }
+            progress("checking budget editing through the native C ABI")
+            let budgetAccount = model.dashboard?.accounts.first(where: { $0.host == "example.ghe.com" }) ?? example
+            model.openSettings(.accounts, accountKey: budgetAccount.key)
+            try await waitUntil { model.formLoaded && !model.busy }
+            model.accountDraft.useCustomBudget = true
+            model.accountDraft.budget = "50.00"
+            guard model.budgetPreview?.contains("of $50.00 custom budget") == true else {
+                throw AppError.message("Native budget draft did not use the shared preview.")
+            }
+            let budgetDraft = model.accountDraft
+            model.accountDraft.budget = "invalid"
+            model.saveChanges()
+            guard model.fieldErrors["budget"] != nil, model.accountDraft.budget == "invalid", !model.saving,
+                  model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == nil else {
+                throw AppError.message("Invalid native budget save altered settings or lost the draft.")
+            }
+            model.accountDraft = budgetDraft
+            model.saveChanges()
+            try await waitUntil {
+                !model.saving && model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == 50
+            }
+            guard model.formMessage == nil, !model.hasUnsavedChanges,
+                  let budgetView = model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key }),
+                  budgetView.allocationSummary.contains("custom budget"),
+                  budgetView.details.observedAllocationUsd == budgetAccount.details.observedAllocationUsd,
+                  budgetView.details.observedPercentConsumed == budgetAccount.details.observedPercentConsumed else {
+                throw AppError.message("Native budget save did not preserve diagnostics and establish a clean baseline.")
+            }
+            settingsWindow?.setContentSize(NSSize(width: 730, height: 550))
+            try await Task.sleep(for: .milliseconds(250))
+            try saveSettingsSnapshot("AccountWithBudget")
+            model.accountDraft.showPeriodEstimate.toggle()
+            model.saveChanges()
+            try await waitUntil { !model.saving }
+            guard model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == 50 else {
+                throw AppError.message("Unrelated native account save reset the custom budget.")
+            }
+            model.accountDraft.useCustomBudget = false
+            model.saveChanges()
+            try await waitUntil {
+                !model.saving && model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == nil
+            }
+            guard model.formMessage == nil, !model.hasUnsavedChanges else {
+                throw AppError.message("Explicit native API-allocation reset did not clear the budget.")
             }
             model.addAccount()
             progress("opening onboarding")

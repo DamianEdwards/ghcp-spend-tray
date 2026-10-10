@@ -1,5 +1,48 @@
 # GHCPSpendTray validation and release gates
 
+## Native macOS budgets and protected settings drafts (October 9, 2026)
+
+The Mac frontend now edits per-account custom USD tracking budgets and explicitly
+resets them to API allocation. Source-generated command/preferences contracts are
+additive: omitted or false `updateCustomBudget` preserves an override; a null
+budget with true clears it. Native usage and estimate labels identify the
+effective target while Advanced Details retain raw API allocation and percentage.
+Draft preview arithmetic and form validation run in the Native AOT bridge using
+the shared budget and threshold rules, not a separate Swift calculation.
+
+`bash tools/macos/verify.sh` passed locally on Apple silicon/macOS 26.7.1 using
+the pinned .NET 10.0.401 SDK, stable Swift 6.4 Command Line Tools, and the selected
+stable macOS 26 SDK. The run includes 179 Core tests and 129 shared/controller/
+bridge assertions in both managed and executed arm64 Native AOT, plus native
+Swift tests, synthetic Keychain CRUD, arm64-only bundle/signature checks, and
+populated/empty real-app UI smoke runs. The CI tooling suite retains two existing
+opt-in skips; they are not claimed as passes.
+
+Focused coverage checks budget set/omission/false/clear, unrelated account and
+global saves, unchanged diagnostics, weighted menu-bar percentages, estimates,
+and draft previews. Native fixtures cover custom-budget labels with unlimited or
+unknown API allocation, shared allowed input values, all-invalid-field feedback,
+override error clearing, exact failed drafts, clean-on-revert behavior, inherited
+overrides/toggles, and dirty refresh protection. A native AppKit field editor
+remains the same object and keeps focus as inline errors appear and disappear.
+Synthetic clicks exercise both fixed footer actions in scrolled account, General,
+and Notifications forms constrained to 500 by 400 points.
+
+Real native sheet buttons exercise Save, Discard, and Keep Editing, including
+invalid Save and synthetic persistence failure. Model coverage guards Back,
+sidebar/account switches, Add/Reconnect, close/Quit continuations, and navigation
+during asynchronous saves. Explicit system logout/restart/shutdown Apple Event
+reasons bypass interactive prompts; no actual OS shutdown was initiated. The
+real-app smoke saves and clears budgets through the C ABI, rejects invalid drafts,
+preserves a budget across an unrelated save, and renders account budget preferences
+at the minimum Settings window size.
+
+All new examples are synthetic and isolated. No real account credentials,
+consumption data, login-item changes, or production signing/notarization
+credentials were used. Windows execution, macOS 15 runtime coverage, VoiceOver
+interaction, and real OS termination remain separate checks; this local run does
+not claim them.
+
 ## Local real-app Sparkle replacement rehearsal (October 9, 2026)
 
 `python3 tools/macos/rehearsal.py --signing-identity '<Developer ID identity>'`

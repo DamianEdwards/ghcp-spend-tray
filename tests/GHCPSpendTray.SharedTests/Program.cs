@@ -342,6 +342,7 @@ try
         bridge.Dispose();
         Check(bridge.Send(new() { Id = "late", Method = "refresh" }).Error is not null, "Shutdown cancels outstanding native work.");
     }
+    assertions += await BudgetBridgeTests.RunAsync(Path.Combine(root, "budget-bridge"));
     Console.WriteLine($"PASS: {assertions} shared application and native bridge assertions; synthetic data only.");
 }
 finally { Directory.Delete(root, recursive: true); }

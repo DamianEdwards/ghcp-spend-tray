@@ -92,7 +92,7 @@ enum NavigationInteractionTests {
         }
     }
 
-    private static func click(_ window: NSWindow, view: NSView, x: CGFloat, fromTop: CGFloat) throws {
+    static func click(_ window: NSWindow, view: NSView, x: CGFloat, fromTop: CGFloat) throws {
         let y = view.isFlipped ? fromTop : view.bounds.height - fromTop
         let point = view.convert(NSPoint(x: x, y: y), to: nil)
         let timestamp = ProcessInfo.processInfo.systemUptime

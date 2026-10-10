@@ -16,6 +16,7 @@ enum PlatformTests {
         try ModelTests.run()
         try PeriodEstimateTests.run()
         try NavigationInteractionTests.run()
+        try SettingsFormTests.run()
         try TrayIconRendererTests.run()
         try PopupSmokeReadinessTests.run()
         try UpdateTests.run()
