@@ -186,6 +186,76 @@ try
         Check(credentials.Values.IsEmpty && (await new JsonStore(root).LoadSettingsAsync()).Value.Accounts.Length == 0, "Removal deletes credentials and configuration.");
     }
     BridgeEvent? notificationRequest = null;
+    foreach (bool unlimited in new[] { false, true })
+    {
+        using var budgetBridge = new BridgeRuntime();
+        DashboardView? budgetDashboard = null;
+        void ObserveBudget(BridgeEvent e) { if (e.Dashboard is not null) budgetDashboard = e.Dashboard; }
+        budgetBridge.Send(new() { Id = "budget-init", Method = "initialize",
+            Directory = Path.Combine(root, "budget-bridge-" + unlimited), Demo = true, Unlimited = unlimited });
+        await Complete(budgetBridge, "budget-init", ObserveBudget);
+        async Task<BridgeEvent> BudgetCommand(string json, bool observe = true)
+        {
+            var command = JsonSerializer.Deserialize(json, BridgeJsonContext.Default.Command)!;
+            Check(budgetBridge.Send(command).Error is null, "Generated budget command accepted.");
+            return await Complete(budgetBridge, command.Id, observe ? ObserveBudget : null);
+        }
+        var set = await BudgetCommand("""
+            {"id":"budget-set","method":"account.save","key":"github.com:1","displayName":"Synthetic",
+             "customBudgetUsd":50.00,"updateCustomBudget":true}
+            """);
+        Check(set.Error is null && budgetDashboard!.Accounts[0] is { CustomBudgetUsd: 50m, AllocationUsd: 50m, Percent: 52.5m } &&
+            budgetDashboard.Tray!.RollUp.Percent == (unlimited ? 52.5 : 28.5),
+            "Budget reaches shared dashboard and weighted tray, including unlimited API allocation.");
+        Check(budgetDashboard!.Accounts[0].Details.Unlimited == unlimited &&
+            budgetDashboard.Accounts[0].Details.ObservedAllocationUsd == (unlimited ? null : 25m),
+            "Budget never rewrites raw API diagnostics.");
+        var preferences = await BudgetCommand("""
+            {"id":"budget-preferences","method":"account.preferences","key":"github.com:1"}
+            """);
+        Check(preferences.Preferences?.CustomBudgetUsd == 50m,
+            "Generated preferences expose the saved budget.");
+        foreach (var json in new[]
+        {
+            """{"id":"budget-omit","method":"account.save","key":"github.com:1","displayName":"Unrelated"}""",
+            """{"id":"budget-false","method":"account.save","key":"github.com:1","customBudgetUsd":null,"updateCustomBudget":false}""",
+            """{"id":"budget-no-update","method":"account.save","key":"github.com:1","customBudgetUsd":80}"""
+        })
+        {
+            await BudgetCommand(json);
+            Check(budgetDashboard!.Accounts[0].CustomBudgetUsd == 50m,
+                "Omitted/false update flags and unrelated account saves preserve the override.");
+        }
+        var preview = await BudgetCommand("""
+            {"id":"budget-preview","method":"account.budget.preview","key":"github.com:1","customBudgetUsd":50}
+            """);
+        Check(preview.Text == "$26.25 consumed = 52.5% of $50.00 custom budget",
+            "Draft preview uses shared exact budget calculations and label.");
+        if (!unlimited)
+        {
+            preview = await BudgetCommand("""
+                {"id":"work-budget-preview","method":"account.budget.preview","key":"example.ghe.com:2","customBudgetUsd":50}
+                """);
+            Check(preview.Text == "$16.50 consumed = 33% of $50.00 custom budget",
+                "Draft preview retains the required consumed/percentage/target output shape.");
+        }
+        Check(budgetDashboard!.Accounts[0].CustomBudgetUsd == 50m, "Preview does not persist a target.");
+        var invalid = await BudgetCommand("""
+            {"id":"budget-invalid","method":"account.save","key":"github.com:1","customBudgetUsd":0,"updateCustomBudget":true}
+            """);
+        Check(invalid.Error is not null && budgetDashboard!.Accounts[0].CustomBudgetUsd == 50m,
+            "Rejected bridge save retains the target.");
+        await BudgetCommand("""
+            {"id":"budget-clear","method":"account.save","key":"github.com:1","customBudgetUsd":null,"updateCustomBudget":true}
+            """);
+        Check(budgetDashboard!.Accounts[0].CustomBudgetUsd is null &&
+            budgetDashboard.Accounts[0].Percent == (unlimited ? null : 105m),
+            "Null plus explicit update clears the target and restores API allocation.");
+        preferences = await BudgetCommand("""
+            {"id":"budget-cleared-preferences","method":"account.preferences","key":"github.com:1"}
+            """);
+        Check(preferences.Preferences?.CustomBudgetUsd is null, "Cleared target round-trips as omitted nullable preference.");
+    }
     using (var platform = new NativePlatform(request =>
     {
         notificationRequest = request;

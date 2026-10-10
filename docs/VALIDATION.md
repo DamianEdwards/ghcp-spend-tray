@@ -696,6 +696,44 @@ pull requests. The main branch requires pull requests and the aggregate
 `tools/ci/test_dependabot.py` guards package coverage alongside the CodeQL
 workflow checks.
 
+## macOS custom budgets and settings drafts (October 9, 2026)
+
+Native account preferences now edit per-account tracking budgets using the
+shared .NET budget calculations. The additive generated C ABI exposes the saved
+target and supports omission/preservation, explicit set, and null-plus-update
+reset. Raw API diagnostics remain separate from custom-budget presentation.
+
+`bash tools/macos/verify.sh` is exercised on native Apple silicon with the pinned
+.NET 10.0.401 SDK and stable Apple Swift 6.2.3 Command Line Tools on macOS 15.8.1.
+Managed and executed Native AOT bridge tests cover generated JSON budget
+round-trips, unrelated saves, exact draft preview text, unlimited allocations,
+reset and rejected saves. The bundle remains arm64-only and development/ad-hoc
+signed; this is not macOS 26 execution or production signing/notarization evidence.
+
+Synthetic native fixtures cover per-field validation, exact invalid/failed draft
+retention, disabled overrides, toggles/set-valued dirty baselines, background
+refresh isolation, and Save/Discard/Keep editing continuations. They exercise an
+actual AppKit field editor through invalid Save and correction, checking editor
+identity and selection. SwiftUI bounds preferences measure Save and Cancel
+inside the fixed footer of account, General and Notifications forms at 500 by
+400 points, including validation-message insertion. Offscreen render snapshots
+are supplementary; they are not a substitute for those geometry/editor checks
+or manual VoiceOver acceptance.
+
+Empty and populated Native AOT app smoke runs exercise real native alert-sheet
+buttons: invalid budget Save blocks navigation, valid Save persists before
+navigation, Settings close supports Keep editing/Discard, and invalid Save or
+Keep editing cancels app Quit. Quit first cancels AppKit termination, then retries
+only after a successful leave action, keeping the normal bridge event loop alive.
+Synthetic Apple-event tests cover noninteractive shutdown/restart/logout policy;
+no real OS shutdown is performed. Save failures are injected in native model
+fixtures, not by modifying real data-folder permissions.
+
+These checks use synthetic data, isolated directories, and uniquely named test
+Keychain items only. They do not sign in, change real login items, or deliver
+notifications. Foreground popup smoke can fail if another app takes activation;
+such a failure is not a passing check and requires an undisturbed rerun.
+
 ## macOS implementation evidence (October 1, 2026)
 
 The native Mac frontend shares the C# controller, host-scoped OAuth, decimal

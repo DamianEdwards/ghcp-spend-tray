@@ -20,6 +20,8 @@ public sealed record Command
     public string? Thresholds { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public bool? ShowPeriodEstimate { get; init; }
+    public decimal? CustomBudgetUsd { get; init; }
+    public bool UpdateCustomBudget { get; init; }
     public SettingsView? Settings { get; init; }
     public string? TargetId { get; init; }
     public PlatformReply? Reply { get; init; }
@@ -36,7 +38,7 @@ public sealed record PlatformReply
 }
 
 public sealed record AccountPreferences(string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
-    string? ClientId, bool ShowPeriodEstimate = false);
+    string? ClientId, bool ShowPeriodEstimate = false, decimal? CustomBudgetUsd = null);
 
 public sealed record BridgeEvent
 {

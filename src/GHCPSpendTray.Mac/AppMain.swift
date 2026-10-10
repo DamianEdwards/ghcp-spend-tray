@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var instanceLock: Int32 = -1
     private var wakeObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
+    private var shutdownObserver: NSObjectProtocol?
+    private var systemShutdown = false
+    private var unsavedAlert: NSAlert?
     private var smoke = false
     private var empty = false
     #if UPDATE_REHEARSAL
@@ -81,11 +84,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let model = AppModel(directory: directory, demo: demo, updates: updates)
             self.model = model
             model.showSettings = { [weak self] in self?.openSettings() }
+            model.askUnsavedChanges = { [weak self] in self?.confirmUnsavedChanges() }
             model.dashboardChanged = { [weak self] dashboard in self?.updateMenuBar(dashboard.tray) }
             setupMenuBar(model)
             UNUserNotificationCenter.current().delegate = self
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak model] _ in
                 MainActor.assumeIsolated { if model?.initialized == true { model?.perform("resume") } }
+            }
+            shutdownObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.systemShutdown = true
+                }
             }
             if !demo {
                 activationObserver = DistributedNotificationCenter.default().addObserver(forName: activationName, object: nil, queue: .main) { [weak self] _ in
@@ -200,8 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             button.performClick(nil)
             item.menu = nil
         } else if let key = statusItems.first(where: { $0.value === item })?.key, key != "rollup" {
-            model?.selectedAccount = key
-            model?.openSettings(.accounts)
+            model?.editAccount(key)
         } else if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -257,6 +266,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if model.initialized && !model.busy && !model.showingSignIn { model.perform("resume") }
     }
 
+    private func confirmUnsavedChanges() {
+        guard let model, let window = settingsWindow else {
+            model?.resolveUnsavedChanges(.keepEditing)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Save your changes?"
+        alert.informativeText = "Save before leaving, discard changes, or keep editing this form."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Keep editing")
+        alert.buttons[2].keyEquivalent = "\u{1b}"
+        unsavedAlert = alert
+        alert.beginSheetModal(for: window) { [weak self] response in
+            self?.unsavedAlert = nil
+            model.resolveUnsavedChanges(response == .alertFirstButtonReturn ? .save :
+                response == .alertSecondButtonReturn ? .discard : .keepEditing)
+        }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let model else { return true }
+        guard !model.preferences.saving else { return false }
+        if model.preferences.dirty {
+            model.leaveForm { sender.close() }
+            return false
+        }
+        return true
+    }
+
     func windowWillClose(_ notification: Notification) {
         model?.cancelSignIn()
         model?.showingSignIn = false
@@ -268,6 +308,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !systemShutdown, !TerminationPolicy.isNoninteractive(NSAppleEventManager.shared().currentAppleEvent) else {
+            model?.cancelSignIn()
+            return .terminateNow
+        }
+        guard model?.preferences.saving != true else { return .terminateCancel }
+        if let model, model.preferences.dirty {
+            // Do not enter AppKit's termination loop while the bridge needs its normal event loop to save.
+            model.leaveForm { sender.terminate(nil) }
+            return .terminateCancel
+        }
         model?.cancelSignIn()
         return .terminateNow
     }
@@ -276,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model?.shutdown()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         if let activationObserver { DistributedNotificationCenter.default().removeObserver(activationObserver) }
+        if let shutdownObserver { NSWorkspace.shared.notificationCenter.removeObserver(shutdownObserver) }
         if instanceLock >= 0 { Darwin.close(instanceLock) }
     }
 
@@ -288,8 +339,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let key = response.notification.request.content.userInfo["accountKey"] as? String
         Task { @MainActor [weak self] in
-            self?.model?.selectedAccount = key
-            self?.model?.openSettings(key == nil ? .usage : .accounts)
+            if let key { self?.model?.editAccount(key) }
+            else { self?.model?.openSettings(.usage) }
         }
         completionHandler()
     }
@@ -481,6 +532,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate == nil else {
                 throw AppError.message("Disabling an account estimate must remove the forecast.")
             }
+            progress("checking native budget drafts and leave-form sheets")
+            model.preferences.begin("")
+            model.beginPreferences(accountKey: example.key)
+            try await waitUntil { model.preferences.loaded && !model.busy }
+            model.preferences.account.useCustomBudget = true
+            model.preferences.account.budget = "0"
+            progress("rejecting invalid budget through native Save sheet")
+            model.navigate(.general)
+            try await chooseUnsavedButton(0)
+            guard model.page == .accounts, model.preferences.account.budget == "0",
+                  model.preferences.errors[.budget] != nil, model.preferences.dirty else {
+                throw AppError.message("Invalid native Save must cancel navigation and retain the budget editor.")
+            }
+            model.preferences.account.budget = "50.00"
+            progress("saving budget before native navigation")
+            model.navigate(.general)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { model.page == .general && !model.busy && model.preferences.context == "General" }
+            guard model.dashboard?.accounts.last?.customBudgetUsd == 50,
+                  model.dashboard?.accounts.last?.percent == 25 else {
+                throw AppError.message("Native Save did not apply the shared custom-budget percentage before navigating.")
+            }
+            guard let window = settingsWindow else { throw AppError.message("Settings window missing.") }
+            model.preferences.global.minutes = "4"
+            progress("keeping dirty Settings open")
+            window.performClose(nil)
+            try await chooseUnsavedButton(2)
+            guard window.isVisible, model.preferences.global.minutes == "4", model.preferences.dirty else {
+                throw AppError.message("Native close Keep editing must retain the visible dirty form.")
+            }
+            progress("rejecting invalid Save on native Quit")
+            NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(0)
+            guard window.isVisible, model.preferences.global.minutes == "4", model.preferences.errors[.minutes] != nil,
+                  model.preferences.dirty else {
+                throw AppError.message("Invalid native Quit Save must cancel termination and retain the draft.")
+            }
+            progress("keeping draft on native Quit")
+            NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(2)
+            guard window.isVisible, model.preferences.dirty else {
+                throw AppError.message("Native Quit Keep editing must cancel termination.")
+            }
+            window.performClose(nil)
+            progress("discarding before native Settings close")
+            try await chooseUnsavedButton(1)
+            guard !window.isVisible, !model.preferences.dirty,
+                  model.preferences.global.minutes == String(model.settings!.pollMinutes) else {
+                throw AppError.message("Native close Discard must restore saved values before closing.")
+            }
+            openSettings()
+            try await waitUntil { !model.busy }
             model.addAccount()
             progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))
@@ -499,6 +602,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             model.shutdown()
             exit(1)
         }
+    }
+
+    private func chooseUnsavedButton(_ index: Int) async throws {
+        try await waitUntil { self.unsavedAlert != nil }
+        guard let alert = unsavedAlert, alert.buttons.indices.contains(index) else {
+            throw AppError.message("Native unsaved-changes sheet did not contain the expected action.")
+        }
+        alert.buttons[index].performClick(nil)
+        try await waitUntil { self.unsavedAlert == nil && self.settingsWindow?.attachedSheet == nil }
     }
 
     private func waitForPopupAnchor(_ button: NSStatusBarButton, phase: String, presented: Bool = true,

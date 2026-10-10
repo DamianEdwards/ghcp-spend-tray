@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using GHCPSpendTray.Core;
 using GHCPSpendTray.Shared;
 
@@ -70,8 +71,28 @@ public sealed class BridgeRuntime : IDisposable
                 {
                     Kind = "completed", Id = command.Id,
                     Preferences = new(preferences.DisplayName, preferences.Thresholds, preferences.SpendIncrementUsd,
-                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate)
+                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate,
+                        _dashboard?.Accounts.FirstOrDefault(a => a.Key == key)?.CustomBudgetUsd)
                 });
+                return new();
+            }
+            if (command.Method == "account.budget.preview")
+            {
+                UsageBudget.Validate(command.CustomBudgetUsd);
+                AccountView account;
+                lock (_stateGate)
+                    account = _dashboard?.Accounts.FirstOrDefault(a => a.Key == Required(command.Key))
+                        ?? throw new AppOperationException("That account is no longer configured.");
+                decimal? target = command.CustomBudgetUsd;
+                string text = target is null ? "API allocation: " + (account.Details.Unlimited ? "Unlimited" :
+                    account.Details.ObservedAllocationUsd is { } allocation
+                        ? $"${allocation.ToString("0.00", CultureInfo.InvariantCulture)}" : "Unavailable") :
+                    account.Freshness != "Fresh" || account.ConsumptionUsd is not { } consumption
+                    ? "Consumption unavailable; no percentage preview." :
+                    $"${consumption.ToString("0.00", CultureInfo.InvariantCulture)} consumed = " +
+                    $"{UsageBudget.Percentage(consumption, target.Value).ToString("0.##", CultureInfo.InvariantCulture)}% of " +
+                    $"${target.Value.ToString("0.00", CultureInfo.InvariantCulture)} custom budget";
+                _events.Enqueue(new() { Kind = "completed", Id = command.Id, Text = text });
                 return new();
             }
             if (string.IsNullOrEmpty(command.Id)) throw new ArgumentException("Missing command identifier.");
@@ -120,7 +141,8 @@ public sealed class BridgeRuntime : IDisposable
                     break;
                 case "account.save":
                     await Controller.SaveAccountAsync(Required(command.Key), command.DisplayName ?? "",
-                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate);
+                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate,
+                        command.CustomBudgetUsd, command.UpdateCustomBudget);
                     break;
                 case "account.remove":
                     await Controller.RemoveAsync(Required(command.Key));

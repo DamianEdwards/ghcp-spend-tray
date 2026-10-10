@@ -1,5 +1,161 @@
 import AppKit
+import Carbon
 import SwiftUI
+
+enum PreferenceField: String, CaseIterable {
+    case name, accountThresholds, accountIncrement, budget, minutes, thresholds, increment
+}
+
+enum UnsavedChoice { case save, discard, keepEditing }
+
+enum TerminationPolicy {
+    static func isNoninteractive(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let reason = event?.paramDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue else { return false }
+        return [OSType(kAEReallyLogOut), OSType(kAEShutDown), OSType(kAERestart)].contains(reason)
+    }
+}
+
+struct AccountDraft: Equatable {
+    var name = ""
+    var thresholds = ""
+    var increment = ""
+    var inherit = true
+    var showPeriodEstimate = false
+    var useCustomBudget = false
+    var budget = ""
+
+    var comparable: AccountDraft {
+        var result = self
+        if inherit { result.increment = "" }
+        if !useCustomBudget { result.budget = "" }
+        return result
+    }
+}
+
+struct GlobalDraft: Equatable {
+    var minutes = "10"
+    var thresholds = "50, 80, 100"
+    var increment = ""
+    var enabled = true
+    var startup = false
+    var trayStyle: TrayIconStyle = .pie
+    var trayMode: TrayDisplayMode = .rollUp
+    var excludedAccounts = Set<String>()
+
+    init() {}
+    init(_ value: SettingsData) {
+        minutes = String(value.pollMinutes)
+        thresholds = value.thresholds
+        increment = decimalText(value.spendIncrementUsd)
+        enabled = value.notifications
+        startup = value.startup
+        trayStyle = value.trayStyle
+        trayMode = value.trayMode
+        excludedAccounts = Set(value.excludedTrayAccounts ?? [])
+    }
+}
+
+@MainActor
+final class PreferencesDraft: ObservableObject {
+    @Published var account = AccountDraft() { didSet { revalidate() } }
+    @Published var global = GlobalDraft() { didSet { revalidate() } }
+    @Published private(set) var errors: [PreferenceField: String] = [:]
+    @Published var saving = false
+    @Published private(set) var loaded = false
+    @Published private(set) var context = ""
+    private var savedAccount = AccountDraft()
+    private var savedGlobal = GlobalDraft()
+
+    var dirty: Bool {
+        loaded && (context.hasPrefix("account:") ? account.comparable != savedAccount.comparable : global != savedGlobal)
+    }
+    var budgetChanged: Bool {
+        account.useCustomBudget != savedAccount.useCustomBudget ||
+            (account.useCustomBudget && account.budget != savedAccount.budget)
+    }
+
+    func begin(_ context: String) {
+        guard self.context != context else { return }
+        self.context = context
+        loaded = false
+        errors = [:]
+    }
+
+    func load(_ value: AccountPreferences, context: String) {
+        guard self.context == context, !loaded else { return }
+        account = AccountDraft(name: value.displayName, thresholds: value.thresholds,
+            increment: decimalText(value.spendIncrementUsd), inherit: value.spendIncrementUsd == nil,
+            showPeriodEstimate: value.showPeriodEstimate, useCustomBudget: value.customBudgetUsd != nil,
+            budget: decimalText(value.customBudgetUsd))
+        savedAccount = account
+        loaded = true
+    }
+
+    func load(_ value: SettingsData) {
+        guard !loaded else { return }
+        global = GlobalDraft(value)
+        savedGlobal = global
+        loaded = true
+    }
+
+    func refresh(_ value: SettingsData) {
+        guard loaded, !dirty, !saving, !context.hasPrefix("account:") else { return }
+        global = GlobalDraft(value)
+        savedGlobal = global
+    }
+
+    func cancel() {
+        guard !saving else { return }
+        account = savedAccount
+        global = savedGlobal
+        errors = [:]
+    }
+
+    func saved() {
+        savedAccount = account
+        savedGlobal = global
+        errors = [:]
+    }
+
+    func validate() -> Bool {
+        let fields: [PreferenceField] = context.hasPrefix("account:")
+            ? [.name, .accountThresholds, .accountIncrement, .budget]
+            : context == SettingsPage.notifications.rawValue ? [.thresholds, .increment] : [.minutes]
+        errors = [:]
+        for field in fields { validate(field) }
+        return errors.isEmpty
+    }
+
+    private func revalidate() {
+        for field in Array(errors.keys) { validate(field) }
+    }
+
+    private func validate(_ field: PreferenceField) {
+        do {
+            switch field {
+            case .name:
+                let name = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard name.utf16.count <= 128,
+                      !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
+                    throw AppError.message("Use at most 128 characters with no control characters.")
+                }
+            case .accountThresholds: try validateThresholds(account.thresholds, inherit: true)
+            case .thresholds: try validateThresholds(global.thresholds, inherit: false)
+            case .accountIncrement:
+                if !account.inherit { _ = try parseAmount(account.increment) }
+            case .increment: _ = try parseAmount(global.increment)
+            case .budget:
+                if account.useCustomBudget { _ = try parseUSD(account.budget, budget: true) }
+            case .minutes:
+                guard let value = Int(global.minutes.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      (5...1440).contains(value) else {
+                    throw AppError.message("Enter a refresh interval from 5 through 1440 minutes.")
+                }
+            }
+            errors.removeValue(forKey: field)
+        } catch { errors[field] = error.localizedDescription }
+    }
+}
 
 @MainActor
 protocol ApplicationBridge {
@@ -57,6 +213,10 @@ final class AppModel: ObservableObject {
     let directory: URL
     let demo: Bool
     let updates: AppUpdates
+    let preferences = PreferencesDraft()
+    var askUnsavedChanges: (() -> Void)?
+    private var pendingLeave: (() -> Void)?
+    private var cancelLeave: (() -> Void)?
     var showSettings: (() -> Void)?
     var dashboardChanged: ((Dashboard) -> Void)?
     private var timer: Timer?
@@ -129,7 +289,10 @@ final class AppModel: ObservableObject {
         do {
             let events = try bridge.poll()
             for event in events {
-                if let settings = event.settings { self.settings = settings }
+                if let settings = event.settings {
+                    self.settings = settings
+                    preferences.refresh(settings)
+                }
                 switch event.kind {
                 case "state":
                     if let dashboard = event.dashboard {
@@ -178,11 +341,137 @@ final class AppModel: ObservableObject {
     }
 
     func openSettings(_ page: SettingsPage = .usage) {
-        self.page = page
-        showSettings?()
+        if page == self.page { showSettings?(); return }
+        leaveForm {
+            self.page = page
+            self.showSettings?()
+        }
+    }
+
+    func navigate(_ page: SettingsPage) {
+        guard page != self.page else { return }
+        leaveForm { self.page = page; self.error = nil; self.notice = nil }
+    }
+
+    func editAccount(_ key: String?) {
+        guard key != selectedAccount || page != .accounts else { showSettings?(); return }
+        leaveForm {
+            self.selectedAccount = key
+            self.page = .accounts
+            self.error = nil
+            self.notice = nil
+            self.showSettings?()
+        }
+    }
+
+    func beginPreferences(accountKey: String? = nil) {
+        let context = accountKey.map { "account:\($0)" } ?? page.rawValue
+        preferences.begin(context)
+        if let accountKey {
+            guard !preferences.loaded else { return }
+            send("account.preferences", fields: ["key": accountKey]) { [weak self] event in
+                if let value = event.preferences { self?.preferences.load(value, context: context) }
+            }
+        } else if let settings { preferences.load(settings) }
+    }
+
+    func cancelPreferences() {
+        preferences.cancel()
+        error = nil
+        notice = nil
+    }
+
+    func leaveForm(_ action: @escaping () -> Void, cancelled: (() -> Void)? = nil) {
+        guard !preferences.saving, pendingLeave == nil else { cancelled?(); return }
+        guard preferences.dirty else { action(); return }
+        pendingLeave = action
+        cancelLeave = cancelled
+        askUnsavedChanges?()
+    }
+
+    func resolveUnsavedChanges(_ choice: UnsavedChoice) {
+        guard let action = pendingLeave else { return }
+        let cancelled = cancelLeave
+        pendingLeave = nil
+        cancelLeave = nil
+        switch choice {
+        case .keepEditing: cancelled?()
+        case .discard: cancelPreferences(); action()
+        case .save: savePreferences { success in if success { action() } else { cancelled?() } }
+        }
+    }
+
+    func savePreferences(completion: ((Bool) -> Void)? = nil) {
+        guard !busy, !preferences.saving, preferences.loaded else {
+            error = "Wait for the current operation to finish, then save your changes."
+            completion?(false)
+            return
+        }
+        guard preferences.validate() else {
+            error = "Correct the highlighted fields before saving."
+            completion?(false)
+            return
+        }
+        do {
+            var fields: [String: Any]
+            let method: String
+            if preferences.context.hasPrefix("account:"), let key = selectedAccount {
+                let draft = preferences.account
+                method = "account.save"
+                fields = ["key": key, "displayName": draft.name, "thresholds": draft.thresholds,
+                          "showPeriodEstimate": draft.showPeriodEstimate]
+                if !draft.inherit {
+                    fields["spendIncrementUsd"] = NSDecimalNumber(decimal: try parseAmount(draft.increment) ?? 0)
+                }
+                if preferences.budgetChanged {
+                    fields["updateCustomBudget"] = true
+                    fields["customBudgetUsd"] = draft.useCustomBudget
+                        ? NSDecimalNumber(decimal: try parseUSD(draft.budget, budget: true)!) : NSNull()
+                }
+            } else {
+                guard var value = settings else { throw AppError.message("Settings have not loaded.") }
+                let draft = preferences.global
+                method = "settings.save"
+                if preferences.context == SettingsPage.notifications.rawValue {
+                    value.notifications = draft.enabled
+                    value.thresholds = draft.thresholds
+                    value.spendIncrementUsd = try parseAmount(draft.increment)
+                } else {
+                    value.pollMinutes = Int(draft.minutes.trimmingCharacters(in: .whitespacesAndNewlines))!
+                    value.startup = draft.startup
+                    value.trayStyle = draft.trayStyle
+                    value.trayMode = draft.trayMode
+                    value.excludedTrayAccounts = draft.excludedAccounts.sorted()
+                }
+                fields = ["settings": try jsonObject(value)]
+            }
+            preferences.saving = true
+            busy = true
+            error = nil
+            notice = nil
+            if send(method, fields: fields, completion: { [weak self] event in
+                guard let self else { return }
+                self.busy = false
+                self.preferences.saving = false
+                if let error = event.error { self.error = error; completion?(false) }
+                else {
+                    self.preferences.saved()
+                    self.notice = "Settings saved."
+                    completion?(true)
+                }
+            }) == nil {
+                busy = false
+                preferences.saving = false
+                completion?(false)
+            }
+        } catch { self.error = error.localizedDescription; completion?(false) }
     }
 
     func addAccount() {
+        leaveForm { self.addAccountAfterLeaving() }
+    }
+
+    private func addAccountAfterLeaving() {
         guard !busy else { return }
         reconnect = nil
         reconnectClientId = nil
@@ -190,7 +479,8 @@ final class AppModel: ObservableObject {
         signInClientId = ""
         editingHost = false
         showingSignIn = true
-        openSettings(.accounts)
+        page = .accounts
+        showSettings?()
         startSignIn()
     }
 
@@ -207,6 +497,10 @@ final class AppModel: ObservableObject {
     }
 
     func reconnectAccount(_ account: AccountData) {
+        leaveForm { self.reconnectAfterLeaving(account) }
+    }
+
+    private func reconnectAfterLeaving(_ account: AccountData) {
         send("account.preferences", fields: ["key": account.key]) { [weak self] event in
             guard let self, let preferences = event.preferences else { return }
             self.reconnect = account

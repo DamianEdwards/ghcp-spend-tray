@@ -29,7 +29,7 @@ enum PeriodEstimateTests {
         try check(estimate.estimatedConsumptionUsd == Decimal(string: "132.525") &&
                   estimatedMoney(estimate.estimatedConsumptionUsd) == "~$133",
                   "Shared decimal results retain their cents before display rounding.")
-        try check(estimate.summary.contains("About $33 over allocation") && estimate.summary.hasSuffix("UTC"),
+        try check(estimate.summary.contains("About $33 over API allocation") && estimate.summary.hasSuffix("UTC"),
                   "Projected exceedance and UTC reset are labeled.")
         try check(utcDateText(estimate.resetAtUtc).contains("2026") &&
                   utcTimestampText(estimate.periodStartUtc).hasSuffix("UTC"),
@@ -38,7 +38,7 @@ enum PeriodEstimateTests {
             "estimatedConsumptionUsd": 15, "overAllocationUsd": NSDecimalNumber(string: "0.2"),
             "isEarly": true, "resetAtUtc": "2026-11-01T00:00:00Z"
         ]).periodEstimate!
-        try check(early.summary.contains("Early estimate") && early.summary.contains("Less than $1 over allocation"),
+        try check(early.summary.contains("Early estimate") && early.summary.contains("Less than $1 over API allocation"),
                   "Early projections and fractional projected exceedances are truthful.")
 
         let off = try account()

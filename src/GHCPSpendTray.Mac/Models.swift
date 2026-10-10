@@ -52,6 +52,16 @@ struct AccountData: Decodable, Identifiable {
     let updatedAt: String?
     let avatarUrl: String?
     let periodEstimate: PeriodEstimateData?
+    let customBudgetUsd: Decimal?
+
+    var targetLabel: String { customBudgetUsd == nil ? "API allocation" : "custom budget" }
+    var usageSummary: String {
+        if let percent {
+            return "\(decimalText(percent))% of \(money(allocationUsd)) \(targetLabel)"
+        }
+        if let customBudgetUsd { return "\(money(customBudgetUsd)) custom budget; consumption unavailable" }
+        return details.unlimited ? "Unlimited API allocation" : "API allocation unavailable"
+    }
 }
 
 struct PeriodEstimateData: Decodable {
@@ -64,11 +74,14 @@ struct PeriodEstimateData: Decodable {
     let isEarly: Bool
     let unavailableReason: String?
 
-    var summary: String {
+    var summary: String { summary(customBudget: false) }
+
+    func summary(customBudget: Bool) -> String {
         var parts: [String] = []
         if isEarly { parts.append("Early estimate") }
         if let over = overAllocationUsd, over > 0 {
-            parts.append(over < 1 ? "Less than $1 over allocation" : "About \(wholeMoney(over)) over allocation")
+            let label = customBudget ? "custom budget" : "API allocation"
+            parts.append(over < 1 ? "Less than $1 over \(label)" : "About \(wholeMoney(over)) over \(label)")
         }
         if let reset = resetAtUtc { parts.append("Resets \(utcDateText(reset))") }
         return parts.joined(separator: " · ")
@@ -95,6 +108,7 @@ struct AccountPreferences: Decodable {
     let spendIncrementUsd: Decimal?
     let clientId: String?
     let showPeriodEstimate: Bool
+    let customBudgetUsd: Decimal?
 }
 
 struct DevicePrompt: Decodable {
@@ -211,14 +225,46 @@ func decimalText(_ value: Decimal?) -> String {
 }
 
 func parseAmount(_ text: String) throws -> Decimal? {
-    let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if value.isEmpty { return nil }
-    guard value.range(of: #"^\d+(\.\d{1,2})?$"#, options: .regularExpression) != nil,
-          let amount = Decimal(string: value, locale: Locale(identifier: "en_US_POSIX")),
-          amount >= 0 else {
-        throw AppError.message("Enter a nonnegative USD increment with at most two decimal places. Use 0 to disable.")
+    try parseUSD(text, budget: false)
+}
+
+func sharedDecimal(_ text: String) -> Decimal? {
+    guard text.range(of: #"^([0-9]+(\.[0-9]*)?|\.[0-9]+)$"#, options: .regularExpression) != nil,
+          let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")),
+          !value.isNaN,
+          value <= Decimal(string: "79228162514264337593543950335")! else { return nil }
+    return value
+}
+
+func parseUSD(_ text: String, budget: Bool) throws -> Decimal? {
+    if !budget && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+    if let value = sharedDecimal(text), budget ? value > 0 : value >= 0 {
+        var input = value
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &input, 2, .plain)
+        if rounded == value { return value }
     }
-    return amount
+    throw AppError.message(budget
+        ? "Enter a budget greater than $0 with at most two decimal places, such as 500 or 12.50."
+        : "Enter a USD increment with at most two decimal places, such as 50 or 12.50. Use 0 to disable.")
+}
+
+func validateThresholds(_ text: String, inherit: Bool) throws {
+    if inherit && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
+    let parts = text.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    guard !parts.contains("") else {
+        throw AppError.message("Enter one or more positive percentages separated by commas.")
+    }
+    var values = Set<Decimal>()
+    for part in parts {
+        guard let value = sharedDecimal(part), value > 0 else {
+            throw AppError.message("Thresholds must be positive percentages. Use '.' for decimals and ',' between values.")
+        }
+        values.insert(value)
+    }
+    guard values.count <= 100 else {
+        throw AppError.message("Thresholds must be sorted, distinct positive percentages (at most 100).")
+    }
 }
 
 func dateValue(_ text: String?) -> Date? {
