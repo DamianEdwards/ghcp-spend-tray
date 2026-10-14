@@ -7,6 +7,17 @@ internal static partial class Program
 {
     private static async Task EnterpriseConsumptionTests()
     {
+        await Test("Corporate identity uses only stable tenant and object IDs", () =>
+        {
+            var saved = new EnterpriseIdentity("fixture", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+            True(saved.IsSameAccount(saved with { Username = "fixture@example.invalid" }));
+            True(saved.IsSameAccount(saved with { Alias = "renamed", Username = "renamed@example.invalid" }));
+            True(saved.IsSameAccount(saved with { TenantId = saved.TenantId.ToUpperInvariant(), ObjectId = saved.ObjectId.ToUpperInvariant() }));
+            True(!saved.IsSameAccount(saved with { TenantId = "cccccccc-cccc-cccc-cccc-cccccccccccc" }));
+            True(!saved.IsSameAccount(saved with { ObjectId = "cccccccc-cccc-cccc-cccc-cccccccccccc" }));
+            True(!saved.IsSameAccount(null));
+        });
         await Test("Consumption endpoint configuration validates HTTPS and normalizes the base route", () =>
         {
             Equal(null, EnterpriseConsumptionEndpoint.ParseBaseUri(null));

@@ -133,7 +133,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                 throw new AppOperationException("Refresh this account to check enterprise eligibility.");
             var token = await _enterpriseTokens.GetAsync(true, _stop.Token).ConfigureAwait(false);
             _enterpriseAttempts.TryRemove(accountKey, out _);
-            bool retryConfirmedIdentity = !confirm && account.ConsumptionIdentity == token.Identity &&
+            bool retryConfirmedIdentity = !confirm && token.Identity.IsSameAccount(account.ConsumptionIdentity) &&
                 _enterpriseViews.TryGetValue(accountKey, out var failed) &&
                 failed.State is EnterpriseSetupState.Error or EnterpriseSetupState.SignInRequired or EnterpriseSetupState.CliMissing;
             if (retryConfirmedIdentity)
@@ -142,7 +142,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                     State: EnterpriseSetupState.Connected, ConnectedUsername: token.Identity.Username ?? token.Identity.Alias);
             }
             else if (!confirm || !_enterpriseViews.TryGetValue(accountKey, out var previous) ||
-                previous.PendingIdentity != token.Identity)
+                !token.Identity.IsSameAccount(previous.PendingIdentity))
             {
                 _enterpriseViews[accountKey] = new(true, "Use this work account for daily consumption?",
                     token.Identity, State: EnterpriseSetupState.ConfirmIdentity);
@@ -189,7 +189,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                 try
                 {
                     var token = await _enterpriseTokens.GetAsync(false, _stop.Token).ConfigureAwait(false);
-                    if (token.Identity != identity)
+                    if (!token.Identity.IsSameAccount(identity))
                     {
                         _enterpriseData.TryRemove(account.Key, out _);
                         _enterpriseViews[account.Key] = new(true, "Azure CLI is using a different work account. Confirm it to reconnect.", token.Identity,
@@ -198,7 +198,8 @@ public class ApplicationController : IApplicationController, INotificationSink
                     }
                     if (_enterpriseData.TryGetValue(account.Key, out var cached) &&
                         DateTimeOffset.UtcNow - cached.FetchedAt < TimeSpan.FromMinutes(15) &&
-                        cached.Identity == identity && cached.Data.StartDate[..7] == quota.FetchedAtUtc.ToString("yyyy-MM", CultureInfo.InvariantCulture) &&
+                        cached.Identity.IsSameAccount(identity) && cached.Identity.Alias == token.Identity.Alias &&
+                        cached.Data.StartDate[..7] == quota.FetchedAtUtc.ToString("yyyy-MM", CultureInfo.InvariantCulture) &&
                         cached.Scope == string.Join(",", DailyConsumptionChart.EnterpriseNames(quota))) continue;
                     if (_enterpriseAttempts.TryGetValue(account.Key, out var attempted) &&
                         DateTimeOffset.UtcNow - attempted < TimeSpan.FromMinutes(15)) continue;
@@ -208,13 +209,13 @@ public class ApplicationController : IApplicationController, INotificationSink
                     catch (EnterpriseAccessException ex) when (ex.AuthenticationFailed)
                     {
                         token = await _enterpriseTokens.GetAsync(true, _stop.Token).ConfigureAwait(false);
-                        if (token.Identity != identity)
+                        if (!token.Identity.IsSameAccount(identity))
                             throw new EnterpriseAccessException("Azure CLI identity changed. Reconnect daily consumption to confirm it.");
                         data = await _enterpriseClient.GetAsync(token, quota, _stop.Token).ConfigureAwait(false);
                     }
                     _enterpriseData[account.Key] = (data, string.Join(",", DailyConsumptionChart.EnterpriseNames(quota)), identity, DateTimeOffset.UtcNow);
                     _enterpriseViews[account.Key] = new(true, "Daily consumption connected", Connected: true,
-                        State: EnterpriseSetupState.Connected, ConnectedUsername: identity.Username ?? identity.Alias);
+                        State: EnterpriseSetupState.Connected, ConnectedUsername: token.Identity.Username ?? token.Identity.Alias);
                 }
                 catch (Exception ex) when (ex is EnterpriseAccessException or HttpRequestException or TaskCanceledException && !_stop.IsCancellationRequested)
                 {
@@ -615,7 +616,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                                 ? new(true, "See daily consumption for this account.")
                                 : new(true, "Azure CLI is needed to connect your work account.", State: EnterpriseSetupState.CliMissing));
                         if (_enterpriseData.TryGetValue(state.Account.Key, out var saved) &&
-                            saved.Identity == _settings.Accounts.SingleOrDefault(a => a.Key == state.Account.Key)?.ConsumptionIdentity &&
+                            saved.Identity.IsSameAccount(_settings.Accounts.SingleOrDefault(a => a.Key == state.Account.Key)?.ConsumptionIdentity) &&
                             enterprise.PendingIdentity is null && now - saved.FetchedAt <= TimeSpan.FromMinutes(_settings.PollIntervalMinutes + 15) &&
                             saved.Scope == string.Join(",", DailyConsumptionChart.EnterpriseNames(snapshot)))
                         {

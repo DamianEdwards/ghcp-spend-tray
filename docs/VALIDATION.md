@@ -37,6 +37,19 @@ Windows background screenshots returned black content, so pixel-level visual
 confirmation was unavailable; native accessibility inspection and synthetic
 WinUI style/layout assertions provide the local UI evidence.
 
+Manual review found a chart that rendered initially but lost its drawing after
+an unrelated dashboard update. A native smoke regression reproduced the failure
+on both chart surfaces. The canvas wrapper now uses Reactor's leaf children
+strategy: the chart, not the reconciler's empty panel list, owns drawing children.
+Smoke asserts USD labels and drawing rectangles survive two additional committed
+dashboard renders. This is an ownership fix, not a timer-based redraw workaround.
+
+Corporate identity comparisons use parsed tenant and object IDs rather than
+record equality. Synthetic coverage includes a confirmed identity saved without
+a display username, the same identity returning with a username, GUID casing,
+and genuine tenant/object changes. Display-name updates do not require renewed
+identity confirmation.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

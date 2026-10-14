@@ -162,6 +162,25 @@ internal static class Program
                         !rectangles.Any(r => r.StrokeDashArray is { Count: > 0 }))
                         throw new InvalidOperationException("The daily chart is missing accent-color columns or dashed translucent estimates.");
                 });
+                for (int update = 0; update < 2; update++)
+                {
+                    await OnUI(shell, shell.Session.Notify);
+                    await WaitForSettingsUI(shell, "daily chart after dashboard rerender");
+                    await OnUI(shell, () =>
+                    {
+                        string key = shell.Session.Dashboard.Accounts[0].Key;
+                        foreach (var (window, suffix) in new[]
+                        {
+                            (shell.SettingsWindow!, "_DailyPlot"), (shell.Flyout!, "_CompactDailyPlot")
+                        })
+                        {
+                            if (Find(window, key + suffix) is not Canvas updatedPlot ||
+                                !updatedPlot.Children.OfType<TextBlock>().Any(t => t.Text == "USD") ||
+                                !updatedPlot.Children.OfType<Microsoft.UI.Xaml.Shapes.Rectangle>().Any())
+                                throw new InvalidOperationException("Daily chart drawing was cleared by a dashboard rerender.");
+                        }
+                    });
+                }
             }
             await OnUI(shell, () =>
             {

@@ -326,6 +326,10 @@ try
         }
         var saved = (await new JsonStore(Path.Combine(root, "enterprise")).LoadSettingsAsync()).Value;
         Check(saved.Accounts[0].ConsumptionIdentity == enterpriseTokens.Identity, "Confirmed identity is persistent.");
+        enterpriseTokens.Identity = enterpriseTokens.Identity with { Username = "fixture@example.invalid" };
+        await controller.RefreshAsync();
+        Check(view!.Accounts[0].EnterpriseConsumption is { State: EnterpriseSetupState.Connected, PendingIdentity: null },
+            "Adding the display username does not invalidate a previously confirmed identity.");
         enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic reauthentication required.", authenticationFailed: true);
         await controller.ConnectConsumptionAsync("github.com:1");
         Check(view!.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.SignInRequired, "Expired login presents sign-in recovery.");

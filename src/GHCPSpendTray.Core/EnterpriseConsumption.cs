@@ -7,6 +7,10 @@ namespace GHCPSpendTray.Core;
 
 public sealed record EnterpriseIdentity(string Alias, string TenantId, string ObjectId, string? Username = null)
 {
+    public bool IsSameAccount(EnterpriseIdentity? other) => other is not null &&
+        Guid.TryParse(TenantId, out var tenant) && Guid.TryParse(other.TenantId, out var otherTenant) && tenant == otherTenant &&
+        Guid.TryParse(ObjectId, out var id) && Guid.TryParse(other.ObjectId, out var otherId) && id == otherId;
+
     public void Validate()
     {
         if (string.IsNullOrEmpty(Alias) || Alias.Length > 128 || Alias.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '.' and not '-' and not '_') ||

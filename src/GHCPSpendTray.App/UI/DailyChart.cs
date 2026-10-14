@@ -1,5 +1,7 @@
 using System.Globalization;
 using GHCPSpendTray.Core;
+using Microsoft.UI.Reactor.Core.V1Protocol;
+using Microsoft.UI.Reactor.Core.V1Protocol.Descriptor;
 using Microsoft.UI.Reactor.Wrappers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -10,8 +12,17 @@ using Windows.UI.ViewManagement;
 
 namespace GHCPSpendTray.App.UI;
 
+// The chart owns its drawing children; Reactor must not reconcile them as an empty panel.
 [GenerateReactorWrapper(typeof(Canvas), AutoDiscover = false)]
-internal partial record DailyChartElement;
+[WrapManual("Children")]
+internal partial record DailyChartElement
+{
+    private static partial ControlDescriptor<DailyChartElement, Canvas> Customize(ControlDescriptor<DailyChartElement, Canvas> d)
+    {
+        d.Children = new None<DailyChartElement, Canvas>();
+        return d;
+    }
+}
 
 internal sealed class DailyChart
 {
