@@ -97,7 +97,7 @@ struct PeriodEstimateData: Decodable {
         var parts: [String] = []
         if isEarly { parts.append("Early estimate") }
         if let over = overAllocationUsd, over > 0 {
-            parts.append(over < 1 ? "Less than $1 over allocation" : "About \(wholeMoney(over)) over allocation")
+            parts.append(over < 1 ? "Less than $1 over limit" : "About \(wholeMoney(over)) over limit")
         }
         if let reset = resetAtUtc { parts.append("Resets \(utcDateText(reset))") }
         return parts.joined(separator: " · ")

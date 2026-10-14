@@ -343,12 +343,12 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         PremiumWire? quota = wire.QuotaSnapshots?.PremiumInteractions;
         if (quota is null || quota.TokenBasedBilling is null || quota.Unlimited is null ||
             quota.HasQuota is null || quota.CreditsUsed is null || quota.CreditsUsed < 0 || quota.Entitlement < 0)
-            throw new ServiceException(AccountStatus.InvalidData, "Required quota fields are missing or invalid.");
+            throw new ServiceException(AccountStatus.InvalidData, "Required usage or limit fields are missing or invalid.");
         if (!quota.TokenBasedBilling.Value)
             throw new ServiceException(AccountStatus.Unsupported, "Dollar accounting is unsupported for premium-request billing.");
         // has_quota can be false after exhaustion; validated observed consumption is still meaningful.
-        DateTimeOffset? reset = Timestamp(wire.QuotaResetDateUtc, "quota reset") ??
-            Timestamp(wire.QuotaResetDate, "quota reset");
+        DateTimeOffset? reset = Timestamp(wire.QuotaResetDateUtc, "limit reset") ??
+            Timestamp(wire.QuotaResetDate, "limit reset");
         DateTimeOffset? source = Timestamp(quota.TimestampUtc, "source timestamp");
         if (reset <= fetched)
             throw new ServiceException(AccountStatus.InvalidData, "The service returned an expired billing period.");
@@ -370,7 +370,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
             return result;
         }
         catch (Exception ex) when (ex is OverflowException or ArgumentException)
-        { throw new ServiceException(AccountStatus.InvalidData, "Quota values are outside the supported range."); }
+        { throw new ServiceException(AccountStatus.InvalidData, "Usage or limit values are outside the supported range."); }
     }
 
     private static DateTimeOffset? Timestamp(JsonElement element, string name)

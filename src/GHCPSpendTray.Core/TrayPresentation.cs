@@ -124,9 +124,9 @@ public static class TrayUsage
         if (snapshot.AccountKey != state.Account.Key) return "invalid identity";
         if (!BillingPeriods.IsCurrent(snapshot, now)) return "outside current period";
         if (now - snapshot.FetchedAtUtc > freshness) return "stale";
-        if (snapshot.Unlimited) return "unlimited allocation";
-        if (snapshot.AllocationUsd is null) return "unknown allocation";
-        if (snapshot.AllocationUsd <= 0) return "zero allocation";
+        if (snapshot.Unlimited) return "unlimited";
+        if (snapshot.AllocationUsd is null) return "unknown limit";
+        if (snapshot.AllocationUsd <= 0) return "zero limit";
         return null;
     }
 
@@ -135,7 +135,7 @@ public static class TrayUsage
     {
         string value = percent is { } p ? TrayIndicator.FormatPercent(p) : "Unavailable";
         string qualifier = included > 0 && included < selected ? "Partial ! | " : "";
-        string over = percent > 100 ? " | Over allocation" : "";
+        string over = percent > 100 ? " | Over limit" : "";
         string counts = $"{included}/{selected} included";
         // Put truth qualifiers before potentially long user-controlled account names.
         string tooltip = $"{qualifier}{value}{over} | {counts}";

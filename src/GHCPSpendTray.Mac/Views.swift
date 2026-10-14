@@ -36,12 +36,12 @@ struct AccountRow: View {
             if let percent = account.percent {
                 ProgressView(value: min(max(NSDecimalNumber(decimal: percent).doubleValue, 0), 100), total: 100)
                     .tint(percent >= 100 ? .red : .accentColor)
-                    .accessibilityLabel("Allocation consumed")
+                    .accessibilityLabel("Limit consumed")
                     .accessibilityValue("\(decimalText(percent)) percent")
-                Text("\(decimalText(percent))% of \(money(account.allocationUsd)) allocation")
+                Text("\(decimalText(percent))% of \(money(account.allocationUsd)) limit")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text(account.details.unlimited ? "Unlimited allocation" : "Allocation unavailable")
+                Text(account.details.unlimited ? "Unlimited" : "Limit unavailable")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let estimate = account.periodEstimate {
@@ -131,7 +131,7 @@ struct FlyoutView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 24, height: 24)
-                Text("Copilot consumption").font(.headline)
+                Text("Copilot usage").font(.headline)
                 Spacer()
                 Button { model.openSettings() } label: { Image(systemName: "gearshape") }
                     .help("Open Settings").accessibilityLabel("Open Settings")
@@ -296,7 +296,7 @@ struct AccountDiagnosticsView: View {
             Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
                 row("Credits used (observed)", decimalText(account.details.creditsUsed).isEmpty ? "Unavailable" : decimalText(account.details.creditsUsed))
                 row("Consumption (observed)", money(account.details.observedConsumptionUsd))
-                row("Allocation (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
+                row("Limit (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
                 row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ?? "Unavailable")
                 row("Current billing period", account.details.isCurrentPeriod ? "Yes" : "No")
                 row("Last fetched", dateText(account.updatedAt))
@@ -399,7 +399,7 @@ struct AccountEditor: View {
                 }.disabled(model.busy)
             }
             if let consumption = account.enterpriseConsumption, consumption.eligible {
-                Section("Corporate Daily Consumption") {
+                Section("Corporate Daily Usage") {
                     Text(consumption.message)
                     switch consumption.state {
                     case .cliMissing:
@@ -508,7 +508,7 @@ struct DailyConsumptionChartView: View {
     }
 
     private func kind(_ bar: DailySpendData) -> String {
-        bar.estimated ? "Estimated" : bar.derived ? "Today - from current quota" : "Reported"
+        bar.estimated ? "Estimated" : bar.derived ? "Today - from current usage" : "Reported"
     }
 
     var body: some View {
@@ -518,7 +518,7 @@ struct DailyConsumptionChartView: View {
             let plotHeight: CGFloat = compact ? 64 : 150
             let stride = max(1, Int(ceil(Double(bars.count) / (compact ? 6 : 16))))
             VStack(alignment: .leading, spacing: 8) {
-                Text("Daily Consumption - \(regionalDate(bars[0].date, month: true))\(compact ? "" : " (UTC)")")
+                Text("Daily Usage - \(regionalDate(bars[0].date, month: true))\(compact ? "" : " (UTC)")")
                     .font(compact ? .caption : .headline)
                 Text("USD").font(.caption2).foregroundStyle(.secondary)
                 HStack(alignment: .top, spacing: 6) {
@@ -564,7 +564,7 @@ struct DailyConsumptionChartView: View {
                     }
                 }
                 Text(bars.contains(where: { $0.estimated }) ? "Solid: reported. Dashed: estimated." :
-                     bars.contains(where: { $0.derived }) ? "Today's amount is from current quota." : "Reported daily consumption.")
+                     bars.contains(where: { $0.derived }) ? "Today's amount is from current usage." : "Reported daily usage.")
                     .font(.caption).foregroundStyle(.secondary)
                 if !compact, let message = view.chartMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
             }.accessibilityIdentifier(account.key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"))
@@ -631,7 +631,7 @@ struct PreferencesView: View {
                     Button("Open Data Folder") { model.openDataFolder() }
                 }
                 Section("Menu Bar") {
-                    Text("Show fresh allocation usage independently of dollar totals. New accounts are included by default.")
+                    Text("Show fresh limit usage independently of dollar totals. New accounts are included by default.")
                         .font(.caption).foregroundStyle(.secondary)
                     Picker("Icon style", selection: $trayStyle) {
                         Text("Pie chart").tag(TrayIconStyle.pie)
@@ -656,12 +656,12 @@ struct PreferencesView: View {
                                 Image(nsImage: TrayIconRenderer.image(icon, style: preview.style))
                                     .help(icon.details).accessibilityLabel(icon.details)
                                 Text("\(icon.accountKey == nil ? "Roll-up" : icon.name): \(icon.valueText)" +
-                                     (icon.isPartial ? " (partial)" : "") + (icon.isOverAllocation ? " (over allocation)" : ""))
+                                     (icon.isPartial ? " (partial)" : "") + (icon.isOverAllocation ? " (over limit)" : ""))
                                     .font(.caption)
                             }
                         }
                     }
-                    Text("Preview changes apply to the menu bar only after Save. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over allocation. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover over an icon for details.")
+                    Text("Preview changes apply to the menu bar only after Save. ! marks partial usage or an unavailable pie; ? means unavailable in percentage mode; + means over limit. An empty pie with ! is unavailable, not 0%. Numbers are rounded; hover over an icon for details.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("A neutral icon remains when nothing is selected. macOS may hide icons on a crowded menu bar; reopen GHCPSpendTray to access Settings.")
                         .font(.caption).foregroundStyle(.secondary)

@@ -138,13 +138,13 @@ public class ApplicationController : IApplicationController, INotificationSink
                 failed.State is EnterpriseSetupState.Error or EnterpriseSetupState.SignInRequired or EnterpriseSetupState.CliMissing;
             if (retryConfirmedIdentity)
             {
-                _enterpriseViews[accountKey] = new(true, "Reconnecting daily consumption...", Connected: true,
+                _enterpriseViews[accountKey] = new(true, "Reconnecting daily usage...", Connected: true,
                     State: EnterpriseSetupState.Connected, ConnectedUsername: token.Identity.Username ?? token.Identity.Alias);
             }
             else if (!confirm || !_enterpriseViews.TryGetValue(accountKey, out var previous) ||
                 !token.Identity.IsSameAccount(previous.PendingIdentity))
             {
-                _enterpriseViews[accountKey] = new(true, "Use this work account for daily consumption?",
+                _enterpriseViews[accountKey] = new(true, "Use this work account for daily usage?",
                     token.Identity, State: EnterpriseSetupState.ConfirmIdentity);
                 _enterpriseData.TryRemove(accountKey, out _);
             }
@@ -157,7 +157,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                 await _store.SaveSettingsAsync(next, _stop.Token).ConfigureAwait(false);
                 _settings = next;
                 _monitor.UpdateSettings(next);
-                _enterpriseViews[accountKey] = new(true, "Connecting daily consumption...", Connected: true,
+                _enterpriseViews[accountKey] = new(true, "Connecting daily usage...", Connected: true,
                     State: EnterpriseSetupState.Connected, ConnectedUsername: token.Identity.Username ?? token.Identity.Alias);
             }
         }
@@ -210,18 +210,18 @@ public class ApplicationController : IApplicationController, INotificationSink
                     {
                         token = await _enterpriseTokens.GetAsync(true, _stop.Token).ConfigureAwait(false);
                         if (!token.Identity.IsSameAccount(identity))
-                            throw new EnterpriseAccessException("Azure CLI identity changed. Reconnect daily consumption to confirm it.");
+                            throw new EnterpriseAccessException("Azure CLI identity changed. Reconnect daily usage to confirm it.");
                         data = await _enterpriseClient.GetAsync(token, quota, _stop.Token).ConfigureAwait(false);
                     }
                     _enterpriseData[account.Key] = (data, string.Join(",", DailyConsumptionChart.EnterpriseNames(quota)), identity, DateTimeOffset.UtcNow);
-                    _enterpriseViews[account.Key] = new(true, "Daily consumption connected", Connected: true,
+                    _enterpriseViews[account.Key] = new(true, "Daily usage connected", Connected: true,
                         State: EnterpriseSetupState.Connected, ConnectedUsername: token.Identity.Username ?? token.Identity.Alias);
                 }
                 catch (Exception ex) when (ex is EnterpriseAccessException or HttpRequestException or TaskCanceledException && !_stop.IsCancellationRequested)
                 {
                     _enterpriseData.TryRemove(account.Key, out _);
                     _enterpriseViews[account.Key] = new(true, ex is EnterpriseAccessException access ? access.Message :
-                        "Daily consumption could not refresh. Check connectivity and retry.", Connected: true,
+                        "Daily usage could not refresh. Check connectivity and retry.", Connected: true,
                         State: ex is EnterpriseAccessException error ? AccessState(error) : EnterpriseSetupState.Error,
                         ConnectedUsername: identity.Username ?? identity.Alias);
                     _recordDiagnostic($"Corporate consumption refresh failed ({ex.GetType().Name}).");
@@ -543,7 +543,7 @@ public class ApplicationController : IApplicationController, INotificationSink
         var notify = _notify ?? throw new AppOperationException("The notification surface is not initialized.");
         var message = $"{alert.Account.DisplayName ?? alert.Account.Login}: {Money(alert.Snapshot.ConsumptionUsd)} consumed.";
         if (alert.ReachedThresholds.Length > 0)
-            message += $" {alert.HighestThreshold:0.##}% of {Money(alert.Snapshot.AllocationUsd!.Value)} allocation reached.";
+            message += $" {alert.HighestThreshold:0.##}% of {Money(alert.Snapshot.AllocationUsd!.Value)} limit reached.";
         if (alert.SpendMilestoneUsd is { } milestone)
             message += $" Passed the {Money(milestone)} spending milestone.";
         return await notify(new(alert.Account.Key, "GHCPSpendTray consumption alert", message,
@@ -613,7 +613,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                     {
                         enterprise = _enterpriseViews.GetValueOrDefault(state.Account.Key) ??
                             (_enterpriseTokens.IsAvailable
-                                ? new(true, "See daily consumption for this account.")
+                                ? new(true, "See daily usage for this account.")
                                 : new(true, "Azure CLI is needed to connect your work account.", State: EnterpriseSetupState.CliMissing));
                         if (_enterpriseData.TryGetValue(state.Account.Key, out var saved) &&
                             saved.Identity.IsSameAccount(_settings.Accounts.SingleOrDefault(a => a.Key == state.Account.Key)?.ConsumptionIdentity) &&

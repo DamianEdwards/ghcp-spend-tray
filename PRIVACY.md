@@ -15,7 +15,7 @@ and requested, refresh tokens.
 
 The app retrieves account information such as your login, account ID, host and
 avatar URL, as well as Copilot consumption information such as credits used,
-allocation, billing period, reset dates and observation timestamps. It also
+limit, billing period, reset dates and observation timestamps. It also
 stores preferences you choose, including account display names, refresh
 intervals and alert thresholds.
 This information is used to display consumption, maintain history and generate

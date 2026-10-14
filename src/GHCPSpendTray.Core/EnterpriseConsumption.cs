@@ -65,13 +65,13 @@ public static class DailyConsumptionChart
         if (!fresh || !BillingPeriods.IsCurrent(quota, now) || observed > now ||
             data.AsOf > now.AddMinutes(5) || DateOnly.ParseExact(data.StartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture) != start ||
             quota.ResetAtUtc is { } reset && reset != new DateTimeOffset(start.AddMonths(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero))
-            return ([], "Daily consumption cannot be reconciled with this quota observation.");
+            return ([], "Daily consumption cannot be reconciled with this usage observation.");
         var days = data.Days.Where(d => DateOnly.ParseExact(d.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture) <= today).ToArray();
         var reported = days.Where(d => d.AmountUsd is not null).ToArray();
         var bars = reported.Select(d => new DailySpend(d.Date, d.AmountUsd!.Value, false)).ToList();
         if (reported.Length == 0) return ([], "No reported daily consumption is available for this account.");
         if (!IsEsme(quota) && quota.EnterpriseIds.Any(id => id is not (1578 or 134482 or 13213)))
-            return (bars.ToArray(), "Reported days cover only the supported enterprises; this account's broader quota cannot be used to estimate the remainder.");
+            return (bars.ToArray(), "Reported days cover only the supported enterprises; this account's broader usage cannot be used to estimate the remainder.");
         var last = DateOnly.ParseExact(reported[^1].Date, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         bool contiguous = Enumerable.Range(0, last.DayNumber - start.DayNumber + 1)
             .All(i => days.Any(d => d.Date == start.AddDays(i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) && d.AmountUsd is not null));
@@ -83,7 +83,7 @@ public static class DailyConsumptionChart
         if (gap == 1 && today == DateOnly.FromDateTime(now.UtcDateTime))
         {
             bars.Add(new(today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), remainder, false, true));
-            return (bars.ToArray(), "Today's consumption is the current quota less all reported prior days.");
+            return (bars.ToArray(), "Today's consumption is the current usage less all reported prior days.");
         }
         for (int i = 1; i <= gap; i++)
             bars.Add(new(last.AddDays(i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),

@@ -46,7 +46,7 @@ internal sealed class ReactorShell : IDisposable
         };
         _session.HideFlyout = () => _flyout?.Hide();
         _session.TestNotification = () => _tray.Notify(new(null, "GHCPSpendTray test",
-            "Synthetic example: 50% of allocation consumed.", PercentConsumed: 50m));
+            "Synthetic example: 50% of limit consumed.", PercentConsumed: 50m));
         _tray.OpenRequested += key => _session.Post(() =>
         {
             if (key is not null) _session.EditAccount(key);

@@ -223,6 +223,7 @@ internal static class Program
                 }
             });
             await WaitForSettingsUI(shell, "Usage after empty-state navigation");
+            if (!empty) await SmokeUsageOverviewAsync(shell);
             RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
             await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
@@ -582,6 +583,55 @@ internal static class Program
             });
         }
     }
+    private static async Task SmokeUsageOverviewAsync(ReactorShell shell)
+    {
+        var original = default(Windows.Graphics.SizeInt32);
+        await OnUI(shell, () => original = shell.SettingsWindow!.AppWindow.Size);
+        try
+        {
+            foreach (int width in new[] { 1100, 640, 1100 })
+            {
+                double scale = 1;
+                await OnUI(shell, () =>
+                {
+                    var root = (FrameworkElement)shell.SettingsWindow!.NativeWindow.Content;
+                    scale = root.XamlRoot.RasterizationScale;
+                    shell.SettingsWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(width * scale), original.Height));
+                });
+                await WaitForUI(shell, $"compact Usage overview at {width} DIPs", () =>
+                    Math.Abs(shell.SettingsWindow!.AppWindow.Size.Width - width * scale) <= 2 &&
+                    LayoutReady(shell.SettingsWindow) &&
+                    Math.Abs(((FrameworkElement)shell.SettingsWindow.NativeWindow.Content).ActualWidth - width) <= 32);
+                await OnUI(shell, () =>
+                {
+                    var window = shell.SettingsWindow!;
+                    var overview = Find(window, "UsageOverview") as FrameworkElement ??
+                        throw new InvalidOperationException("Usage overview is missing.");
+                    var amount = (FrameworkElement)Find(window, "UsageOverviewAmount")!;
+                    var actions = (FrameworkElement)Find(window, "UsageOverviewActions")!;
+                    var amountOrigin = amount.TransformToVisual(overview).TransformPoint(default);
+                    var actionsOrigin = actions.TransformToVisual(overview).TransformPoint(default);
+                    if (overview.ActualHeight > (width > 640 ? 152 : 190))
+                        throw new InvalidOperationException($"Usage overview exceeds its compact height budget at {width} DIPs: {overview.ActualHeight:F1}.");
+                    if (width > 640 && actionsOrigin.X < amountOrigin.X + amount.ActualWidth - 1)
+                        throw new InvalidOperationException("Wide Usage overview is not using horizontal space.");
+                    if (width == 640 && actionsOrigin.Y < amountOrigin.Y + amount.ActualHeight - 1)
+                        throw new InvalidOperationException("Narrow Usage overview did not reflow.");
+                    if (Find(window, "RefreshUsage") is not Button { IsEnabled: true } refresh ||
+                        refresh.TransformToVisual(overview).TransformPoint(default).X + refresh.ActualWidth > overview.ActualWidth + 1)
+                        throw new InvalidOperationException("Responsive Usage overview clipped its refresh action.");
+                    if (Find(window, "TrayUsageDetails") is not null)
+                        throw new InvalidOperationException("Usage overview repeats the per-account breakdown.");
+                });
+            }
+        }
+        finally
+        {
+            await OnUI(shell, () => shell.SettingsWindow!.AppWindow.Resize(original));
+            await WaitForSettingsUI(shell, "restored Usage overview size");
+        }
+    }
+
     private static async Task SmokeUsageDisclosureAsync(ReactorShell shell)
     {
         if (shell.Session.Dashboard.Accounts.Count == 0) return;

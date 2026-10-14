@@ -25,7 +25,7 @@ public static class DailyChartPresentation
     public static string DateLabel(string date, CultureInfo? culture = null) =>
         DateOnly.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture).ToString("d", culture ?? CultureInfo.CurrentCulture);
 
-    public static string Kind(DailySpend bar) => bar.Estimated ? "Estimated" : bar.Derived ? "Today - from current quota" : "Reported";
+    public static string Kind(DailySpend bar) => bar.Estimated ? "Estimated" : bar.Derived ? "Today - from current usage" : "Reported";
     public static string Tooltip(DailySpend bar) =>
         $"{DateLabel(bar.Date)}: {bar.AmountUsd.ToString("N2", CultureInfo.CurrentCulture)} USD - {Kind(bar)}";
 }

@@ -50,6 +50,16 @@ a display username, the same identity returning with a username, GUID casing,
 and genuine tenant/object changes. Display-name updates do not require renewed
 identity confirmation.
 
+The Windows Usage overview is a compact wrapping layout rather than a vertical
+per-account breakdown. Native smoke resizes the same settings window from 1100
+to 640 and back to 1100 DIPs, asserting horizontal layout at wide sizes, stacked
+reflow at narrow sizes, an unclipped refresh action, and total panel heights of
+at most 152 DIPs wide / 190 DIPs narrow. Details remain in the account panels.
+Visible labels, tray explanations, notification text, and current documentation
+use "limit" rather than "allocation" or "quota"; consumed amounts use "usage".
+Existing upstream JSON names, persistence properties, and bridge identifiers are
+unchanged for compatibility.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

@@ -36,7 +36,7 @@ internal static class PeriodEstimateTests
             "Actual cents, total, percentage and tray remain observed, not projected.");
         Check(UI.EstimateAmount(account.PeriodEstimate!) == "~$56" && UI.Money(account.ConsumptionUsd) == "$26.25",
             "Estimated dollars are approximate and rounded; actual dollars retain cents.");
-        Check(UI.EstimateContext(account.PeriodEstimate!).Contains("About $31 over allocation") &&
+        Check(UI.EstimateContext(account.PeriodEstimate!).Contains("About $31 over limit") &&
             UI.EstimateContext(account.PeriodEstimate!).Contains("Nov 1, 2026 UTC"),
             "Projected excess uses whole dollars and reset dates explicitly use UTC.");
         Check(UI.UtcTimestamp(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero).ToOffset(TimeSpan.FromHours(-7)))
@@ -45,13 +45,13 @@ internal static class PeriodEstimateTests
         Check(UI.ApproximateMoney(0) == "~$0" && UI.ApproximateMoney(0.01m) == "<$1" &&
             UI.ApproximateMoney(0.99m) == "<$1" && UI.ApproximateMoney(1) == "~$1",
             "Windows matches macOS whole/sub-dollar formatting without turning nonzero forecasts into zero.");
-        Check(UI.EstimateContext(new(OverAllocationUsd: 0.01m)) == "Less than $1 over allocation" &&
-            UI.EstimateContext(new(OverAllocationUsd: 0.99m)) == "Less than $1 over allocation" &&
-            UI.EstimateContext(new(OverAllocationUsd: 1.5m)) == "About $2 over allocation",
+        Check(UI.EstimateContext(new(OverAllocationUsd: 0.01m)) == "Less than $1 over limit" &&
+            UI.EstimateContext(new(OverAllocationUsd: 0.99m)) == "Less than $1 over limit" &&
+            UI.EstimateContext(new(OverAllocationUsd: 1.5m)) == "About $2 over limit",
             "Windows matches macOS's sub-dollar projected-excess warning.");
         Check(UI.EstimateContext(new(IsEarly: true, OverAllocationUsd: 33m,
             ResetAtUtc: new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero))) ==
-            "Early estimate \u00B7 About $33 over allocation \u00B7 Resets Nov 1, 2026 UTC",
+            "Early estimate \u00B7 About $33 over limit \u00B7 Resets Nov 1, 2026 UTC",
             "Compact estimate context matches the macOS information order and separators.");
         session.Navigate(SettingsPage.Usage);
         session.EditAccount(account.Key);

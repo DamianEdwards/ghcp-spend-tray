@@ -5,7 +5,7 @@
 
 GHCPSpendTray is an independent Windows 11 tray and macOS menu-bar app for
 keeping an eye on GitHub Copilot AI-credit consumption. It shows per-account
-usage and allocation and offers optional spending alerts without a browser tab
+usage and limits and offers optional spending alerts without a browser tab
 or a hosted service.
 
 [Install from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295)
@@ -26,7 +26,7 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
 ## Features
 
-- A tray flyout with per-account consumption and allocation meters.
+- A tray flyout with per-account consumption and limit meters.
 - Configurable pie-chart or percentage tray icons: one weighted roll-up by
   default, or one icon per selected account.
 - Multiple accounts, including different identities on the same GitHub host.
@@ -59,8 +59,8 @@ the UTC calendar month to date with `group-by=day`, `start-date`, and exclusive
 enterprises reported by that GitHub account. Columns use the system accent color
 with a labeled USD scale. Solid bars show reported gross USD consumption; dashed
 bars with translucent fill spread a multi-day unreported remainder evenly through
-the quota observation's UTC day. When today is the only missing day and all prior
-days reconcile, its solid bar is derived from the current quota rather than
+the usage observation's UTC day. When today is the only missing day and all prior
+days reconcile, its solid bar is derived from current usage rather than
 labeled an estimate. Tooltips distinguish the source and use regional date
 formatting without changing the UTC day. These values are not invoiced charges.
 Internal missing days, negative remainders, stale observations, and incompatible
@@ -70,9 +70,9 @@ are outside the service's coverage.
 Azure CLI owns login and refresh credentials. Access tokens and daily responses
 remain in app memory; only the confirmed username, alias, tenant, and object ID are saved
 in account settings. The app reacquires expiring tokens, retries authentication
-once, and refreshes daily reports with a 15-minute minimum interval when quota
+once, and refreshes daily reports with a 15-minute minimum interval when usage
 updates arrive. If CLI authentication changes identities, reconfirm in account
-management. The regular GitHub quota totals, notifications, and tray remain
+management. The regular GitHub usage totals, notifications, and tray remain
 independent of this optional integration.
 
 #### Build-time API configuration
@@ -162,7 +162,7 @@ Background refreshes never open permission prompts or System Settings.
 
 In **General > Menu Bar**, choose a pie or percentage, a single weighted roll-up
 or one icon per selected account, and the accounts to include. The live preview
-uses the shared allocation rules; only **Save** applies it to the menu bar.
+uses the shared limit rules; only **Save** applies it to the menu bar.
 The monochrome template graphics adapt to macOS light/dark menu-bar appearance.
 Per-account icons open account settings. If macOS hides icons on a crowded
 menu bar, reopening GHCPSpendTray brings its settings window forward.
@@ -241,7 +241,7 @@ simple **Add account** prompt without empty totals, diagnostics, or refresh cont
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
-is 10 minutes (configurable from 5 to 1440), and the default allocation alerts
+is 10 minutes (configurable from 5 to 1440), and the default limit alerts
 are 50%, 80%, and 100%.
 
 In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
@@ -259,9 +259,9 @@ refresh, Settings, notifications and Exit remain available. If no accounts are
 selected or connected, a neutral access icon remains.
 
 The roll-up percentage is **eligible consumption divided by the same accounts'
-eligible allocation**, not an average of account percentages. Only valid, fresh,
-current-period observations with known, finite positive allocation qualify.
-Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
+eligible limits**, not an average of account percentages. Only valid, fresh,
+current-period observations with known, finite positive limits qualify.
+Stale, failed, unsupported, unknown/zero-limit and unlimited accounts are
 excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
 available, not zero. On macOS, an unavailable pie stays an empty outline with
 an `!` badge; percentage mode still shows `?`. The badged empty pie does not
@@ -275,23 +275,23 @@ unit is shown in the tooltip and preview label instead of a tiny extra glyph.
 Both styles are antialiased at the taskbar's pixel size on a transparent canvas.
 The settings preview places them on a taskbar-colored swatch so they remain
 readable when the app and taskbar themes differ.
-Pies fill to 100%; a `+` on either style marks over-allocation. Tooltips retain the
+Pies fill to 100%; a `+` on either style marks over-limit usage. Tooltips retain the
 unsaturated percentage (up to two decimals, with `<0.01%` for smaller nonzero
-values) and label over-allocation. Eligibility is reevaluated at least every
+values) and label over-limit usage. Eligibility is reevaluated at least every
 minute and on refresh/resume, including billing rollover. Windows controls
 notification-area overflow and icon visibility; the app cannot force icons to
 remain unhidden.
 
 In **Settings > Notifications**, you can also set a USD increment (for example,
 `50` for alerts at $50, $100, and so on). An account can inherit that value,
-override it, or disable it. Unknown or unlimited allocations can still use
+override it, or disable it. Unknown limits or unlimited accounts can still use
 dollar alerts, but not percentage alerts. Windows may suppress a notification
 even when the app submits it.
 
 Displayed USD consumption is `credits_used / 100` from GitHub's token-billing
-quota data. It is **not** an invoice, a finance budget, or total spend across all
+usage data. It is **not** an invoice, a finance budget, or total spend across all
 GitHub products. Stale or partial observations are identified; previous billing
-periods are not counted as current spend. GitHub's quota snapshot does not
+periods are not counted as current spend. GitHub's usage snapshot does not
 provide a verified per-day consumption breakdown, so the app does not chart
 daily usage from its locally sampled refreshes.
 
@@ -299,10 +299,10 @@ On either platform, **Settings > Accounts > select an account > Show estimated
 period consumption** enables an optional **Estimated at reset** row in that
 account's tray flyout/menu-bar popup, Usage summary, and details. It is off by
 default; choose **Save account** on Windows or **Save** on macOS to apply it.
-The whole-dollar amount is right-aligned below observed allocation, with a
+The whole-dollar amount is right-aligned below the observed limit, with a
 secondary early/reset/projected-excess line. Windows uses a theme-aware caution
 color and warning glyph for projected excess. There is no combined forecast,
-forecast-based alert, or change to the observed allocation meter or tray/menu-bar
+forecast-based alert, or change to the observed limit meter or tray/menu-bar
 icons.
 
 Accounts rows use the same shaded panels as Usage and show an explicit
@@ -320,8 +320,8 @@ fallback. Estimates remain unavailable for the first 24 hours, are labeled
 early before 72 hours, and show a reason when data is stale, failed, expired,
 or inconsistent with that period. Estimates are rounded to whole USD
 (`<$1` for small nonzero values); actual consumption retains cents.
-Unknown or unlimited allocation still allows a dollar forecast without an
-over-allocation comparison. Advanced Details explains the method and shows
+An unknown limit or unlimited account still allows a dollar forecast without an
+over-limit comparison. Advanced Details explains the method and shows
 the average per day, period boundaries, and observation time. On Windows these
 fields are in the existing **Advanced information** disclosure on Usage and
 **Advanced details** on account settings. Estimate boundaries explicitly use
