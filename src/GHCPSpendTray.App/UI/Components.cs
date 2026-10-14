@@ -161,7 +161,7 @@ internal static class UI
             Copy(bars.Any(b => b.Estimated) ? "Solid: reported. Dashed: estimated." :
                 bars.Any(b => b.Derived) ? "Today's amount is from current usage." : "Reported daily usage.")
                 .FontSize(12),
-            !compact && view.ChartMessage is { } message ? Copy(message).FontSize(12) : null)
+            !compact && !bars.Any(b => b.Derived) && view.ChartMessage is { } message ? Copy(message).FontSize(12) : null)
             .AutomationId(account.Key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"));
     }
 }
