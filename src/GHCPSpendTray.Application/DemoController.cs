@@ -67,7 +67,8 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         {
             Accounts = dashboard.Accounts.Select((account, i) => account with
             {
-                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes))
+                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes)),
+                EnterpriseConsumption = i == 0 ? DemoConsumption(now) : null
             }).ToArray(),
             Tray = TrayUsage.Create(new()
             {
@@ -87,6 +88,20 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         return RefreshAsync();
     }
     public Task RefreshAccountAsync(string accountKey) => RefreshAsync(accountKey);
+    private static EnterpriseConsumptionView DemoConsumption(DateTimeOffset now)
+    {
+        var start = new DateOnly(now.Year, now.Month, 1);
+        int days = Math.Min(now.Day, 17);
+        var weights = Enumerable.Range(0, days).Select(i => i switch { 0 => 12.50m, 1 => 8.25m, 2 => 10m, _ => 1.25m }).ToArray();
+        decimal total = weights.Sum();
+        var bars = Enumerable.Range(0, days).Select(i => new DailySpend(
+            start.AddDays(i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            i == days - 1 ? 26.25m - weights.Take(i).Sum(w => 26.25m * w / total) : 26.25m * weights[i] / total,
+            days > 3 && i >= days - 3)).ToArray();
+        return new(true, "Daily consumption connected", Connected: true, Bars: bars,
+            State: EnterpriseSetupState.Connected, ConnectedUsername: "work@example.invalid",
+            AxisTicks: DailyChartPresentation.Ticks(bars));
+    }
     public Task SaveSettingsAsync(SettingsView settings)
     {
         Settings = settings with { Startup = false };

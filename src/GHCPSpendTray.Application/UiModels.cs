@@ -11,7 +11,7 @@ public sealed record AccountDiagnostics(decimal? CreditsUsed, decimal? ObservedC
 public sealed record AccountView(string Key, string Name, string Login, string Host, AccountDiagnostics Details,
     decimal? Percent,
     decimal? ConsumptionUsd = null, decimal? AllocationUsd = null, string Freshness = "", DateTimeOffset? UpdatedAt = null,
-    string? AvatarUrl = null, PeriodEstimate? PeriodEstimate = null);
+    string? AvatarUrl = null, PeriodEstimate? PeriodEstimate = null, EnterpriseConsumptionView? EnterpriseConsumption = null);
 public sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
     decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false,
     TrayPresentation? Tray = null, IReadOnlyList<AccountState>? TrayStates = null);
@@ -44,6 +44,8 @@ public interface IApplicationController : IDisposable
     Task InitializeAsync();
     Task RefreshAsync(string? accountKey = null);
     Task RefreshAccountAsync(string accountKey);
+    Task ConnectConsumptionAsync(string accountKey, bool confirm = false) =>
+        Task.FromException(new AppOperationException("Corporate consumption is unavailable in this controller."));
     Task SaveSettingsAsync(SettingsView settings);
     Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
         bool? showPeriodEstimate = null);

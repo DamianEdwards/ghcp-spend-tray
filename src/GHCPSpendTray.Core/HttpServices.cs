@@ -359,6 +359,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
                 AccountKey = accountKey, FetchedAtUtc = fetched.ToUniversalTime(),
                 SourceTimestampUtc = source, ResetAtUtc = reset,
                 PeriodId = BillingPeriods.Resolve(fetched, reset),
+                EnterpriseIds = wire.Enterprises?.Select(e => e.Id).Distinct().ToArray() ?? [],
                 CreditsUsed = quota.CreditsUsed.Value, Entitlement = quota.Entitlement,
                 Unlimited = quota.Unlimited.Value,
                 ConsumptionUsd = CreditPolicy.ToUsd(quota.CreditsUsed.Value),

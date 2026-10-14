@@ -1,5 +1,42 @@
 # GHCPSpendTray validation and release gates
 
+## Optional enterprise daily consumption (October 14, 2026)
+
+The shared controller gates corporate setup, Azure CLI invocation, and API
+requests on both a build-time endpoint and supported account enterprise
+membership. Supported dotcom IDs are 1578, 134482, and 13213; ESME requires the
+exact `msft.ghe.com` account host and returned enterprise membership. The endpoint
+is injected through `GHCP_CONSUMPTION_API_URL`, not a checked-in production URL.
+Unconfigured real accounts do not expose the integration.
+
+Synthetic coverage exercises missing CLI, sign-in recovery, explicit work-account
+confirmation, confirmed-identity persistence, identity changes, generated bridge
+serialization, scoped enterprise results, invalid response measures/ranges,
+incomplete reporting, and nonnegative current-period reconciliation.
+Reported columns and today's uniquely derivable remainder are solid; multi-day
+remainders have translucent fill and dashed outlines. UTC date buckets remain
+unchanged when formatting dates with regional settings. Axis tests cover zero,
+fractional, ordinary, and maximum decimal amounts.
+
+Windows release-tooling checks, all four managed and executed x64 Native AOT
+harnesses, and populated/empty native UI smoke passed locally. The populated
+smoke asserts both Usage and popup charts, USD axis text, accent-color fills,
+translucent estimates, and dashed outlines against actual WinUI controls.
+The source-generated shared bridge also passes its executed Native AOT harness.
+Configured and missing-endpoint builds are covered separately.
+
+The implemented Azure CLI provider and API client successfully acquired a token
+and parsed a live daily response locally without printing or saving identity,
+token, or consumption values. This is not evidence of access for every corporate
+identity or enterprise. Production refresh rotation and provider availability
+remain subject to Azure CLI sign-in and service permissions.
+
+SwiftUI changes require the native Apple-silicon macOS verification lane;
+macOS compilation and visual rendering were not verified on this Windows host.
+Windows background screenshots returned black content, so pixel-level visual
+confirmation was unavailable; native accessibility inspection and synthetic
+WinUI style/layout assertions provide the local UI evidence.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

@@ -274,6 +274,74 @@ try
         bridge.Dispose();
         Check(bridge.Send(new() { Id = "late", Method = "refresh" }).Error is not null, "Shutdown cancels outstanding native work.");
     }
+    var enterpriseHandler = new FixtureHttp { Eligible = true };
+    var enterpriseTokens = new FixtureEnterpriseTokens();
+    if (EnterpriseConsumptionEndpoint.BuildTimeBaseUri is null)
+    {
+        using var disabledHttp = new HttpClient(new FixtureHttp { Eligible = true });
+        using var disabledController = new ApplicationController(Path.Combine(root, "enterprise-disabled"), false,
+            new MemoryCredentials(), disabledHttp, enterpriseTokens: enterpriseTokens);
+        DashboardView? disabledView = null;
+        disabledController.Changed += value => disabledView = value;
+        await disabledController.InitializeAsync();
+        await disabledController.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        await disabledController.RefreshAsync();
+        Check(disabledView!.Accounts[0].EnterpriseConsumption is null, "Missing build URL hides corporate integration for eligible accounts.");
+        await Reject<AppOperationException>(() => disabledController.ConnectConsumptionAsync("github.com:1"));
+        Check(enterpriseTokens.Calls == 0, "Missing build URL cannot invoke Azure CLI.");
+    }
+    using (var enterpriseHttp = new HttpClient(enterpriseHandler))
+    using (var controller = new ApplicationController(Path.Combine(root, "enterprise"), false, new MemoryCredentials(), enterpriseHttp,
+        enterpriseTokens: enterpriseTokens,
+        enterpriseApiBaseUri: new Uri("https://usage.example.invalid/api/copilot/consumption/crossEnterprise/")))
+    {
+        DashboardView? view = null;
+        controller.Changed += value => view = value;
+        await controller.InitializeAsync();
+        await controller.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        await controller.RefreshAsync();
+        Check(view!.Accounts[0].EnterpriseConsumption?.Eligible == true, "Enterprise metadata enables per-account setup.");
+        Check(enterpriseTokens.Calls == 0 && enterpriseHandler.DailyRequests == 0, "No corporate access before setup.");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.Ready, "Installed CLI offers only connection, not installation.");
+        enterpriseTokens.IsAvailable = false;
+        enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic missing CLI.", cliMissing: true);
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.CliMissing, "Installation is offered only for missing CLI.");
+        enterpriseTokens.IsAvailable = true;
+        enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic sign-in required.", authenticationFailed: true);
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.SignInRequired, "Installed CLI with no token offers sign-in, not installation.");
+        enterpriseTokens.Failure = null;
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity, "Setup presents a corporate identity.");
+        Check(enterpriseHandler.DailyRequests == 0, "No consumption access before identity confirmation.");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.ConfirmIdentity, "Confirmation replaces initial setup action.");
+        await controller.ConnectConsumptionAsync("github.com:1", true);
+        Check(view!.Accounts[0].EnterpriseConsumption is { Connected: true, PendingIdentity: null }, "Identity confirmation connects consumption.");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.Connected, "Successful setup collapses to connected state.");
+        if (DateTimeOffset.UtcNow.Day > 1)
+        {
+            Check(enterpriseHandler.DailyRequests == 1, "Confirmed consumption uses the corporate service.");
+            Check(view.Accounts[0].EnterpriseConsumption?.Bars?.Length > 0, "Reported days reach the shared chart model.");
+        }
+        var saved = (await new JsonStore(Path.Combine(root, "enterprise")).LoadSettingsAsync()).Value;
+        Check(saved.Accounts[0].ConsumptionIdentity == enterpriseTokens.Identity, "Confirmed identity is persistent.");
+        enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic reauthentication required.", authenticationFailed: true);
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view!.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.SignInRequired, "Expired login presents sign-in recovery.");
+        enterpriseTokens.Failure = null;
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view!.Accounts[0].EnterpriseConsumption is { State: EnterpriseSetupState.Connected, PendingIdentity: null },
+            "Retrying the previously confirmed identity does not repeat identity confirmation.");
+        enterpriseTokens.Identity = enterpriseTokens.Identity with { ObjectId = "11111111-1111-1111-1111-111111111111" };
+        await controller.RefreshAsync();
+        Check(view!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity, "Changed identity requires confirmation.");
+        Check(view.Accounts[0].EnterpriseConsumption?.Bars is null, "Changed identity removes the old chart.");
+        var roundtrip = JsonSerializer.Deserialize(JsonSerializer.Serialize(new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = view } },
+            BridgeJsonContext.Default.BridgeEventArray), BridgeJsonContext.Default.BridgeEventArray)!;
+        Check(roundtrip[0].Dashboard!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity,
+            "Source-generated bridge serialization carries consumption setup.");
+    }
     Console.WriteLine($"PASS: {assertions} shared application and native bridge assertions; synthetic data only.");
 }
 finally { Directory.Delete(root, recursive: true); }
@@ -342,9 +410,25 @@ sealed class MemoryCredentials : ICredentialStore
 sealed class FixtureHttp : HttpMessageHandler
 {
     public string UserId { get; set; } = "1";
+    public bool Eligible { get; set; }
+    public int DailyRequests { get; private set; }
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        string json = request.RequestUri!.AbsolutePath switch
+        string json;
+        if (request.RequestUri!.Host == "usage.example.invalid")
+        {
+            DailyRequests++;
+            var query = request.RequestUri.Query.TrimStart('?').Split('&')
+                .Select(p => p.Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
+            if (request.Headers.Authorization?.Parameter != "synthetic-corporate-token") throw new InvalidOperationException("Wrong token.");
+            string start = query["start-date"], end = query["end-date"];
+            json = $$$"""
+            {"user":{"aadAlias":"fixture"},"groupBy":"day","startDate":"{{{start}}}","endDate":"{{{end}}}",
+            "asOf":"{{{DateTimeOffset.UtcNow:O}}}","coverage":{"measure":"daily-ai-credit-report-usage","timezone":"UTC","currency":"USD"},
+            "days":[{"date":"{{{start}}}","results":[{"enterpriseId":"dotcom:microsoftopensource","status":"available","usage":{"grossAmountUsd":1}}]}]}
+            """;
+        }
+        else json = request.RequestUri!.AbsolutePath switch
         {
             "/login/device/code" => """{"device_code":"synthetic-device","user_code":"SYNTHETIC","verification_uri":"https://github.com/login/device","expires_in":60,"interval":1}""",
             "/login/oauth/access_token" => $$"""{"access_token":"synthetic-token-{{UserId}}","token_type":"bearer","scope":"read:user"}""",
@@ -352,6 +436,24 @@ sealed class FixtureHttp : HttpMessageHandler
             "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":false}}}""",
             _ => throw new InvalidOperationException("Unexpected synthetic request.")
         };
+        if (Eligible && request.RequestUri.AbsolutePath == "/copilot_internal/user")
+            json = json.Insert(1, "\"enterprise_list\":[{\"id\":1578}],");
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+    }
+
+}
+
+sealed class FixtureEnterpriseTokens : IEnterpriseTokenProvider
+{
+    public bool IsAvailable { get; set; } = true;
+    public EnterpriseAccessException? Failure { get; set; }
+    public EnterpriseIdentity Identity { get; set; } = new("fixture", "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333");
+    public int Calls { get; private set; }
+    public Task<EnterpriseToken> GetAsync(bool forceRefresh, CancellationToken cancellationToken)
+    {
+        Calls++;
+        if (Failure is { } failure) return Task.FromException<EnterpriseToken>(failure);
+        return Task.FromResult(new EnterpriseToken("synthetic-corporate-token", Identity, DateTimeOffset.UtcNow.AddHours(1)));
     }
 }

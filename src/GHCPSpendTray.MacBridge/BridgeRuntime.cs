@@ -111,6 +111,9 @@ public sealed class BridgeRuntime : IDisposable
                 case "account.refresh":
                     await Controller.RefreshAccountAsync(Required(command.Key));
                     break;
+                case "consumption.connect":
+                    await Controller.ConnectConsumptionAsync(Required(command.Key), command.Confirm);
+                    break;
                 case "resume":
                     await Controller.ResumeAsync();
                     if (!Controller.Portable) await _platform.InitializeAsync();

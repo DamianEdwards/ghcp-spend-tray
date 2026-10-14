@@ -36,6 +36,7 @@ jobs:
       id-token: write
     env:
       RELEASE_VERSION: ${{ inputs.version }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       STORE_ID: ${{ vars.STORE_ID }}
       STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
       STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}

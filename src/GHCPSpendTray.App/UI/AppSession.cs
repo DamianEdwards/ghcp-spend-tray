@@ -230,6 +230,8 @@ internal sealed class AppSession : IDisposable
         Run(() => Controller.SaveAccountAsync(key, name, thresholds, amount, showPeriodEstimate),
             () => Notice = "Account settings saved.");
     }
+    internal void ConnectConsumption(string key, bool confirm = false) =>
+        Run(() => Controller.ConnectConsumptionAsync(key, confirm));
     private bool TryAmount(string text, out decimal? amount)
     {
         amount = null;

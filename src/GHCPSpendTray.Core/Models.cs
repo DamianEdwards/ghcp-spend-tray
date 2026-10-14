@@ -15,6 +15,7 @@ public sealed record Account
     public decimal? SpendIncrementUsd { get; init; }
     public bool ExcludeFromTray { get; init; }
     public bool ShowPeriodEstimate { get; init; }
+    public EnterpriseIdentity? ConsumptionIdentity { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
 
     public void Validate()
@@ -28,6 +29,7 @@ public sealed record Account
         if (ThresholdOverrides is not null)
             AppSettings.ValidateThresholds(ThresholdOverrides);
         AppSettings.ValidateSpendIncrement(SpendIncrementUsd);
+        ConsumptionIdentity?.Validate();
     }
 }
 
@@ -153,6 +155,7 @@ public sealed record UsageSnapshot
     [JsonRequired] public decimal ConsumptionUsd { get; init; }
     public decimal? AllocationUsd { get; init; }
     public decimal? PercentConsumed { get; init; }
+    public long[] EnterpriseIds { get; init; } = [];
     [JsonRequired] public int ConversionPolicyVersion { get; init; } = 1;
 
     public void Validate()

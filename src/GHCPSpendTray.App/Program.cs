@@ -144,6 +144,25 @@ internal static class Program
             await InvokeButtonAsync(shell, "OpenSettings", flyout: true);
             await WaitForSettingsUI(shell, "usage settings from the gear");
             bool empty = shell.Session.Dashboard.Accounts.Count == 0;
+            if (!empty)
+            {
+                await OnUI(shell, () =>
+                {
+                    string key = shell.Session.Dashboard.Accounts[0].Key;
+                    if (Find(shell.SettingsWindow!, key + "_DailyConsumption") is null ||
+                        Find(shell.Flyout!, key + "_CompactDailyConsumption") is null)
+                        throw new InvalidOperationException("Synthetic daily consumption is missing from Usage or the popup.");
+                    if (Find(shell.SettingsWindow!, key + "_DailyPlot") is not Canvas plot ||
+                        !plot.Children.OfType<TextBlock>().Any(t => t.Text == "USD"))
+                        throw new InvalidOperationException("The daily chart has no USD axis.");
+                    var rectangles = plot.Children.OfType<Microsoft.UI.Xaml.Shapes.Rectangle>().ToArray();
+                    var accent = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent);
+                    if (!rectangles.Any(r => r.Fill is SolidColorBrush fill && fill.Color == accent && r.Opacity == 1) ||
+                        !rectangles.Any(r => r.Fill is SolidColorBrush fill && fill.Color == accent && Math.Abs(r.Opacity - 0.2) < 0.0001) ||
+                        !rectangles.Any(r => r.StrokeDashArray is { Count: > 0 }))
+                        throw new InvalidOperationException("The daily chart is missing accent-color columns or dashed translucent estimates.");
+                });
+            }
             await OnUI(shell, () =>
             {
                 if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)

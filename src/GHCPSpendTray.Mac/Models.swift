@@ -52,6 +52,35 @@ struct AccountData: Decodable, Identifiable {
     let updatedAt: String?
     let avatarUrl: String?
     let periodEstimate: PeriodEstimateData?
+    let enterpriseConsumption: EnterpriseConsumptionData?
+}
+
+struct EnterpriseConsumptionData: Decodable {
+    let eligible: Bool
+    let message: String
+    let pendingIdentity: CorporateIdentityData?
+    let connected: Bool
+    let bars: [DailySpendData]?
+    let chartMessage: String?
+    let state: EnterpriseSetupState
+    let connectedUsername: String?
+    let axisTicks: [Decimal]?
+}
+enum EnterpriseSetupState: Int, Decodable {
+    case ready, cliMissing, signInRequired, confirmIdentity, connected, error
+}
+struct CorporateIdentityData: Decodable {
+    let alias: String
+    let tenantId: String
+    let objectId: String
+    let username: String?
+}
+struct DailySpendData: Decodable, Identifiable {
+    var id: String { date }
+    let date: String
+    let amountUsd: Decimal
+    let estimated: Bool
+    let derived: Bool
 }
 
 struct PeriodEstimateData: Decodable {

@@ -144,6 +144,25 @@ internal static class UI
                 ? DetailRow("Estimate unavailable", reason, idPrefix + "PeriodEstimateUnavailable") : null
         ).AutomationId(idPrefix + "PeriodEstimateDisclosure")
         : null;
+
+    internal static Element? DailyConsumption(AccountView account, bool compact = false)
+    {
+        if (account.EnterpriseConsumption is not { Bars.Length: > 0 } view) return null;
+        var bars = view.Bars!;
+        string month = DateOnly.ParseExact(bars[0].Date, "yyyy-MM-dd", CultureInfo.InvariantCulture)
+            .ToString("Y", CultureInfo.CurrentCulture);
+        return VStack(compact ? 4 : 8,
+            TextBlock(compact ? $"Daily consumption - {month}" : $"Daily consumption - {month} (UTC)")
+                .FontSize(compact ? 12 : 16).SemiBold(),
+            new DailyChartElement().Set(canvas => DailyChart.Apply(canvas, bars, compact))
+                .Height(compact ? 96 : 200).HAlign(HorizontalAlignment.Stretch)
+                .AutomationId(account.Key + (compact ? "_CompactDailyPlot" : "_DailyPlot")),
+            Copy(bars.Any(b => b.Estimated) ? "Solid: reported. Dashed: estimated." :
+                bars.Any(b => b.Derived) ? "Today's amount is from current quota." : "Reported daily consumption.")
+                .FontSize(12),
+            !compact && view.ChartMessage is { } message ? Copy(message).FontSize(12) : null)
+            .AutomationId(account.Key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"));
+    }
 }
 
 internal abstract class SessionComponent(AppSession session) : Component
@@ -223,6 +242,7 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                     UI.Copy($"{percent:0.##}% of {UI.Money(account.AllocationUsd)} allocation").FontSize(12))
                 : UI.Copy("Allocation percentage not available").FontSize(12),
             UI.EstimateRow(account, account.Key + "_Flyout_"),
+            UI.DailyConsumption(account, compact: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
                 Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")
@@ -317,6 +337,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.AccountWarning(account) is { Length: > 0 } warning
             ? InfoBar("Account needs attention", warning).Warning().IsClosable(false) : null,
         UsageSummary(account, account.Key + "_"),
+        UI.DailyConsumption(account),
         UsageAdvancedDetails(account)
     )).WithKey(account.Key);
     private Element UsageAdvancedDetails(AccountView account)
@@ -489,6 +510,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.AccountWarning(account) is { Length: > 0 } warning
             ? InfoBar("Account needs attention", warning).Warning().IsClosable(false).AutomationId("AccountWarning") : null,
         UsageSummary(account),
+        ConsumptionSetup(account, owner),
         Expander("Advanced details", Session.ShowAdvancedDetails ? AdvancedDetails(account) : VStack(),
             Session.ShowAdvancedDetails, expanded => { Session.ShowAdvancedDetails = expanded; Session.Notify(); })
             .HAlign(HorizontalAlignment.Stretch).AutomationId("AdvancedAccountDetails"),
@@ -528,6 +550,32 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.EstimateRow(account, idPrefix),
         UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
     )).AutomationId(idPrefix + "AccountSummary");
+
+    private Element? ConsumptionSetup(AccountView account, nint owner)
+    {
+        if (account.EnterpriseConsumption is not { Eligible: true } view) return null;
+        Element action = view.State switch
+        {
+            EnterpriseSetupState.CliMissing => VStack(8,
+                Button("Install Azure CLI", () => Session.OpenLink("https://aka.ms/installazurecli", owner)).AccentButton(),
+                Button("Check again", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            EnterpriseSetupState.ConfirmIdentity => VStack(8,
+                TextBlock(view.PendingIdentity?.Username ?? view.PendingIdentity?.Alias ?? "").SemiBold(),
+                Button("Use this account", () => Session.ConnectConsumption(account.Key, true)).AccentButton().IsEnabled(!Session.Busy),
+                UI.Copy("Using the wrong account? Run az login in a terminal, then check again.").FontSize(12),
+                Button("Check again", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            EnterpriseSetupState.SignInRequired => VStack(8,
+                UI.Copy(DailyChartPresentation.LoginCommand).IsTextSelectionEnabled(),
+                Button("I've signed in - try again", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            EnterpriseSetupState.Connected => HStack(10,
+                UI.Copy(view.ConnectedUsername ?? "Work account connected"),
+                Button("Change account", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            _ => Button(view.State == EnterpriseSetupState.Error ? "Try again" : "Connect work account",
+                () => Session.ConnectConsumption(account.Key)).AutomationName("Connect work account").AccentButton().IsEnabled(!Session.Busy)
+        };
+        return Card(VStack(10, TextBlock("Daily consumption").SemiBold(), UI.Copy(view.Message), action))
+            .AutomationId("DailyConsumptionSetup");
+    }
 
     private static Element AdvancedDetails(AccountView account, string idPrefix = "") => VStack(12,
         UI.DetailRow("GitHub login", account.Login, idPrefix + "DetailLogin"),

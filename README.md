@@ -37,6 +37,75 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 - Local history and settings, with OAuth tokens in Windows Credential Manager
   or the macOS login Keychain.
 - Opt-in launch at login on either platform.
+- Optional corporate daily-consumption charts for eligible Microsoft enterprise
+  accounts, using Azure CLI authentication and explicit corporate-identity confirmation.
+
+### Corporate daily consumption
+
+Accounts whose Copilot `enterprise_list` contains `1578` (microsoftopensource) or
+`134482` (microsoftcopilot), or `13213` (Microsoft internal EMU) offer
+**Connect work account** in account management.
+MSFT ESME is also supported: accounts on the exact `msft.ghe.com` host with
+returned enterprise membership map to `proxima:msft.ghe.com` in the daily service,
+without assuming that numeric enterprise IDs are portable between GitHub hosts.
+Install [Azure CLI](https://aka.ms/installazurecli), then run
+`az login --scope "2efaf292-00a0-426c-ba7d-f5d2b214b8fc/.default"` with your corporate
+account. Confirm the displayed corporate identity for each GitHub account.
+The corporate service must also grant that identity consumption-read access.
+
+The app reads the build-configured corporate daily API, requesting
+the UTC calendar month to date with `group-by=day`, `start-date`, and exclusive
+`end-date`. The charts in Usage and the tray/menu-bar popup include only the eligible
+enterprises reported by that GitHub account. Columns use the system accent color
+with a labeled USD scale. Solid bars show reported gross USD consumption; dashed
+bars with translucent fill spread a multi-day unreported remainder evenly through
+the quota observation's UTC day. When today is the only missing day and all prior
+days reconcile, its solid bar is derived from the current quota rather than
+labeled an estimate. Tooltips distinguish the source and use regional date
+formatting without changing the UTC day. These values are not invoiced charges.
+Internal missing days, negative remainders, stale observations, and incompatible
+billing periods disable estimates. Other billing profiles and dual-access usage
+are outside the service's coverage.
+
+Azure CLI owns login and refresh credentials. Access tokens and daily responses
+remain in app memory; only the confirmed username, alias, tenant, and object ID are saved
+in account settings. The app reacquires expiring tokens, retries authentication
+once, and refreshes daily reports with a 15-minute minimum interval when quota
+updates arrive. If CLI authentication changes identities, reconfirm in account
+management. The regular GitHub quota totals, notifications, and tray remain
+independent of this optional integration.
+
+#### Build-time API configuration
+
+Set `GHCP_CONSUMPTION_API_URL` in the build process's environment to the HTTPS
+cross-enterprise consumption **base route**, without an alias or query string.
+For example, a synthetic configuration is:
+
+```powershell
+$env:GHCP_CONSUMPTION_API_URL = 'https://usage.example.invalid/api/copilot/consumption/crossEnterprise/'
+```
+
+MSBuild embeds this value in the shared Core assembly for both Windows and macOS.
+The app appends the confirmed corporate alias, `/consumption`, and query parameters.
+The value must not contain credentials, a query, fragment, or a non-default port.
+An unset or empty variable disables all corporate-consumption UI and access,
+even for otherwise eligible accounts. The variable is read at build time, not
+from the running app's environment; rebuild after changing it.
+
+For local development, set the variable in your shell profile or user environment
+and start a new build process. GitHub Actions reads the same-named
+`GHCP_CONSUMPTION_API_URL` secret in verification, Windows/macOS release,
+and Store packaging. CodeQL intentionally builds without secrets to keep private
+endpoint configuration out of analysis diagnostics. Use a repository secret for
+all lanes, or an environment secret in `production` / `microsoft-store` for those
+release jobs. Fork PRs and builds without the secret remain functional with this
+feature hidden for real accounts. Demo mode includes only synthetic chart data
+for UI verification. Tests inject synthetic endpoints and never contact the service.
+
+This keeps the URL out of source, not out of the distributed binary. Generated
+assembly metadata, build logs/binlogs, diagnostic artifacts, and binaries may
+contain it; do not publish private build diagnostics. Authentication remains the
+actual access boundary.
 
 ## Install
 

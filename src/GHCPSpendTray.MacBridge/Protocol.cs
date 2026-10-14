@@ -19,6 +19,7 @@ public sealed record Command
     public string? Thresholds { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public bool? ShowPeriodEstimate { get; init; }
+    public bool Confirm { get; init; }
     public SettingsView? Settings { get; init; }
     public string? TargetId { get; init; }
     public PlatformReply? Reply { get; init; }

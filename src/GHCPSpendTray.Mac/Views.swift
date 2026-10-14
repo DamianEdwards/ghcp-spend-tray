@@ -165,6 +165,7 @@ struct FlyoutView: View {
                                 model.openSettings(.accounts)
                             } label: { AccountRow(account: account) }
                                 .buttonStyle(.plain)
+                            DailyConsumptionChartView(account: account, compact: true)
                             Divider()
                         }
                     }
@@ -250,6 +251,7 @@ struct UsageView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
                             AccountRow(account: account)
+                            DailyConsumptionChartView(account: account)
                             AccountDiagnosticsView(account: account)
                         }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -396,6 +398,45 @@ struct AccountEditor: View {
                     Button("Manage OAuth Grants") { model.openURL("https://\(account.host)/settings/applications") }
                 }.disabled(model.busy)
             }
+            if let consumption = account.enterpriseConsumption, consumption.eligible {
+                Section("Corporate Daily Consumption") {
+                    Text(consumption.message)
+                    switch consumption.state {
+                    case .cliMissing:
+                        Link("Install Azure CLI", destination: URL(string: "https://aka.ms/installazurecli")!)
+                        Button("Check Again") {
+                            model.perform("consumption.connect", fields: ["key": account.key])
+                        }.disabled(model.busy)
+                    case .confirmIdentity:
+                        Text(consumption.pendingIdentity?.username ?? consumption.pendingIdentity?.alias ?? "")
+                            .font(.headline).textSelection(.enabled)
+                        Button("Use This Account") {
+                            model.perform("consumption.connect", fields: ["key": account.key, "confirm": true])
+                        }.buttonStyle(.borderedProminent).disabled(model.busy)
+                        Text("Using the wrong account? Run az login in a terminal, then check again.").font(.caption)
+                        Button("Check Again") {
+                            model.perform("consumption.connect", fields: ["key": account.key])
+                        }.disabled(model.busy)
+                    case .signInRequired:
+                        Text("az login --scope \"2efaf292-00a0-426c-ba7d-f5d2b214b8fc/.default\"").textSelection(.enabled)
+                        Button("I've Signed In - Try Again") {
+                            model.perform("consumption.connect", fields: ["key": account.key])
+                        }.disabled(model.busy)
+                    case .connected:
+                        HStack {
+                            Text(consumption.connectedUsername ?? "Work account connected").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Change Account") {
+                                model.perform("consumption.connect", fields: ["key": account.key])
+                            }.disabled(model.busy)
+                        }
+                    case .ready, .error:
+                        Button(consumption.state == .error ? "Try Again" : "Connect Work Account") {
+                            model.perform("consumption.connect", fields: ["key": account.key])
+                        }.buttonStyle(.borderedProminent).disabled(model.busy)
+                    }
+                }
+            }
             Section("Account Preferences") {
                 TextField("Display name", text: $name)
                     .textFieldStyle(.roundedBorder)
@@ -444,6 +485,89 @@ struct AccountEditor: View {
             }
         } message: {
             Text("This deletes its local credentials, alert state, and cached avatar. Retained history and recovery copies may remain. It does not revoke the OAuth grant on GitHub.")
+        }
+    }
+}
+
+struct DailyConsumptionChartView: View {
+    let account: AccountData
+    var compact = false
+
+    private func regionalDate(_ text: String, month: Bool = false) -> String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = TimeZone(secondsFromGMT: 0)
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: text) else { return text }
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if month { formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy") }
+        else { formatter.dateStyle = .short }
+        return formatter.string(from: date)
+    }
+
+    private func kind(_ bar: DailySpendData) -> String {
+        bar.estimated ? "Estimated" : bar.derived ? "Today - from current quota" : "Reported"
+    }
+
+    var body: some View {
+        if let view = account.enterpriseConsumption, let bars = view.bars, !bars.isEmpty,
+           let ticks = view.axisTicks, let maximum = ticks.last, maximum > 0 {
+            let maxAmount = NSDecimalNumber(decimal: maximum).doubleValue
+            let plotHeight: CGFloat = compact ? 64 : 150
+            let stride = max(1, Int(ceil(Double(bars.count) / (compact ? 6 : 16))))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Daily Consumption - \(regionalDate(bars[0].date, month: true))\(compact ? "" : " (UTC)")")
+                    .font(compact ? .caption : .headline)
+                Text("USD").font(.caption2).foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 6) {
+                    GeometryReader { geometry in
+                        ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
+                            Text(decimalText(tick))
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .position(x: geometry.size.width / 2,
+                                          y: plotHeight * CGFloat(1 - NSDecimalNumber(decimal: tick).doubleValue / maxAmount))
+                        }
+                    }.frame(width: compact ? 35 : 55, height: plotHeight)
+                    ZStack(alignment: .bottom) {
+                        GeometryReader { geometry in
+                            ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
+                                Path { path in
+                                    let y = plotHeight * CGFloat(1 - NSDecimalNumber(decimal: tick).doubleValue / maxAmount)
+                                    path.move(to: CGPoint(x: 0, y: y))
+                                    path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+                                }.stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                            }
+                        }.frame(height: plotHeight).padding(.bottom, 18)
+                        HStack(alignment: .bottom, spacing: compact ? 2 : 4) {
+                            ForEach(Array(bars.enumerated()), id: \.element.id) { index, bar in
+                                VStack(spacing: 4) {
+                                    Spacer(minLength: 0)
+                                    Rectangle()
+                                        .fill(Color.accentColor.opacity(bar.estimated ? 0.2 : 1))
+                                        .overlay {
+                                            if bar.estimated {
+                                                Rectangle().strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+                                            }
+                                        }
+                                        .frame(height: max(1, CGFloat(NSDecimalNumber(decimal: bar.amountUsd).doubleValue / maxAmount) * plotHeight))
+                                    Text(index % stride == 0 || index == bars.count - 1 ? String(Int(bar.date.suffix(2)) ?? 0) : " ")
+                                        .font(.caption2).frame(height: 14)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .help("\(regionalDate(bar.date)): \(money(bar.amountUsd)) USD - \(kind(bar))")
+                                .accessibilityLabel("\(regionalDate(bar.date)): \(money(bar.amountUsd)) USD - \(kind(bar))")
+                            }
+                        }.frame(height: plotHeight + 18)
+                    }
+                }
+                Text(bars.contains(where: { $0.estimated }) ? "Solid: reported. Dashed: estimated." :
+                     bars.contains(where: { $0.derived }) ? "Today's amount is from current quota." : "Reported daily consumption.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !compact, let message = view.chartMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
+            }.accessibilityIdentifier(account.key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"))
         }
     }
 }
