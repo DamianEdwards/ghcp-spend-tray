@@ -192,8 +192,8 @@ internal static class BackNavigationTests
         public Task RefreshAccountAsync(string accountKey) => _demo.RefreshAccountAsync(accountKey);
         public Task SaveSettingsAsync(SettingsView settings) => _demo.SaveSettingsAsync(settings);
         public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
-            bool? showPeriodEstimate = null) =>
-            _demo.SaveAccountAsync(key, displayName, thresholds, spendIncrementUsd, showPeriodEstimate);
+            bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false) =>
+            _demo.SaveAccountAsync(key, displayName, thresholds, spendIncrementUsd, showPeriodEstimate, customBudgetUsd, updateCustomBudget);
         public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key) =>
             _demo.AccountSettings(key);
         public Task RemoveAsync(string key) => _demo.RemoveAsync(key);

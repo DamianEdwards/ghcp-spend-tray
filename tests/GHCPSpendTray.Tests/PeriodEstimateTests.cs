@@ -92,11 +92,54 @@ internal static partial class Program
                 Snapshot = state.Snapshot with { SourceTimestampUtc = null }
             }).ObservedAtUtc);
         });
-        await Test("period estimate rejects source timestamps outside the period or newer than the fetch", () =>
+        await Test("period estimate tolerates up to one minute of positive source clock skew", () =>
+        {
+            var expected = Estimate(State(Now));
+            foreach (var skew in new[]
+            {
+                TimeSpan.FromTicks(1), TimeSpan.FromMilliseconds(5),
+                TimeSpan.FromMinutes(1).Subtract(TimeSpan.FromTicks(1)), TimeSpan.FromMinutes(1)
+            })
+            {
+                var source = Now.Add(skew).ToOffset(TimeSpan.FromHours(-7));
+                var state = State(Now, source: source);
+                Equal(expected, Estimate(state));
+                Equal(Now, Estimate(state).ObservedAtUtc);
+                Equal(expected, Estimate(state, Now.AddMinutes(30)));
+                Equal(source, state.Snapshot!.SourceTimestampUtc);
+            }
+        });
+        await Test("period estimate clock skew cannot advance elapsed-time or freshness boundaries", () =>
+        {
+            var start = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+            var beforeDay = start.AddDays(1).AddTicks(-1);
+            Unavailable(State(beforeDay, source: beforeDay.AddMinutes(1)),
+                "At least 24 hours of this period must elapse.");
+            var beforeEarlyEnd = start.AddDays(3).AddTicks(-1);
+            True(Estimate(State(beforeEarlyEnd, source: beforeEarlyEnd.AddMinutes(1))).IsEarly);
+            var state = State(Now, source: Now.AddMinutes(1));
+            True(Estimate(state, Now.Add(freshness)).EstimatedConsumptionUsd is not null);
+            Unavailable(state, "Consumption observation is stale.", Now.Add(freshness).AddTicks(1));
+        });
+        await Test("period estimate clamps positive clock skew across reset without extending the period", () =>
+        {
+            var reset = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+            var fetched = reset.AddSeconds(-30);
+            var state = State(fetched, source: reset.AddSeconds(30), reset: reset);
+            Equal(Estimate(State(fetched, reset: reset)), Estimate(state));
+            Equal(fetched, Estimate(state).ObservedAtUtc);
+            Unavailable(state, "Awaiting current-period consumption.", reset);
+        });
+        await Test("period estimate rejects previous-period sources and clock skew over one minute", () =>
         {
             Unavailable(State(Now, source: new DateTimeOffset(2026, 8, 31, 23, 59, 59, TimeSpan.Zero)),
                 "Usage observation time is outside the supported period.");
-            Unavailable(State(Now, source: Now.AddTicks(1)),
+            var start = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+            Unavailable(State(start.AddSeconds(10), source: start.AddTicks(-1)),
+                "Usage observation time is outside the supported period.");
+            Unavailable(State(Now, source: Now.AddMinutes(1).AddTicks(1)),
+                "Usage observation time is outside the supported period.");
+            Unavailable(State(Now, source: Now.AddDays(1)),
                 "Usage observation time is outside the supported period.");
         });
         await Test("period estimate requires fresh current observations at exact freshness threshold", () =>

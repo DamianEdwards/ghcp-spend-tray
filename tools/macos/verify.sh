@@ -23,15 +23,19 @@ if [[ "$verification" != app ]]; then
 fi
 if [[ "$verification" == shared-tests ]]; then exit 0; fi
 bash tools/macos/build.sh
+source tools/macos/sparkle.sh
 xcrun swiftc -swift-version 6 -warnings-as-errors -O \
     src/GHCPSpendTray.Mac/Models.swift src/GHCPSpendTray.Mac/Platform.swift \
     src/GHCPSpendTray.Mac/AppModel.swift src/GHCPSpendTray.Mac/TrayIconRenderer.swift \
     src/GHCPSpendTray.Mac/Notifications.swift src/GHCPSpendTray.Mac/PopupSmokeReadiness.swift \
+    src/GHCPSpendTray.Mac/Updates.swift src/GHCPSpendTray.Mac/UpdateViews.swift \
+    -F "$SPARKLE_ROOT" -framework Sparkle \
     src/GHCPSpendTray.Mac/Views.swift \
     -import-objc-header src/GHCPSpendTray.Mac/Bridge.h \
     tests/GHCPSpendTray.MacTests/*.swift \
     artifacts/macos/GHCPSpendTray.app/Contents/Frameworks/GHCPSpendTray.MacBridge.dylib \
     -Xlinker -rpath -Xlinker @executable_path/GHCPSpendTray.app/Contents/Frameworks \
     -o artifacts/macos/platform-tests
-artifacts/macos/platform-tests
+mkdir -p artifacts/macos-test-diagnostics
+artifacts/macos/platform-tests 2>&1 | tee artifacts/macos-test-diagnostics/platform-tests.log
 python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app

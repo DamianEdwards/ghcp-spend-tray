@@ -3,12 +3,14 @@ using GHCPSpendTray.Core;
 
 namespace GHCPSpendTray.Shared;
 
-public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null) : IApplicationController
+public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null,
+    bool unlimited = false) : IApplicationController
 {
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly List<AccountView> _examples = [];
     private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
         bool ShowPeriodEstimate)> _preferences = [];
+    private readonly Dictionary<string, decimal?> _budgets = [];
     public string DataDirectory => directory;
     public bool Portable => true;
     public event Action<DashboardView>? Changed;
@@ -24,7 +26,11 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             return Task.CompletedTask;
         }
         List<AccountView> views = [];
-        if (!empty) views.AddRange([
+        if (!empty && unlimited)
+            views.Add(new("github.com:1", "Unlimited (demo)", "demo-unlimited", "github.com",
+                new(2625m, 26.25m, null, null, true, now, null, now.AddHours(1), "synthetic", true, null),
+                null, 26.25m, null, "Fresh", now));
+        else if (!empty) views.AddRange([
             new("github.com:1", "Personal (demo)", "demo-user", "github.com",
                 new(2625m, 26.25m, 25m, 105m, false, now, null, now.AddHours(1), "synthetic", true, null), 105m,
                 26.25m, 25m, "Fresh", now),
@@ -50,6 +56,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             Host = a.Host, UserId = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
             Login = a.Login, DisplayName = a.Name,
             ShowPeriodEstimate = _preferences.GetValueOrDefault(a.Key).ShowPeriodEstimate,
+            CustomBudgetUsd = _budgets.GetValueOrDefault(a.Key),
             ExcludeFromTray = Settings.ExcludedTrayAccounts?.Contains(a.Key, StringComparer.Ordinal) == true
         }).ToArray();
         var states = accounts.Select((a, i) => new AccountState
@@ -58,6 +65,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             {
                 AccountKey = a.Key, FetchedAtUtc = now, SourceTimestampUtc = now, PeriodId = BillingPeriods.Resolve(now, null),
                 CreditsUsed = dashboard.Accounts[i].Details.CreditsUsed!.Value,
+                Unlimited = dashboard.Accounts[i].Details.Unlimited,
                 Entitlement = dashboard.Accounts[i].AllocationUsd * 100,
                 ConsumptionUsd = dashboard.Accounts[i].ConsumptionUsd!.Value,
                 AllocationUsd = dashboard.Accounts[i].AllocationUsd, PercentConsumed = dashboard.Accounts[i].Percent
@@ -67,7 +75,10 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         {
             Accounts = dashboard.Accounts.Select((account, i) => account with
             {
-                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes))
+                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes)),
+                CustomBudgetUsd = accounts[i].CustomBudgetUsd,
+                AllocationUsd = accounts[i].CustomBudgetUsd ?? account.AllocationUsd,
+                Percent = UsageBudget.Percentage(accounts[i], states[i].Snapshot!)
             }).ToArray(),
             Tray = TrayUsage.Create(new()
             {
@@ -80,7 +91,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public Task AddExampleAccountAsync()
     {
         var now = _time.GetUtcNow();
-        string id = (_examples.Count + (empty ? 1 : 3)).ToString(CultureInfo.InvariantCulture);
+        string id = (_examples.Count + (empty ? 1 : unlimited ? 2 : 3)).ToString(CultureInfo.InvariantCulture);
         _examples.Add(new($"github.com:{id}", $"Example {id} (demo)", $"demo-example-{id}", "github.com",
             new(1250m, 12.5m, 50m, 25m, false, now, null, now.AddHours(1), "synthetic", true, null),
             25m, 12.5m, 50m, "Fresh", now));
@@ -93,21 +104,23 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         return RefreshAsync();
     }
     public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
-        bool? showPeriodEstimate = null)
+        bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false)
     {
         var previous = AccountSettings(key);
         displayName = displayName.Trim();
         if (displayName.Length > 128 || displayName.Any(char.IsControl))
             throw new AppOperationException("Display names must be at most 128 characters and contain no control characters.");
         AppSettings.ValidateSpendIncrement(spendIncrementUsd);
+        UsageBudget.Validate(customBudgetUsd);
         _preferences[key] = (displayName, thresholds, spendIncrementUsd, showPeriodEstimate ?? previous.ShowPeriodEstimate);
+        if (updateCustomBudget) _budgets[key] = customBudgetUsd;
         return RefreshAsync();
     }
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key)
     {
         if (_preferences.TryGetValue(key, out var preferences)) return preferences;
-        if (key is "github.com:1" && !empty) return ("Personal (demo)", "", null, false);
-        if (key is "example.ghe.com:2" && !empty) return ("Work (demo)", "", null, false);
+        if (key is "github.com:1" && !empty) return (unlimited ? "Unlimited (demo)" : "Personal (demo)", "", null, false);
+        if (key is "example.ghe.com:2" && !empty && !unlimited) return ("Work (demo)", "", null, false);
         var example = _examples.SingleOrDefault(account => account.Key == key)
             ?? throw new AppOperationException("That account is no longer configured.");
         return (example.Name, "", null, false);

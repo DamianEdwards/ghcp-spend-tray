@@ -72,6 +72,16 @@ from the connected GitHub host or its avatar service (for github.com,
 ordinary network information such as your IP address. The app does not include
 app-operated advertising or analytics tracking.
 
+Public macOS builds use Sparkle to check a signed update feed on GitHub Pages
+and download updates from this repository's GitHub Releases. Sparkle asks
+permission to check automatically; you can change automatic checks and optional
+automatic downloads in **Settings > About**, or check manually. These requests
+send ordinary network information such as your IP address and HTTP client/app
+version information to GitHub's hosting services. They do not include account
+identities, authorization tokens, consumption data, history, or diagnostic logs.
+Sparkle system profiling is disabled, and the app supplies no profiling fields.
+Development and demonstration modes do not start the updater.
+
 GitHub's handling of information is governed by its
 [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)
 and any policies applicable to your enterprise host. Microsoft Store delivery and

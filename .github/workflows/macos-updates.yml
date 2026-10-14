@@ -1,0 +1,58 @@
+name: macOS Update Feed
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-update-feed
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate signed stable appcast
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-macos
+      - name: Restore pinned Sparkle and rebuild feed from public releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          MACOS_UPDATE_FEED_URL: ${{ vars.MACOS_UPDATE_FEED_URL }}
+        run: |
+          source tools/macos/sparkle.sh
+          python3 tools/macos/updates.py feed artifacts/macos-update-site
+      - name: Upload authenticated update site
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: artifacts/macos-update-site
+
+  deploy:
+    name: Deploy stable appcast
+    needs: generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy verified feed after release publication
+        id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

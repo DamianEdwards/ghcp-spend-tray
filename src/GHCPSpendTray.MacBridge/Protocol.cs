@@ -11,6 +11,7 @@ public sealed record Command
     public string? Directory { get; init; }
     public bool Demo { get; init; }
     public bool Empty { get; init; }
+    public bool Unlimited { get; init; }
     public string? Key { get; init; }
     public string? Host { get; init; }
     public string? ClientId { get; init; }
@@ -19,6 +20,9 @@ public sealed record Command
     public string? Thresholds { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public bool? ShowPeriodEstimate { get; init; }
+    public decimal? CustomBudgetUsd { get; init; }
+    public bool UpdateCustomBudget { get; init; }
+    public FormInput? Form { get; init; }
     public SettingsView? Settings { get; init; }
     public string? TargetId { get; init; }
     public PlatformReply? Reply { get; init; }
@@ -35,7 +39,19 @@ public sealed record PlatformReply
 }
 
 public sealed record AccountPreferences(string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
-    string? ClientId, bool ShowPeriodEstimate = false);
+    string? ClientId, bool ShowPeriodEstimate = false, decimal? CustomBudgetUsd = null);
+
+public sealed record FormInput
+{
+    public string Page { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+    public string Thresholds { get; init; } = "";
+    public string Increment { get; init; } = "";
+    public string PollMinutes { get; init; } = "";
+    public string CustomBudget { get; init; } = "";
+    public bool InheritIncrement { get; init; }
+    public bool UseCustomBudget { get; init; }
+}
 
 public sealed record BridgeEvent
 {
@@ -58,7 +74,8 @@ public sealed record BridgeEvent
     public string? Key { get; init; }
 }
 
-public sealed record Receipt(string? Error = null);
+public sealed record Receipt(string? Error = null, Dictionary<string, string>? FieldErrors = null,
+    decimal? IncrementUsd = null, decimal? CustomBudgetUsd = null, int? PollMinutes = null, string? Text = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

@@ -78,6 +78,11 @@ are not added. SSO/approval failures are surfaced, not bypassed.
 - Required quota fields are nullable wire fields and missing values are rejected.
   Premium-request billing is unsupported. Missing/zero allocation or unlimited
   allocation produces no percentage or allocation alerts.
+- `TrayUsage.Create` distinguishes fresh unlimited allocations from unavailable
+  data. `TrayIndicator.IsUnlimited` renders infinity in either icon style without
+  inventing a percentage. Roll-ups use finite allocations when present, otherwise
+  unlimited accounts; missing/failed accounts retain partial qualifiers. All
+  indicators require validated identity, fresh state and a current billing period.
 - Reset timestamps define billing periods when available. Only otherwise is a UTC
   calendar month used. `UsageAggregation.Total` excludes expired periods and labels
   partial/last-known totals. A complete total also requires fresh account state.
