@@ -330,7 +330,9 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 }).AutomationId("UsageOverviewAmount").Flex(basis: 260, grow: 1),
             (FlexRow(
                 UI.Copy(model.Status).FontSize(12).AutomationId("UsageOverviewStatus").Flex(basis: 120, grow: 1),
-                Button(Session.Busy ? "Refreshing..." : "Refresh usage", () => Session.Refresh())
+                Button(HStack(8,
+                    Icon(FontIcon("\uE72C", "Segoe Fluent Icons", 16)),
+                    TextBlock(Session.Busy ? "Refreshing..." : "Refresh usage")), () => Session.Refresh())
                     .AutomationName("Refresh usage").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Right)
                     .IsEnabled(Session.Initialized && !Session.Busy).Flex(shrink: 0)) with
             {
