@@ -354,6 +354,7 @@ internal static class Program
                 shell.ShowSettings(SettingsPage.Notifications);
             });
             await WaitForSettingsUI(shell, "reopened Notifications settings");
+            if (!empty) await SmokeUsageDeepLinksAsync(shell);
             if (empty) await SmokeSingleAccountPopupAsync(shell);
             await OnUI(shell, () =>
             {
@@ -390,6 +391,44 @@ internal static class Program
         internal DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
     }
+    private static async Task SmokeUsageDeepLinksAsync(ReactorShell shell)
+    {
+        var keys = shell.Session.Dashboard.Accounts.Select(a => a.Key).Reverse().ToArray();
+        foreach (string key in keys)
+        {
+            await OnUI(shell, shell.ShowFlyout);
+            await WaitForFlyoutUI(shell, "account Usage link in popup");
+            await InvokeButtonAsync(shell, key + "_ViewUsage", flyout: true);
+            await WaitForSettingsUI(shell, "account Usage destination");
+            await OnUI(shell, () =>
+            {
+                var panel = Find(shell.SettingsWindow!, key + "_UsagePanel") as FrameworkElement;
+                var scroll = Find(shell.SettingsWindow!, "SettingsContentScroll");
+                RecordSmokePhase(shell.Session.Controller.DataDirectory,
+                    $"Usage destination key={key}, target={shell.Session.UsageAccountKey}, panel={panel?.GetType().Name}, " +
+                    $"scroll={scroll?.GetType().Name}, top={(scroll is UIElement element ? panel?.TransformToVisual(element).TransformPoint(default).Y : null)}.");
+            });
+            await WaitForUI(shell, "account Usage panel brought into view", () =>
+            {
+                var window = shell.SettingsWindow!;
+                if (shell.Session.Page != SettingsPage.Usage || shell.Session.UsageAccountKey != key ||
+                    shell.Session.SelectedAccount is not null || shell.Session.ShowAddForm ||
+                    Find(window, key + "_UsagePanel") is not FrameworkElement panel ||
+                    Find(window, "SettingsContentScroll") is not ScrollView scroll)
+                    return false;
+                double top = panel.TransformToVisual(scroll).TransformPoint(default).Y;
+                return top >= -1 && top < scroll.ActualHeight - 40;
+            });
+            await OnUI(shell, () =>
+            {
+                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
+                    throw new InvalidOperationException("Account Usage navigation did not dismiss the popup.");
+            });
+        }
+        await OnUI(shell, () => shell.Session.Navigate(SettingsPage.Notifications));
+        await WaitForSettingsUI(shell, "Notifications after popup Usage links");
+    }
+
     private static async Task SmokeSingleAccountPopupAsync(ReactorShell shell)
     {
         var demo = (DemoController)shell.Session.Controller;

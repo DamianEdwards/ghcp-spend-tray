@@ -70,6 +70,15 @@ assertion both with and without the optional period estimate.
 The subsequent populated smoke encountered an unrelated early tray-focus
 timeout before reaching layout checks; it is not recorded as a passing run.
 
+Popup account Details opens Usage and scrolls the selected account panel into
+view rather than opening account management. Session tests cover the destination,
+repeated requests, and clearing the target on navigation. Native populated smoke
+clicks the second account followed by the first, checks the Usage destination
+and visible target panel, and verifies that the popup is dismissed. Independent
+element refs prevent unbinding the previous account from clearing the new target;
+scrolling waits for native loading/layout rather than using a fixed delay.
+Populated and empty smoke both passed after this navigation change.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

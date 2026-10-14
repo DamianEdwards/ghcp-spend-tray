@@ -163,8 +163,7 @@ struct FlyoutView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(model.dashboard?.accounts ?? []) { account in
                             Button {
-                                model.selectedAccount = account.key
-                                model.openSettings(.accounts)
+                                model.viewUsage(account.key)
                             } label: { AccountRow(account: account) }
                                 .buttonStyle(.plain)
                             DailyConsumptionChartView(account: account, compact: true)
@@ -236,31 +235,39 @@ struct UsageView: View {
     }
 
     private var usage: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Usage").font(.largeTitle)
-                Text(model.dashboard?.total ?? "Consumption unavailable").font(.title2)
-                Text(model.dashboard?.status ?? "").foregroundStyle(.secondary)
-                if let tray = model.dashboard?.tray {
-                    Text(tray.rollUp.details).font(.caption).textSelection(.enabled)
-                }
-                HStack {
-                    Button("Refresh Now") { model.perform("refresh") }.disabled(model.busy)
-                    Button("Add Account...") { model.addAccount() }.disabled(model.busy)
-                    if model.busy { ProgressView().controlSize(.small) }
-                }
-                ForEach(model.dashboard?.accounts ?? []) { account in
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            AccountRow(account: account)
-                            DailyConsumptionChartView(account: account)
-                            AccountDiagnosticsView(account: account)
-                        }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Usage").font(.largeTitle)
+                    Text(model.dashboard?.total ?? "Consumption unavailable").font(.title2)
+                    Text(model.dashboard?.status ?? "").foregroundStyle(.secondary)
+                    if let tray = model.dashboard?.tray {
+                        Text(tray.rollUp.details).font(.caption).textSelection(.enabled)
                     }
-                }
-                Text("USD consumption is AI credits used divided by 100, not an invoice or total GitHub spend. Locally sampled history is not a verified daily breakdown.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Button("Refresh Now") { model.perform("refresh") }.disabled(model.busy)
+                        Button("Add Account...") { model.addAccount() }.disabled(model.busy)
+                        if model.busy { ProgressView().controlSize(.small) }
+                    }
+                    ForEach(model.dashboard?.accounts ?? []) { account in
+                        GroupBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                AccountRow(account: account)
+                                DailyConsumptionChartView(account: account)
+                                AccountDiagnosticsView(account: account)
+                            }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                        }.id(account.key)
+                    }
+                    Text("USD consumption is AI credits used divided by 100, not an invoice or total GitHub spend. Locally sampled history is not a verified daily breakdown.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onAppear {
+                if let key = model.usageAccount { proxy.scrollTo(key, anchor: .top) }
+            }
+            .onChange(of: model.usageNavigationRevision) { _, _ in
+                if let key = model.usageAccount { proxy.scrollTo(key, anchor: .top) }
+            }
         }
     }
 }

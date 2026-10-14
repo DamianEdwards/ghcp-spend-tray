@@ -52,6 +52,8 @@ final class AppModel: ObservableObject {
     @Published var reconnectClientId: String?
     @Published var page: SettingsPage = .usage
     @Published var selectedAccount: String?
+    @Published var usageAccount: String?
+    @Published var usageNavigationRevision = 0
     @Published var notificationPermission: NotificationPermission?
     @Published var notificationBusy = false
     let directory: URL
@@ -177,6 +179,16 @@ final class AppModel: ObservableObject {
     func openSettings(_ page: SettingsPage = .usage) {
         self.page = page
         showSettings?()
+    }
+    func viewUsage(_ key: String) {
+        guard dashboard?.accounts.contains(where: { $0.key == key }) == true else {
+            error = "That account is no longer configured."
+            return
+        }
+        selectedAccount = nil
+        usageAccount = key
+        usageNavigationRevision += 1
+        openSettings(.usage)
     }
 
     func addAccount() {

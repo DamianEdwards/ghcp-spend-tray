@@ -17,6 +17,8 @@ internal sealed class AppSession : IDisposable
     internal IApplicationController Controller { get; }
     internal DashboardView Dashboard { get; private set; } = new("Loading", "Loading accounts...", "GHCPSpendTray | Loading", []);
     internal SettingsPage Page { get; private set; } = SettingsPage.Usage;
+    internal string? UsageAccountKey { get; private set; }
+    internal int UsageNavigationRevision { get; private set; }
     internal event Action? Changed;
     internal event Action? DashboardChanged;
     internal Action<SettingsPage>? OpenSettings { get; set; }
@@ -116,7 +118,23 @@ internal sealed class AppSession : IDisposable
     internal void Navigate(SettingsPage page)
     {
         if (SigningIn) CancelSignIn();
+        if (page != SettingsPage.Usage) UsageAccountKey = null;
         Page = page; Error = null; Notice = null; ConfirmRemove = false;
+        Notify();
+    }
+    internal void ViewUsage(string key)
+    {
+        if (!Dashboard.Accounts.Any(a => a.Key == key))
+        {
+            SetError("That account is no longer configured.");
+            return;
+        }
+        Navigate(SettingsPage.Usage);
+        SelectedAccount = null;
+        ShowAddForm = false;
+        UsageAccountKey = key;
+        UsageNavigationRevision++;
+        OpenSettings?.Invoke(SettingsPage.Usage);
         Notify();
     }
     internal void AddAccount()

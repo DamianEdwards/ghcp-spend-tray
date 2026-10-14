@@ -4,6 +4,7 @@ using GHCPSpendTray.App.Native;
 using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
+using Microsoft.UI.Reactor.Input;
 using Microsoft.UI.Reactor.Layout;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -246,8 +247,8 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
             UI.DailyConsumption(account, compact: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
-                Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")
-                    .Grid(column: 1))
+                Button("Details", () => Session.ViewUsage(account.Key)).AutomationName($"Usage details for {account.Login}")
+                    .AutomationId(account.Key + "_ViewUsage").Grid(column: 1))
         )).WithKey(account.Key);
     private static string LastUpdated(DashboardView model)
     {
@@ -261,11 +262,45 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     public override Element Render()
     {
         UseSession();
+        var usageKey = Session.UsageAccountKey;
+        var usageTarget = UseMemo(() => new ElementRef(), usageKey);
+        bool showingUsage = Session.Page == SettingsPage.Usage;
+        UseEffect(() =>
+        {
+            FrameworkElement? waiting = null;
+            void Reveal()
+            {
+                if (!showingUsage || usageKey is null || Session.Page != SettingsPage.Usage ||
+                    Session.UsageAccountKey != usageKey || usageTarget.Current is not { } target) return;
+                if (!target.IsLoaded)
+                {
+                    waiting = target;
+                    target.Loaded += TargetLoaded;
+                    return;
+                }
+                target.UpdateLayout();
+                target.StartBringIntoView(new BringIntoViewOptions
+                {
+                    AnimationDesired = false, VerticalAlignmentRatio = 0
+                });
+            }
+            void TargetLoaded(object sender, RoutedEventArgs args)
+            {
+                if (waiting is not null) waiting.Loaded -= TargetLoaded;
+                waiting = null;
+                Session.Post(Reveal);
+            }
+            Session.Post(Reveal);
+            return () =>
+            {
+                if (waiting is not null) waiting.Loaded -= TargetLoaded;
+            };
+        }, showingUsage, Session.UsageNavigationRevision);
         var owner = UseWindow();
         nint hwnd = owner is null ? 0 : WinRT.Interop.WindowNative.GetWindowHandle(owner.NativeWindow);
         Element content = Session.Page switch
         {
-            SettingsPage.Usage => Usage(),
+            SettingsPage.Usage => Usage(usageTarget),
             SettingsPage.Accounts => Accounts(hwnd),
             SettingsPage.Notifications => Notifications(),
             SettingsPage.About => About(),
@@ -282,7 +317,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 TextBlock(Session.Page.ToString()).FontSize(30).SemiBold(),
                 UI.Feedback(Session),
                 content
-            ).Padding(30, 24)))
+            ).Padding(30, 24)).AutomationId("SettingsContentScroll"))
             with { SelectedTag = Session.Page.ToString(), IsSettingsVisible = false };
         return Grid([GridSize.Star()], [GridSize.Auto, GridSize.Star()],
             TitleBar("GHCPSpendTray Settings").Grid(row: 0),
@@ -293,7 +328,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 .BackButtonVisible(false).Grid(row: 1)
         ).AutomationId("SettingsRoot");
     }
-    private Element Usage()
+    private Element Usage(ElementRef usageTarget)
     {
         var model = Session.Dashboard;
         if (!Session.Initialized)
@@ -313,7 +348,8 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             ).Padding(0, 16).AutomationId("UsagePage");
         return VStack(18,
             UsageOverview(model),
-            VStack(16, model.Accounts.Select(UsageAccount).ToArray())
+            VStack(16, model.Accounts.Select(account => UsageAccount(account,
+                account.Key == Session.UsageAccountKey ? usageTarget : null).WithKey(account.Key)).ToArray())
         ).AutomationId("UsagePage");
     }
     private Element UsageOverview(DashboardView model) => Card(VStack(8,
@@ -344,7 +380,9 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12)
     )).AutomationId("UsageOverview");
 
-    private Element UsageAccount(AccountView account) => Card(VStack(12,
+    private Element UsageAccount(AccountView account, ElementRef? usageTarget)
+    {
+        var card = Card(VStack(12,
         Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
             UI.AccountPicture(account, 44).Grid(column: 0).Margin(0, 0, 12, 0),
             VStack(2, TextBlock(account.Name).FontSize(20).SemiBold(),
@@ -357,7 +395,9 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UsageSummary(account, account.Key + "_"),
         UI.DailyConsumption(account),
         UsageAdvancedDetails(account)
-    )).WithKey(account.Key);
+        )).AutomationId(account.Key + "_UsagePanel").WithKey(account.Key);
+        return usageTarget is null ? card : card.Ref(usageTarget);
+    }
     private Element UsageAdvancedDetails(AccountView account)
     {
         bool expanded = Session.ExpandedUsageAccounts.Contains(account.Key);
