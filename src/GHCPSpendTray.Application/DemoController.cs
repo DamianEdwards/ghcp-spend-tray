@@ -68,7 +68,10 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             Accounts = dashboard.Accounts.Select((account, i) => account with
             {
                 PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes)),
-                EnterpriseConsumption = i == 0 ? DemoConsumption(now) : null
+                EnterpriseConsumption = i == 0 ? DemoConsumption(now) : i == 1
+                    ? new(true, "Daily usage connected", Connected: true, Bars: [],
+                        ChartMessage: "Daily usage is connected, but no daily reports are available for this account yet.",
+                        State: EnterpriseSetupState.Connected) : null
             }).ToArray(),
             Tray = TrayUsage.Create(new()
             {

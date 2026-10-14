@@ -152,6 +152,9 @@ internal static class Program
                     if (Find(shell.SettingsWindow!, key + "_DailyConsumption") is null ||
                         Find(shell.Flyout!, key + "_CompactDailyConsumption") is null)
                         throw new InvalidOperationException("Synthetic daily consumption is missing from Usage or the popup.");
+                    if (shell.Session.Dashboard.Accounts.Count > 1 &&
+                        Find(shell.SettingsWindow!, shell.Session.Dashboard.Accounts[1].Key + "_DailyConsumptionStatus") is null)
+                        throw new InvalidOperationException("Connected daily usage without reports did not explain its missing data.");
                     if (Find(shell.SettingsWindow!, key + "_DailyPlot") is not Canvas plot ||
                         !plot.Children.OfType<TextBlock>().Any(t => t.Text == "USD"))
                         throw new InvalidOperationException("The daily chart has no USD axis.");

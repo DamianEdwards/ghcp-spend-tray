@@ -73,6 +73,12 @@ internal static partial class Program
             Equal(3, chart.Bars.Count(b => b.Estimated));
             Equal(7m / 3, chart.Bars[2].AmountUsd);
         });
+        await Test("Unavailable daily reports produce a connected no-data explanation, not estimated zeroes", () =>
+        {
+            var chart = DailyConsumptionChart.Create(data with { Days = [new("2026-10-01", null)] }, quota, now, true);
+            Equal(0, chart.Bars.Length);
+            True(chart.Message?.Contains("connected, but no daily reports") == true);
+        });
         await Test("Daily chart never fills internal missing days or negative remainders", () =>
         {
             var missing = data with { Days = [new("2026-10-01", 1), new("2026-10-02", null), new("2026-10-03", 2)] };

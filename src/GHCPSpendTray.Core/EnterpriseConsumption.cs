@@ -39,7 +39,8 @@ public sealed record DailyReportedSpend(string Date, decimal? AmountUsd);
 public enum EnterpriseSetupState { Ready, CliMissing, SignInRequired, ConfirmIdentity, Connected, Error }
 public sealed record EnterpriseConsumptionView(bool Eligible, string Message, EnterpriseIdentity? PendingIdentity = null,
     bool Connected = false, DailySpend[]? Bars = null, string? ChartMessage = null,
-    EnterpriseSetupState State = EnterpriseSetupState.Ready, string? ConnectedUsername = null, decimal[]? AxisTicks = null);
+    EnterpriseSetupState State = EnterpriseSetupState.Ready, string? ConnectedUsername = null, decimal[]? AxisTicks = null,
+    bool IsLoading = false);
 
 public static class DailyConsumptionChart
 {
@@ -69,7 +70,7 @@ public static class DailyConsumptionChart
         var days = data.Days.Where(d => DateOnly.ParseExact(d.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture) <= today).ToArray();
         var reported = days.Where(d => d.AmountUsd is not null).ToArray();
         var bars = reported.Select(d => new DailySpend(d.Date, d.AmountUsd!.Value, false)).ToList();
-        if (reported.Length == 0) return ([], "No reported daily consumption is available for this account.");
+        if (reported.Length == 0) return ([], "Daily usage is connected, but no daily reports are available for this account yet.");
         if (!IsEsme(quota) && quota.EnterpriseIds.Any(id => id is not (1578 or 134482 or 13213)))
             return (bars.ToArray(), "Reported days cover only the supported enterprises; this account's broader usage cannot be used to estimate the remainder.");
         var last = DateOnly.ParseExact(reported[^1].Date, "yyyy-MM-dd", CultureInfo.InvariantCulture);

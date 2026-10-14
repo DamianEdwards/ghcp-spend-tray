@@ -321,6 +321,7 @@ try
         Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.Connected, "Successful setup collapses to connected state.");
         if (DateTimeOffset.UtcNow.Day > 1)
         {
+            await Until(() => view!.Accounts[0].EnterpriseConsumption is { IsLoading: false, Bars.Length: > 0 });
             Check(enterpriseHandler.DailyRequests == 1, "Confirmed consumption uses the corporate service.");
             Check(view.Accounts[0].EnterpriseConsumption?.Bars?.Length > 0, "Reported days reach the shared chart model.");
         }
@@ -345,6 +346,57 @@ try
             BridgeJsonContext.Default.BridgeEventArray), BridgeJsonContext.Default.BridgeEventArray)!;
         Check(roundtrip[0].Dashboard!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity,
             "Source-generated bridge serialization carries consumption setup.");
+    }
+    if (DateTimeOffset.UtcNow.Day > 1)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parallelHandler = new FixtureHttp
+        {
+            Eligible = true, UnavailableDaily = true,
+            BeforeDailyResponse = async (number, cancellationToken) =>
+            {
+                if (number != 1) return;
+                entered.TrySetResult();
+                await release.Task.WaitAsync(cancellationToken);
+            }
+        };
+        using var parallelHttp = new HttpClient(parallelHandler);
+        using var parallelController = new ApplicationController(Path.Combine(root, "enterprise-parallel"), false,
+            new MemoryCredentials(), parallelHttp, enterpriseTokens: new FixtureEnterpriseTokens(),
+            enterpriseApiBaseUri: new Uri("https://usage.example.invalid/api/copilot/consumption/crossEnterprise/"));
+        DashboardView? parallelView = null;
+        parallelController.Changed += value => Volatile.Write(ref parallelView, value);
+        await parallelController.InitializeAsync();
+        await parallelController.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        parallelHandler.UserId = "2";
+        await parallelController.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        await parallelController.RefreshAsync();
+        try
+        {
+            await parallelController.ConnectConsumptionAsync("github.com:1").WaitAsync(TimeSpan.FromSeconds(3));
+            await parallelController.ConnectConsumptionAsync("github.com:1", true).WaitAsync(TimeSpan.FromSeconds(3));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Check(parallelView!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption is
+                { Connected: true, IsLoading: true }, "Setup publishes connected/loading before a slow daily request completes.");
+            await parallelController.ConnectConsumptionAsync("github.com:2").WaitAsync(TimeSpan.FromSeconds(3));
+            await parallelController.ConnectConsumptionAsync("github.com:2", true).WaitAsync(TimeSpan.FromSeconds(3));
+            await Until(() => parallelView!.Accounts.Single(a => a.Key == "github.com:2").EnterpriseConsumption is
+                { Connected: true, IsLoading: false, Bars.Length: 0 });
+            var second = parallelView!.Accounts.Single(a => a.Key == "github.com:2").EnterpriseConsumption!;
+            Check(!release.Task.IsCompleted && parallelHandler.DailyRequests == 2,
+                "A slow account does not block another account's setup or daily report.");
+            Check(second.State == EnterpriseSetupState.Connected &&
+                second.ChartMessage?.Contains("no daily reports") == true,
+                "Successful authentication with unavailable reports explicitly shows connected but no data.");
+            var serialized = JsonSerializer.Serialize(new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = parallelView } },
+                BridgeJsonContext.Default.BridgeEventArray);
+            var decoded = JsonSerializer.Deserialize(serialized, BridgeJsonContext.Default.BridgeEventArray)!;
+            Check(decoded[0].Dashboard!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption!.IsLoading,
+                "In-flight daily report state crosses the generated native bridge.");
+        }
+        finally { release.TrySetResult(); }
+        await Until(() => parallelView!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption is { IsLoading: false });
     }
     Console.WriteLine($"PASS: {assertions} shared application and native bridge assertions; synthetic data only.");
 }
@@ -415,13 +467,17 @@ sealed class FixtureHttp : HttpMessageHandler
 {
     public string UserId { get; set; } = "1";
     public bool Eligible { get; set; }
-    public int DailyRequests { get; private set; }
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    private int _dailyRequests;
+    public int DailyRequests => Volatile.Read(ref _dailyRequests);
+    public bool UnavailableDaily { get; set; }
+    public Func<int, CancellationToken, Task>? BeforeDailyResponse { get; init; }
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string json;
         if (request.RequestUri!.Host == "usage.example.invalid")
         {
-            DailyRequests++;
+            int number = Interlocked.Increment(ref _dailyRequests);
+            if (BeforeDailyResponse is not null) await BeforeDailyResponse(number, cancellationToken);
             var query = request.RequestUri.Query.TrimStart('?').Split('&')
                 .Select(p => p.Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
             if (request.Headers.Authorization?.Parameter != "synthetic-corporate-token") throw new InvalidOperationException("Wrong token.");
@@ -431,6 +487,8 @@ sealed class FixtureHttp : HttpMessageHandler
             "asOf":"{{{DateTimeOffset.UtcNow:O}}}","coverage":{"measure":"daily-ai-credit-report-usage","timezone":"UTC","currency":"USD"},
             "days":[{"date":"{{{start}}}","results":[{"enterpriseId":"dotcom:microsoftopensource","status":"available","usage":{"grossAmountUsd":1}}]}]}
             """;
+            if (UnavailableDaily)
+                json = json.Replace("\"status\":\"available\",\"usage\":{\"grossAmountUsd\":1}", "\"status\":\"unavailable\",\"usage\":null");
         }
         else json = request.RequestUri!.AbsolutePath switch
         {
@@ -442,7 +500,7 @@ sealed class FixtureHttp : HttpMessageHandler
         };
         if (Eligible && request.RequestUri.AbsolutePath == "/copilot_internal/user")
             json = json.Insert(1, "\"enterprise_list\":[{\"id\":1578}],");
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
     }
 
 }

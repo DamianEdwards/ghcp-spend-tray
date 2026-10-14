@@ -579,6 +579,12 @@ struct DailyConsumptionChartView: View {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
             }.accessibilityIdentifier(account.key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"))
+        } else if !compact, let view = account.enterpriseConsumption, view.connected {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Daily Usage").font(.headline)
+                Text(view.isLoading ? "Connected. Loading daily usage..." : view.chartMessage ?? view.message)
+                    .foregroundStyle(.secondary)
+            }.accessibilityIdentifier(account.key + "_DailyConsumptionStatus")
         }
     }
 }

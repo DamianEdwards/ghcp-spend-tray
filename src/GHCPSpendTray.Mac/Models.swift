@@ -65,6 +65,7 @@ struct EnterpriseConsumptionData: Decodable {
     let state: EnterpriseSetupState
     let connectedUsername: String?
     let axisTicks: [Decimal]?
+    let isLoading: Bool
 }
 enum EnterpriseSetupState: Int, Decodable {
     case ready, cliMissing, signInRequired, confirmIdentity, connected, error

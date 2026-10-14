@@ -79,6 +79,16 @@ element refs prevent unbinding the previous account from clearing the new target
 scrolling waits for native loading/layout rather than using a fixed delay.
 Populated and empty smoke both passed after this navigation change.
 
+Daily-report refreshes now use per-account gates, with parallel refresh across
+accounts. Setup acquires the CLI token outside the settings mutation lock,
+persists identity confirmation, publishes connected/loading, and returns before
+the report fetch completes. A synthetic blocked first-account response verifies
+that second-account setup and report fetching still finish independently.
+Missing reports produce an explicit connected-but-no-data Usage status, not an
+empty hidden chart or fabricated zeroes. Loading state is exercised through the
+source-generated bridge; the native demo includes a no-report account, and
+populated smoke checks that its explanatory Usage status exists.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

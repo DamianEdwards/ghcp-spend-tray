@@ -79,6 +79,13 @@ updates arrive. If CLI authentication changes identities, reconfirm in account
 management. The regular GitHub usage totals, notifications, and tray remain
 independent of this optional integration.
 
+Connecting a work account publishes the confirmed connection immediately, while
+daily reports load in the background. Report requests are serialized only within
+each account; a slow account does not block setting up or refreshing another.
+Usage shows a loading message while the first report is fetched and an explicit
+connected-but-no-data message if the service has no available daily reports.
+Unavailable reports are not treated as zero usage or turned into estimated bars.
+
 #### Build-time API configuration
 
 Set `GHCP_CONSUMPTION_API_URL` in the build process's environment to the HTTPS

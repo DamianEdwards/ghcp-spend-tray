@@ -15,6 +15,21 @@ internal static class PeriodEstimateTests
         session.Initialize();
         await Until(() => session.Initialized && !session.Busy);
         var account = session.Dashboard.Accounts[0];
+        var noDaily = account with
+        {
+            EnterpriseConsumption = new(true, "Daily usage connected", Connected: true, Bars: [],
+                ChartMessage: "Daily usage is connected, but no daily reports are available for this account yet.")
+        };
+        Check(UI.DailyConsumption(noDaily) is not null,
+            "Connected accounts without daily reports retain an explicit Usage status.");
+        Check(UI.DailyConsumption(noDaily, compact: true) is null,
+            "Unavailable daily-report status does not expand the compact popup.");
+        Check(UI.DailyConsumption(account with { EnterpriseConsumption = new(true, "Connect work account") }) is null,
+            "Unconnected daily usage does not add a Usage status.");
+        Check(UI.DailyConsumption(noDaily with
+        {
+            EnterpriseConsumption = noDaily.EnterpriseConsumption! with { IsLoading = true }
+        }) is not null, "Connected daily usage shows an in-flight report status.");
         var before = session.Dashboard;
         Check(account.PeriodEstimate is null && UI.EstimateRow(account, "") is null && UI.EstimateDetails(account) is null,
             "Disabled forecast omits all Windows estimate surfaces.");

@@ -148,7 +148,12 @@ internal static class UI
 
     internal static Element? DailyConsumption(AccountView account, bool compact = false)
     {
-        if (account.EnterpriseConsumption is not { Bars.Length: > 0 } view) return null;
+        if (account.EnterpriseConsumption is not { } view) return null;
+        if (view.Bars is not { Length: > 0 })
+            return compact || !view.Connected ? null : VStack(8,
+                TextBlock("Daily usage").FontSize(16).SemiBold(),
+                Copy(view.IsLoading ? "Connected. Loading daily usage..." : view.ChartMessage ?? view.Message))
+                .AutomationId(account.Key + "_DailyConsumptionStatus");
         var bars = view.Bars!;
         string month = DateOnly.ParseExact(bars[0].Date, "yyyy-MM-dd", CultureInfo.InvariantCulture)
             .ToString("Y", CultureInfo.CurrentCulture);
@@ -268,6 +273,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UseEffect(() =>
         {
             FrameworkElement? waiting = null;
+            void QueueReveal() => ReactorApp.UIDispatcher?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Reveal);
             void Reveal()
             {
                 if (!showingUsage || usageKey is null || Session.Page != SettingsPage.Usage ||
@@ -288,9 +294,9 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             {
                 if (waiting is not null) waiting.Loaded -= TargetLoaded;
                 waiting = null;
-                Session.Post(Reveal);
+                QueueReveal();
             }
-            Session.Post(Reveal);
+            QueueReveal();
             return () =>
             {
                 if (waiting is not null) waiting.Loaded -= TargetLoaded;
