@@ -205,12 +205,12 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                     .TextAlignment(TextAlignment.Center)).Padding(8, 36);
         else
             body = VStack(18,
-                VStack(3,
+                model.Accounts.Count > 1 ? VStack(3,
                     UI.Copy("This month's usage"),
                     TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(46).SemiBold().AutomationId("TotalConsumption"),
                     UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
                         model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable")
-                ),
+                ) : null,
                 VStack(10, model.Accounts.Select(AccountCard).ToArray())
             ).Padding(0, 8);
         return Grid([GridSize.Star()], [GridSize.Auto, GridSize.Star(), GridSize.Auto],
@@ -220,7 +220,8 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 UI.Glyph("\uE713", "Settings", () => Session.OpenSettings?.Invoke(SettingsPage.Usage))
                     .AutomationId("OpenSettings").Grid(column: 2)
             ).Grid(row: 0).Padding(20, 14),
-            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), body)).Grid(row: 1).Padding(20, 0),
+            ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), body))
+                .AutomationId("FlyoutBodyScroll").Grid(row: 1).Padding(20, 0),
             Border(VStack(10,
                 Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                     UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12).Grid(column: 0).VAlign(VerticalAlignment.Center),

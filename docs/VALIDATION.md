@@ -60,6 +60,16 @@ use "limit" rather than "allocation" or "quota"; consumed amounts use "usage".
 Existing upstream JSON names, persistence properties, and bridge identifiers are
 unchanged for compatibility.
 
+Single-account popups omit the duplicate aggregate total and account count;
+the account card retains its amount, limit, freshness, chart, and Details action.
+The aggregate summary remains for multiple accounts, and scrolling remains
+available when multiple accounts or constrained work areas require it.
+A native regression reproduced 4.8 DIPs of single-account overflow before this
+change. The same single-account daily-chart scenario now passes the no-scroll
+assertion both with and without the optional period estimate.
+The subsequent populated smoke encountered an unrelated early tray-focus
+timeout before reaching layout checks; it is not recorded as a passing run.
+
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
 Windows tray selection no longer waits for the system double-click interval.

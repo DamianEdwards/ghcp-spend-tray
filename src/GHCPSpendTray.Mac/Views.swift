@@ -140,15 +140,17 @@ struct FlyoutView: View {
                 StatusMessage(model: model)
                 AccountSetupPrompt(model: model, alignment: .leading).padding(.vertical, 8)
             } else {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(money(model.dashboard?.consumptionUsd)).font(.largeTitle).monospacedDigit()
-                    Text("month to date").foregroundStyle(.secondary)
+                if (model.dashboard?.accounts.count ?? 0) > 1 {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(money(model.dashboard?.consumptionUsd)).font(.largeTitle).monospacedDigit()
+                        Text("month to date").foregroundStyle(.secondary)
+                    }
                 }
                 if let dashboard = model.dashboard, !dashboard.isComplete {
                     Text(dashboard.isLastKnown ? "Last-known / partial consumption" : "Partial / unavailable consumption")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                if let tray = model.dashboard?.tray {
+                if (model.dashboard?.accounts.count ?? 0) > 1, let tray = model.dashboard?.tray {
                     Text(tray.rollUp.details).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 if !model.demo && model.settings?.notifications == true,

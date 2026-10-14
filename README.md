@@ -27,6 +27,8 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 ## Features
 
 - A tray flyout with per-account consumption and limit meters.
+  With one account, its card is the summary; the aggregate total appears only
+  with multiple accounts, leaving room for the daily chart.
 - Configurable pie-chart or percentage tray icons: one weighted roll-up by
   default, or one icon per selected account.
 - Multiple accounts, including different identities on the same GitHub host.

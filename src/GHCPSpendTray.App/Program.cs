@@ -354,6 +354,7 @@ internal static class Program
                 shell.ShowSettings(SettingsPage.Notifications);
             });
             await WaitForSettingsUI(shell, "reopened Notifications settings");
+            if (empty) await SmokeSingleAccountPopupAsync(shell);
             await OnUI(shell, () =>
             {
                 AssertBackAccelerators(shell.SettingsWindow!);
@@ -389,6 +390,37 @@ internal static class Program
         internal DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
     }
+    private static async Task SmokeSingleAccountPopupAsync(ReactorShell shell)
+    {
+        var demo = (DemoController)shell.Session.Controller;
+        await demo.AddExampleAccountAsync();
+        await WaitForUI(shell, "single synthetic account", () => shell.Session.Dashboard.Accounts.Count == 1);
+        string key = shell.Session.Dashboard.Accounts[0].Key;
+        foreach (bool estimate in new[] { false, true })
+        {
+            await demo.SaveAccountAsync(key, "", "", showPeriodEstimate: estimate);
+            await OnUI(shell, shell.ShowFlyout);
+            await WaitForFlyoutUI(shell, "single account with daily chart and optional estimate");
+            await OnUI(shell, () =>
+            {
+                if (Find(shell.Flyout!, key + "_CompactDailyConsumption") is null)
+                    throw new InvalidOperationException("Single-account popup is missing its daily chart.");
+                if (Find(shell.Flyout!, "TotalConsumption") is not null)
+                    throw new InvalidOperationException("Single-account popup repeats the account total.");
+                var scroll = Find(shell.Flyout!, "FlyoutBodyScroll");
+                double overflow = scroll switch
+                {
+                    ScrollView modern => modern.ScrollableHeight,
+                    ScrollViewer classic => classic.ScrollableHeight,
+                    _ => throw new InvalidOperationException("Popup body scroll control is missing.")
+                };
+                if (overflow > 1)
+                    throw new InvalidOperationException($"Single-account popup requires {overflow:F1} DIPs of vertical scrolling (estimate={estimate}).");
+            });
+        }
+        await OnUI(shell, () => shell.Flyout!.Hide());
+    }
+
     private static async Task SmokePeriodEstimateAsync(ReactorShell shell, SmokeTimeProvider time, Action<string> phase)
     {
         if (shell.Session.Dashboard.Accounts.Count == 0) return;
