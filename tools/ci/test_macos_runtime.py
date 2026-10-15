@@ -1,5 +1,6 @@
 from pathlib import Path
 import plistlib
+import re
 import unittest
 
 
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class MacOSRuntimeTests(unittest.TestCase):
     def test_release_toolchain_artifact_runs_on_older_os_without_rebuilding(self):
         workflow = (ROOT / ".github/workflows/verify.yml").read_text()
-        runtime = workflow.split("\n  macos_runtime:\n")[1].split("\n  verify:\n")[0]
+        runtime = re.split(r"\n  \w+:\n", workflow.split("\n  macos_runtime:\n")[1], maxsplit=1)[0]
         self.assertIn("runs-on: macos-15\n", runtime)
         self.assertNotIn("intel", runtime)
         self.assertIn('"$(uname -m)" != arm64', runtime)
@@ -24,7 +25,7 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("tools/macos/test-package.sh artifacts/macos-runtime/GHCPSpendTray.app", runtime)
         self.assertNotIn("build.sh", runtime)
         self.assertNotIn("setup-dotnet", runtime)
-        self.assertIn("needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]", workflow)
+        self.assertIn("needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime, linux]", workflow)
         self.assertIn("@('macos_tests', 'macos', 'macos_runtime')", (ROOT / "tools/assert-verification.ps1").read_text())
 
     def test_build_release_and_analysis_share_current_stable_toolchain(self):

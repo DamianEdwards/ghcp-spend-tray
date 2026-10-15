@@ -19,6 +19,16 @@ Native AOT. Windows uses WinUI 3 and
 macOS uses native SwiftUI and AppKit.
 It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
+An experimental [native Linux prototype](docs/LINUX-PROTOTYPE.md) pairs native
+GNOME, KDE Plasma, and Hyprland/Waybar surfaces with a headless shared .NET helper.
+One AppImage opens graphical per-user setup for the selected desktop integration;
+it installs a stable copy, supports updates/removal, and starts the helper automatically.
+It uses the shared backend for real accounts and stores tokens in Secret Service.
+The native frontends still require live-desktop acceptance.
+Trusted main-branch builds produce a separate `linux-signed` artifact once the
+[protected Linux signing configuration](docs/RELEASING.md#linux-main-branch-signing)
+is provisioned. Local and PR development AppImages remain unsigned.
+
 <p>
   <img src="docs/images/windows-flyout.png" alt="GHCPSpendTray Windows tray flyout showing synthetic demo accounts and usage" width="310" align="top">
   <img src="docs/images/macos-popup.png" alt="GHCPSpendTray macOS menu-bar popup showing synthetic demo accounts and usage" width="412" align="top">
