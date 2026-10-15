@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
       - name: Restore original versions on a rerun
         if: github.run_attempt > 1
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-plan-${{ github.run_id }}
           path: artifacts/release-plan
@@ -67,7 +67,7 @@ jobs:
         run: python3 tools/release/plan.py
       - name: Preserve release plan before building or signing
         if: github.run_attempt == 1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan-${{ github.run_id }}
           path: artifacts/release-plan/plan.json
@@ -312,7 +312,7 @@ jobs:
         run: bash tools/macos/verify.sh
       - name: Retain native macOS test diagnostics
         if: ${{ always() && steps.native_verify.outcome != 'skipped' && steps.native_verify.outcome != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-test-diagnostics
           path: artifacts/macos-test-diagnostics/
@@ -336,7 +336,7 @@ jobs:
         run: bash tools/macos/sign-package.sh "$RELEASE_VERSION"
       - name: Retain notarization submission IDs and status
         if: ${{ always() && steps.sign.outcome != 'skipped' && steps.sign.outcome != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-notarization-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/macos-notarization/
