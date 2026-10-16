@@ -48,8 +48,10 @@ internal static class Program
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
             var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
-            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo) :
-                new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
+            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo,
+                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: false)) :
+                new ApplicationController(runtime.DataDirectory, runtime.IsPortable,
+                    telemetry: new(UI.UI.Version, PackageContext.InstallationSource));
             int smokeExit = 0;
             ReactorShell? shell = null;
             ReactorApp.ShutdownPolicy = ShutdownPolicy.Explicit;

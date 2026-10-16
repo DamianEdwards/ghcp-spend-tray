@@ -450,6 +450,11 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         )),
         Button("Open data folder", () => Session.OpenLink(Session.Controller.DataDirectory, owner))
             .HAlign(HorizontalAlignment.Left),
+        UI.Section("Share basic app telemetry",
+            "Share telemetry including app usage data and error reports to help the developer improve this application.",
+            ToggleSwitch(Session.TrackedTelemetryEnabled, value => { Session.TrackedTelemetryEnabled = value; Session.Notify(); })
+                .AutomationName("Share basic app telemetry").AutomationId("TrackedTelemetryEnabled").IsEnabled(!Session.Busy)),
+        HyperlinkButton("Privacy policy", new Uri("https://github.com/DamianEdwards/ghcp-spend-tray/blob/main/PRIVACY.md")),
         UI.Copy("Windows manages installation and removal. Install a newer signed package to update; GitHub builds do not check for updates.")
     );
     private Element TrayPreview()

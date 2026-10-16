@@ -12,6 +12,9 @@ public sealed record Command
     public bool Demo { get; init; }
     public bool Empty { get; init; }
     public bool Unlimited { get; init; }
+    public string? AppVersion { get; init; }
+    public string? ReleaseChannel { get; init; }
+    public string? OsVersion { get; init; }
     public string? Key { get; init; }
     public string? Host { get; init; }
     public string? ClientId { get; init; }

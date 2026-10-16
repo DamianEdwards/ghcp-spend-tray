@@ -9,9 +9,9 @@ namespace GHCPSpendTray.App;
 internal sealed class ApplicationController : Shared.ApplicationController
 {
     internal ApplicationController(string directory, bool portable, HttpClient? http = null,
-        ICredentialStore? credentials = null)
+        ICredentialStore? credentials = null, TelemetryConfiguration? telemetry = null)
         : base(directory, portable, credentials ?? new VaultCredentials(portable ? directory : null),
-            http, async () => await StartupRegistration.CreateAsync(), Diagnostics.Record) { }
+            http, async () => await StartupRegistration.CreateAsync(), Diagnostics.Record, telemetry) { }
 
     protected override AppOperationException SafeError(Exception ex)
     {

@@ -66,6 +66,7 @@ internal sealed class AppSession : IDisposable
     internal string Thresholds { get; set; } = "50, 80, 100";
     internal string Increment { get; set; } = "";
     internal bool Notifications { get; set; } = true;
+    internal bool TrackedTelemetryEnabled { get; set; } = true;
     internal bool Startup { get; set; }
     internal TrayIconStyle TrayStyle { get; set; }
     internal TrayDisplayMode TrayMode { get; set; }
@@ -90,13 +91,13 @@ internal sealed class AppSession : IDisposable
     private bool HasGlobalChanges => _savedGlobal is not null && CurrentGlobalDraft() != _savedGlobal;
 
     private GlobalDraft CurrentGlobalDraft() => new(PollMinutes, Thresholds, Increment, Notifications, Startup,
-        TrayStyle, TrayMode, string.Join("\n", ExcludedTrayAccounts.Order(StringComparer.Ordinal)));
+        TrayStyle, TrayMode, string.Join("\n", ExcludedTrayAccounts.Order(StringComparer.Ordinal)), TrackedTelemetryEnabled);
     private AccountDraft CurrentAccountDraft() => new(SelectedAccount, DisplayName, AccountThresholds,
         InheritIncrement, InheritIncrement ? "" : AccountIncrement, ShowPeriodEstimate,
         UseCustomBudget, UseCustomBudget ? CustomBudget : "");
 
     private sealed record GlobalDraft(string PollMinutes, string Thresholds, string Increment, bool Notifications,
-        bool Startup, TrayIconStyle TrayStyle, TrayDisplayMode TrayMode, string ExcludedAccounts);
+        bool Startup, TrayIconStyle TrayStyle, TrayDisplayMode TrayMode, string ExcludedAccounts, bool TrackedTelemetryEnabled);
     private sealed record AccountDraft(string? Key, string DisplayName, string Thresholds, bool InheritIncrement,
         string Increment, bool ShowPeriodEstimate, bool UseCustomBudget, string Budget);
 
@@ -242,6 +243,7 @@ internal sealed class AppSession : IDisposable
         Thresholds = settings.Thresholds;
         Increment = settings.SpendIncrementUsd?.ToString(CultureInfo.InvariantCulture) ?? "";
         Notifications = settings.Notifications; Startup = settings.Startup;
+        TrackedTelemetryEnabled = settings.TrackedTelemetryEnabled;
         TrayStyle = settings.TrayStyle; TrayMode = settings.TrayMode;
         ExcludedTrayAccounts.Clear();
         ExcludedTrayAccounts.UnionWith(settings.ExcludedTrayAccounts ?? []);
@@ -249,6 +251,8 @@ internal sealed class AppSession : IDisposable
     }
     internal void Navigate(SettingsPage page)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.navigate");
+        activity?.SetTag("ui.page", page.ToString());
         if (page != Page && !CanLeaveForm(() => Navigate(page))) return;
         _fieldErrors.Clear();
         if (SigningIn) CancelSignIn();
@@ -346,6 +350,7 @@ internal sealed class AppSession : IDisposable
         Busy = true; Saving = saving; Error = null; Notice = null; Notify();
         _ = Task.Run(async () =>
         {
+            using var activity = AppInstrumentation.Activities.StartActivity("ui.operation");
             try
             {
                 await operation().ConfigureAwait(false);
@@ -365,7 +370,8 @@ internal sealed class AppSession : IDisposable
         int minutes = int.Parse(PollMinutes, CultureInfo.InvariantCulture);
         decimal? increment = ParseAmount(Increment);
         var next = new SettingsView(minutes, Thresholds, Notifications, Startup, increment,
-            TrayStyle: TrayStyle, TrayMode: TrayMode, ExcludedTrayAccounts: ExcludedTrayAccounts.ToArray());
+            TrayStyle: TrayStyle, TrayMode: TrayMode, ExcludedTrayAccounts: ExcludedTrayAccounts.ToArray(),
+            TrackedTelemetryEnabled: TrackedTelemetryEnabled);
         Run(() => Controller.SaveSettingsAsync(next),
             () => { ReloadSettings(); Notice = "Settings saved."; continuation?.Invoke(); }, saving: true);
     }

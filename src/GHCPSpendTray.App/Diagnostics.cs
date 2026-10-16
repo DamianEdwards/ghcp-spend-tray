@@ -15,6 +15,7 @@ internal static class Diagnostics
     // Callers provide only fixed diagnostic categories, never server responses or exception messages.
     internal static void Record(string category)
     {
+        System.Diagnostics.Trace.TraceWarning(category);
         lock (Gate)
         {
             try

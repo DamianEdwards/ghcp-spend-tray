@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net.NetworkInformation;
+using System.Collections.Concurrent;
 using GHCPSpendTray.Core;
+using Microsoft.Extensions.Logging;
 
 namespace GHCPSpendTray.Shared;
 
@@ -17,6 +19,8 @@ public class ApplicationController : IApplicationController, INotificationSink
     private IStartupRegistration? _startup;
     private readonly Func<Task<IStartupRegistration>>? _createStartup;
     private readonly Action<string> _recordDiagnostic;
+    private readonly AppTelemetry? _telemetry;
+    private readonly ConcurrentDictionary<string, bool?> _enterprise = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _mutations = new(1, 1);
     private readonly SemaphoreSlim _render = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
@@ -34,7 +38,7 @@ public class ApplicationController : IApplicationController, INotificationSink
 
     public ApplicationController(string directory, bool portable, ICredentialStore credentials,
         HttpClient? http = null, Func<Task<IStartupRegistration>>? createStartup = null,
-        Action<string>? recordDiagnostic = null)
+        Action<string>? recordDiagnostic = null, TelemetryConfiguration? telemetry = null)
     {
         DataDirectory = directory; Portable = portable;
         _store = new JsonStore(directory);
@@ -42,7 +46,9 @@ public class ApplicationController : IApplicationController, INotificationSink
         _http = http ?? HttpTransport.CreateClient();
         _credentials = credentials;
         _createStartup = createStartup;
-        _recordDiagnostic = recordDiagnostic ?? (message => System.Diagnostics.Trace.TraceError(message));
+        var diagnostic = recordDiagnostic ?? (message => System.Diagnostics.Trace.TraceError(message));
+        if (telemetry is not null) _telemetry = new(telemetry, diagnostic);
+        _recordDiagnostic = diagnostic;
         _auth = new DeviceFlowClient(_http);
         _tokens = new TokenManager(_credentials, _auth);
         _usage = new CopilotUsageProvider(_http, _tokens);
@@ -55,7 +61,8 @@ public class ApplicationController : IApplicationController, INotificationSink
         FormatThresholds(_settings.AlertThresholds), _settings.NotificationsEnabled, _startup?.Enabled ?? false,
         _settings.SpendIncrementUsd, _startup?.CanChange ?? false,
         Portable ? "Unavailable in isolated portable mode." : _startup?.Description ?? "Loading login startup settings...",
-        _settings.TrayStyle, _settings.TrayMode, _settings.Accounts.Where(a => a.ExcludeFromTray).Select(a => a.Key).ToArray());
+        _settings.TrayStyle, _settings.TrayMode, _settings.Accounts.Where(a => a.ExcludeFromTray).Select(a => a.Key).ToArray(),
+        _settings.TrackedTelemetryEnabled);
 
     public Task InitializeAsync()
     {
@@ -68,6 +75,16 @@ public class ApplicationController : IApplicationController, INotificationSink
             if (!Portable && _createStartup is not null) _startup = await _createStartup();
             var result = await _store.LoadSettingsAsync(_stop.Token).ConfigureAwait(false);
             _settings = result.Value;
+            if (_telemetry is not null)
+            {
+                if (_settings.TelemetryId is null || _settings.TelemetryId == Guid.Empty)
+                {
+                    _settings = _settings with { TelemetryId = Guid.NewGuid() };
+                    await _store.SaveSettingsAsync(_settings, _stop.Token).ConfigureAwait(false);
+                }
+                _telemetry.Configure(!Portable && _settings.TrackedTelemetryEnabled, _settings.TelemetryId.Value);
+                _telemetry.Started(_settings.Accounts.Length, EnterpriseAffiliation());
+            }
             if (result.Diagnostics.Length > 0) _storageDiagnostic = string.Join(" ", result.Diagnostics);
             if (_settings.Accounts.Any(a => a.AvatarUrl is not null))
             {
@@ -84,6 +101,7 @@ public class ApplicationController : IApplicationController, INotificationSink
             _monitor = new MonitorService(_usage, _store, _alerts, _settings);
             _monitor.StateChanged += StateChanged;
             _monitor.DiagnosticReported += StoreDiagnostic;
+            _monitor.RefreshCompleted += RefreshCompleted;
             await PublishAsync().ConfigureAwait(false);
             await _monitor.StartAsync(_stop.Token).ConfigureAwait(false);
             _clock = Task.Run(async () =>
@@ -105,11 +123,13 @@ public class ApplicationController : IApplicationController, INotificationSink
 
     public async Task RefreshAsync(string? accountKey = null)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.refresh");
         await InitializeAsync().ConfigureAwait(false);
         await _monitor!.RefreshAsync(accountKey, _stop.Token).ConfigureAwait(false);
     }
     public async Task RefreshAccountAsync(string accountKey)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.account.refresh");
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
         try
@@ -152,6 +172,7 @@ public class ApplicationController : IApplicationController, INotificationSink
     }
     public async Task SaveSettingsAsync(SettingsView settings)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.settings.save");
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
         try
@@ -161,6 +182,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                 PollIntervalMinutes = settings.PollMinutes,
                 AlertThresholds = ParseThresholds(settings.Thresholds),
                 NotificationsEnabled = settings.Notifications,
+                TrackedTelemetryEnabled = settings.TrackedTelemetryEnabled,
                 SpendIncrementUsd = settings.SpendIncrementUsd,
                 TrayStyle = settings.TrayStyle,
                 TrayMode = settings.TrayMode,
@@ -180,6 +202,8 @@ public class ApplicationController : IApplicationController, INotificationSink
                 throw;
             }
             _settings = next;
+            if (_telemetry is not null && next.TelemetryId is { } id)
+                _telemetry.Configure(!Portable && next.TrackedTelemetryEnabled, id);
             _monitor!.UpdateSettings(next);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { throw SafeError(ex); }
@@ -196,6 +220,7 @@ public class ApplicationController : IApplicationController, INotificationSink
     public async Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
         bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.account.save");
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
         try
@@ -225,6 +250,7 @@ public class ApplicationController : IApplicationController, INotificationSink
     }
     public async Task RemoveAsync(string key)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.account.remove");
         await InitializeAsync().ConfigureAwait(false);
         await _mutations.WaitAsync(_stop.Token).ConfigureAwait(false);
         try
@@ -281,6 +307,7 @@ public class ApplicationController : IApplicationController, INotificationSink
         Action<DevicePrompt> prompt, Action authorized, CancellationToken cancellationToken,
         string? clientId = null)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui.account.signin");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
         var token = linked.Token;
         string stage = "initialization";
@@ -427,6 +454,30 @@ public class ApplicationController : IApplicationController, INotificationSink
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
     private void StateChanged(AccountState state) => _ = PublishAsync();
+    private void RefreshCompleted(AccountState state)
+    {
+        if (state.Status == AccountStatus.Fresh)
+            _enterprise[state.Account.Key] = state.Snapshot?.MicrosoftEnterprise;
+        string affiliation = EnterpriseAffiliation();
+        _telemetry?.Refreshed(_settings.Accounts.Length, affiliation, state.Status);
+        _telemetry?.Logger.LogInformation("Account refresh completed with {Status}", state.Status);
+        if (state.Status != AccountStatus.Fresh)
+            _telemetry?.Error(_settings.Accounts.Length, affiliation, state.Status.ToString());
+    }
+
+    private string EnterpriseAffiliation()
+    {
+        bool unknown = false;
+        foreach (var account in _settings.Accounts)
+        {
+            string host = HostResolver.Resolve(account.Host).Host;
+            if (host == "msft.ghe.com") return "yes";
+            if (host != "github.com") continue;
+            if (!_enterprise.TryGetValue(account.Key, out bool? value) || value is null) unknown = true;
+            else if (value.Value) return "yes";
+        }
+        return unknown ? "unknown" : "no";
+    }
     private void StoreDiagnostic(string message)
     {
         _storageDiagnostic = message;
@@ -524,17 +575,27 @@ public class ApplicationController : IApplicationController, INotificationSink
     }
     private static string FormatThresholds(decimal[] values) => string.Join(", ", values.Select(v => v.ToString("0.##", CultureInfo.InvariantCulture)));
     private static string Money(decimal value) => "$" + value.ToString("N2", CultureInfo.GetCultureInfo("en-US"));
-    protected virtual AppOperationException SafeError(Exception ex) => ex switch
+    protected virtual AppOperationException SafeError(Exception ex)
     {
-        AppOperationException known => known,
-        PlatformOperationException platform => new(platform.Message),
-        ServiceException service => new(service.Message),
-        HttpRequestException or InvalidDataException => new("Avatar could not be downloaded. Check this account's access and try Refresh again."),
-        ArgumentException => new("Invalid settings or host. Check the displayed values and supported ranges."),
-        IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception =>
-            new("Local storage or the credential store could not complete the operation. Check permissions and free space; existing configuration was preserved where possible."),
-        _ => new("The request failed or timed out. Check connectivity and the host's OAuth app approval.")
-    };
+        _telemetry?.Error(_settings.Accounts.Length, EnterpriseAffiliation(), ex switch
+        {
+            ServiceException service => service.Status.ToString(),
+            IOException or UnauthorizedAccessException => "StorageError",
+            ArgumentException => "InvalidInput",
+            _ => "ApplicationOperation"
+        });
+        return ex switch
+        {
+            AppOperationException known => known,
+            PlatformOperationException platform => new(platform.Message),
+            ServiceException service => new(service.Message),
+            HttpRequestException or InvalidDataException => new("Avatar could not be downloaded. Check this account's access and try Refresh again."),
+            ArgumentException => new("Invalid settings or host. Check the displayed values and supported ranges."),
+            IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception =>
+                new("Local storage or the credential store could not complete the operation. Check permissions and free space; existing configuration was preserved where possible."),
+            _ => new("The request failed or timed out. Check connectivity and the host's OAuth app approval.")
+        };
+    }
     public void Dispose()
     {
         if (_disposed) return;
@@ -545,8 +606,10 @@ public class ApplicationController : IApplicationController, INotificationSink
         {
             _monitor.StateChanged -= StateChanged;
             _monitor.DiagnosticReported -= StoreDiagnostic;
+            _monitor.RefreshCompleted -= RefreshCompleted;
             _monitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
         _http.Dispose();
+        _telemetry?.Dispose();
     }
 }

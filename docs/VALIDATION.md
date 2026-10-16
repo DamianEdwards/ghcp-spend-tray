@@ -1,5 +1,43 @@
 # GHCPSpendTray validation and release gates
 
+## Isolated telemetry pipelines (October 15, 2026)
+
+Windows verification covers the tracked Azure Monitor pipeline independently
+from the explicitly configured diagnostic OTLP pipeline. Synthetic tests check
+persisted UUIDs and opt-out, startup/refresh/error event names and allowlisted
+fields, queue discard on disable, enterprise classification without persisting
+enterprise metadata, and Windows preference-save behavior. The actual Azure
+exporter envelope maps the UUID to `ai.user.id`; diagnostic parent/child spans,
+structured logs, existing Trace diagnostics, and shared trace IDs are captured
+through the actual OTLP HTTP/protobuf exporter.
+Real loopback HTTP success and failure requests additionally verify native
+.NET 10 HTTP spans, URL redaction, exception-detail redaction before immutable
+events are created, and suppression of outbound trace headers. Diagnostic
+resource attributes do not enrich tracked Azure envelopes.
+
+`.\tools\verify.ps1 -NativeTests` passed: the Release build and release-tooling
+checks, 182 Core tests, 14 platform tests, 1,089 Windows application assertions,
+and 222 shared/controller/bridge assertions, with all four harnesses also
+published and executed as Windows x64 Native AOT. The CI and release Python
+suites passed 34 and 30 tests respectively. A self-contained Windows x64
+Native AOT publish passed both populated and empty real-app smoke runs without
+changing startup registration or accessing live accounts.
+
+An opt-in Native AOT live check sent only synthetic startup and refresh events.
+It also verified that the build-time connection string survives assembly
+metadata in a native executable. Querying
+Application Insights confirmed the generated UUID in `user_Id`, configured
+account count, OS/process architectures, and the synthetic-source marker.
+No real account identities, credentials, or consumption data were used.
+Release and Store builds read the ingestion configuration from the repository's
+`GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` Actions variable, not source code.
+
+The native macOS preference, dirty-draft, and bridge initialization changes have
+not been compiled or executed on this Windows machine. Run
+`bash tools/macos/verify.sh` on Apple silicon on this same branch before claiming
+native Mac verification. These changes do not establish real-user delivery
+rates, daily-active-user totals, or production retention/deletion behavior.
+
 ## Native macOS budgets and protected settings drafts (October 9, 2026)
 
 The Mac frontend now edits per-account custom USD tracking budgets and explicitly

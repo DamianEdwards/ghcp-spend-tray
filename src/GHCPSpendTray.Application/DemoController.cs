@@ -1,11 +1,14 @@
 using System.Globalization;
 using GHCPSpendTray.Core;
+using Microsoft.Extensions.Logging;
 
 namespace GHCPSpendTray.Shared;
 
 public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null,
-    bool unlimited = false) : IApplicationController
+    bool unlimited = false, TelemetryConfiguration? telemetry = null) : IApplicationController
 {
+    private readonly AppTelemetry? _telemetry = telemetry is null ? null :
+        new(telemetry with { TrackedAllowed = false }, message => System.Diagnostics.Trace.TraceWarning(message));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly List<AccountView> _examples = [];
     private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
@@ -18,6 +21,8 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public Task InitializeAsync() => RefreshAsync();
     public Task RefreshAsync(string? accountKey = null)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("demo.refresh");
+        _telemetry?.Logger.LogInformation("Refreshing synthetic demo data");
         var now = _time.GetUtcNow();
         if (empty && _examples.Count == 0)
         {
@@ -146,5 +151,5 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     }
     public Task ResumeAsync() => RefreshAsync();
     public void SetNotificationHandler(Func<NotificationView, Task<bool>> handler) { }
-    public void Dispose() { }
+    public void Dispose() => _telemetry?.Dispose();
 }

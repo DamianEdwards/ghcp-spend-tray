@@ -14,7 +14,7 @@ enum SettingsFormTests {
         model.initialized = true
         model.settings = try JSONDecoder().decode(SettingsData.self, from: Data("""
         {"pollMinutes":10,"thresholds":"50, 80, 100","notifications":true,"startup":false,
-         "canChangeStartup":false,"startupDescription":"Synthetic","trayStyle":0,"trayMode":0}
+         "canChangeStartup":false,"startupDescription":"Synthetic","trayStyle":0,"trayMode":0,"trackedTelemetryEnabled":true}
         """.utf8))
         model.dashboard = try JSONDecoder().decode(Dashboard.self, from: Data("""
         {"total":"Synthetic","status":"Synthetic","tooltip":"Synthetic","isComplete":true,"isLastKnown":false,
@@ -148,11 +148,13 @@ enum SettingsFormTests {
         model.globalDraft.minutes = "10"
         try check(!model.hasUnsavedChanges && model.fieldErrors.isEmpty, "Returning text inputs to their baseline is clean.")
         model.globalDraft.startup = true
+        model.globalDraft.trackedTelemetryEnabled = false
         model.globalDraft.trayStyle = .percentage
         model.globalDraft.excludedAccounts.insert(account.key)
         try bridge.enqueue("state", id: nil, values: ["settings": try jsonObject(model.settings!)])
         model.poll()
-        try check(model.globalDraft.startup && model.globalDraft.trayStyle == .percentage && model.hasUnsavedChanges,
+        try check(model.globalDraft.startup && !model.globalDraft.trackedTelemetryEnabled &&
+                  model.globalDraft.trayStyle == .percentage && model.hasUnsavedChanges,
                   "Activation/background settings refresh cannot overwrite dirty toggles and selections.")
         var cancelled = 0
         try check(!model.requestLeaving({ closes += 1 }, cancelled: { cancelled += 1 }), "Closing/Quit protects global drafts.")

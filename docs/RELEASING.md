@@ -8,6 +8,71 @@ Only selected platforms build, request environment approval, and publish.
 Shared changes should normally receive a release on both platforms, but their
 numbers need not match.
 
+## Telemetry build configuration
+
+Configure `GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` as a repository or
+environment Actions **variable**, available to both `production` and
+`microsoft-store`. The Windows, macOS, and Store packaging steps pass it to
+MSBuild, which embeds it in the shared application assembly's
+`ApplicationInsightsConnectionString` metadata. It is readable ingestion
+configuration, not an Azure management credential. Do not put the value in
+source, shell profiles, or committed configuration. An omitted/empty value
+disables tracked export; ordinary verification does not need it.
+
+For local builds set the environment variable in the same shell as the build.
+Do not pass a semicolon-separated connection string directly as a `-p:` argument.
+macOS Preview/Stable builds use the native bundle version and `github-release`
+installation source; Development builds never send tracked events. Windows
+reports Microsoft Store, sideload, or unpackaged installation context.
+Demo/smoke/isolated portable modes do not export tracked events.
+
+The independent diagnostic pipeline uses standard `OTEL_EXPORTER_OTLP_*`
+environment settings. For an Aspire dashboard's HTTP/protobuf receiver:
+
+```powershell
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:18890'
+$env:OTEL_EXPORTER_OTLP_PROTOCOL = 'http/protobuf'
+# If the receiver requires an API key, supply OTEL_EXPORTER_OTLP_HEADERS locally.
+```
+
+The app must inherit these variables at launch. macOS apps started by Finder do
+not automatically inherit terminal environment variables; launch the bundle
+executable from the configured terminal for diagnostic sessions.
+Signal-specific endpoint/header/protocol/timeout settings are supported by the
+OTel exporter; only signals with a configured endpoint (or the common endpoint)
+are activated. `OTEL_SDK_DISABLED=true` disables developer diagnostics.
+Diagnostic sampling, batch options and resource attributes use the OTel SDK's
+supported environment settings. These do not configure the tracked pipeline.
+HTTP spans use .NET 10's native `System.Net.Http` ActivitySource. The transport
+uses a no-output context propagator so collecting spans does not send trace
+headers to GitHub; a null propagator would disable the HTTP spans themselves.
+
+Tracked custom events are `app.started`, `data.refresh` (per account refresh
+completion, including failures), and `app.error` (fixed categories only).
+`account.count` is the number configured, not the number successfully refreshed.
+`enduser.pseudo.id` maps to Application Insights `user_Id`; it is intentionally
+not an authenticated account ID. DAU is distinct app data profiles, not distinct
+people, and excludes opt-outs and lost deliveries. No daily event or sampling
+is applied. A sleeping app or server-directed refresh deferral can delay events;
+the app does not wake a machine or bypass GitHub rate limits for analytics.
+
+Example KQL:
+
+```kusto
+customEvents
+| where timestamp > ago(30d)
+| where name in ("app.started", "data.refresh") and isempty(operation_SyntheticSource)
+| where toint(customDimensions["account.count"]) > 0
+| summarize ActiveProfiles=dcount(user_Id) by bin(timestamp, 1d)
+```
+
+The shared test harness validates the actual Azure exporter payload without
+network access. To opt into a synthetic live ingestion check, set
+`GHCP_TELEMETRY_SMOKE_CONNECTION_STRING` for that harness invocation only.
+It tags events with `operation_SyntheticSource=GHCPSpendTray.TelemetryVerification`;
+exclude synthetic events from usage reports. Never exercise real accounts or
+credentials in telemetry tests.
+
 ## Choose platforms and version bumps
 
 The **Release** workflow has these inputs:

@@ -108,6 +108,7 @@ public sealed class BridgeRuntime : IDisposable
 
     private async Task ExecuteAsync(Command command)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("ui." + command.Method);
         string? error = null;
         bool cancelled = false;
         try
@@ -119,7 +120,10 @@ public sealed class BridgeRuntime : IDisposable
                     _directory = Path.GetFullPath(Required(command.Directory));
                     _controller = command.Demo ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited) :
                         new ApplicationController(_directory, false, _platform,
-                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic);
+                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic,
+                            telemetry: command.AppVersion is { } version
+                                ? new(version, command.ReleaseChannel is "Stable" or "Preview" ? "github-release" : "development",
+                                    command.ReleaseChannel is "Stable" or "Preview", command.OsVersion) : null);
                     _controller.Changed += OnDashboard;
                     _controller.SetNotificationHandler(_platform.NotifyAsync);
                     await _controller.InitializeAsync();
@@ -201,6 +205,7 @@ public sealed class BridgeRuntime : IDisposable
 
     private void RecordDiagnostic(string category)
     {
+        System.Diagnostics.Trace.TraceWarning(category);
         lock (_stateGate)
         {
             try
