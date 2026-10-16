@@ -147,6 +147,21 @@ enum SettingsFormTests {
                   model.settings?.pollMinutes == 10, "General validation does not mutate persisted preferences.")
         model.globalDraft.minutes = "10"
         try check(!model.hasUnsavedChanges && model.fieldErrors.isEmpty, "Returning text inputs to their baseline is clean.")
+        model.globalDraft.trackedTelemetryEnabled = false
+        try check(model.hasUnsavedChanges, "Telemetry opt-out alone marks General preferences dirty.")
+        model.saveChanges()
+        let telemetrySave = bridge.lastRequest
+        try check(telemetrySave["method"] as? String == "settings.save" &&
+                  (telemetrySave["settings"] as? [String: Any])?["trackedTelemetryEnabled"] as? Bool == false,
+                  "General Save sends the telemetry opt-out across the native bridge.")
+        try bridge.enqueue("completed", id: telemetrySave["id"], values: ["error": "Synthetic telemetry save failure."])
+        model.poll()
+        try check(model.hasUnsavedChanges && !model.globalDraft.trackedTelemetryEnabled &&
+                  model.settings?.trackedTelemetryEnabled == true,
+                  "Failed telemetry saves preserve the draft without changing persisted consent.")
+        model.cancelChanges()
+        try check(model.globalDraft.trackedTelemetryEnabled && !model.hasUnsavedChanges,
+                  "Cancel restores saved telemetry consent.")
         model.globalDraft.startup = true
         model.globalDraft.trackedTelemetryEnabled = false
         model.globalDraft.trayStyle = .percentage

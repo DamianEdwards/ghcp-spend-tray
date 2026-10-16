@@ -42,6 +42,26 @@ executable from the configured terminal for diagnostic sessions.
 Signal-specific endpoint/header/protocol/timeout settings are supported by the
 OTel exporter; only signals with a configured endpoint (or the common endpoint)
 are activated. `OTEL_SDK_DISABLED=true` disables developer diagnostics.
+On macOS, isolated demo and smoke runs also initialize this diagnostic pipeline,
+but never enable tracked Azure export, even when running a Preview/Stable bundle.
+For a synthetic end-to-end check against a local Aspire dashboard:
+
+```bash
+aspire dashboard run --frontend-url http://127.0.0.1:18888 \
+    --otlp-grpc-url http://127.0.0.1:18889 --otlp-http-url http://127.0.0.1:18890 \
+    --allow-anonymous
+# In another terminal, after bash tools/macos/build.sh:
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:18890 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app
+aspire otel spans GHCPSpendTray --dashboard-url http://127.0.0.1:18888
+aspire otel logs GHCPSpendTray --dashboard-url http://127.0.0.1:18888
+```
+
+Anonymous dashboard access is for this loopback-only local check, not a shared
+or production endpoint. The smoke runner uses temporary synthetic profiles and
+exits both app instances; stop the dashboard after verification.
+
 Diagnostic sampling, batch options and resource attributes use the OTel SDK's
 supported environment settings. These do not configure the tracked pipeline.
 HTTP spans use .NET 10's native `System.Net.Http` ActivitySource. The transport

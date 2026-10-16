@@ -108,7 +108,8 @@ public sealed class BridgeRuntime : IDisposable
 
     private async Task ExecuteAsync(Command command)
     {
-        using var activity = AppInstrumentation.Activities.StartActivity("ui." + command.Method);
+        using var activity = command.Method == "initialize" ? null :
+            AppInstrumentation.Activities.StartActivity("ui." + command.Method);
         string? error = null;
         bool cancelled = false;
         try
@@ -118,15 +119,20 @@ public sealed class BridgeRuntime : IDisposable
                 case "initialize":
                     if (_controller is not null) throw new AppOperationException("The application is already initialized.");
                     _directory = Path.GetFullPath(Required(command.Directory));
-                    _controller = command.Demo ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited) :
+                    TelemetryConfiguration? telemetry = command.AppVersion is { } version
+                        ? new(version, command.Demo ? "demo" :
+                                command.ReleaseChannel is "Stable" or "Preview" ? "github-release" : "development",
+                            !command.Demo && command.ReleaseChannel is "Stable" or "Preview", command.OsVersion)
+                        : null;
+                    _controller = command.Demo
+                        ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited, telemetry: telemetry) :
                         new ApplicationController(_directory, false, _platform,
                             createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic,
-                            telemetry: command.AppVersion is { } version
-                                ? new(version, command.ReleaseChannel is "Stable" or "Preview" ? "github-release" : "development",
-                                    command.ReleaseChannel is "Stable" or "Preview", command.OsVersion) : null);
+                            telemetry: telemetry);
                     _controller.Changed += OnDashboard;
                     _controller.SetNotificationHandler(_platform.NotifyAsync);
-                    await _controller.InitializeAsync();
+                    using (AppInstrumentation.Activities.StartActivity("ui.initialize"))
+                        await _controller.InitializeAsync();
                     break;
                 case "refresh":
                     await Controller.RefreshAsync(command.Key);

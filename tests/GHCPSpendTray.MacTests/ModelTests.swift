@@ -17,6 +17,13 @@ enum ModelTests {
                   unlimitedBridge.lastRequest["empty"] as? Bool == false &&
                   unlimitedBridge.lastRequest["unlimited"] as? Bool == true,
                   "Unlimited sample mode reaches the shared initializer without real account access.")
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        try check(unlimitedBridge.lastRequest["appVersion"] as? String ==
+                    (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development") &&
+                  unlimitedBridge.lastRequest["releaseChannel"] as? String ==
+                    (Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development") &&
+                  unlimitedBridge.lastRequest["osVersion"] as? String == "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+                  "Native bundle version, release channel and macOS product version reach telemetry initialization.")
         let bridge = FixtureBridge()
         let model = AppModel(directory: URL(fileURLWithPath: "/synthetic-unused"), demo: true, bridge: bridge)
         var copies: [String] = []

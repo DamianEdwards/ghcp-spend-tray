@@ -8,6 +8,7 @@ using Azure.Core.Pipeline;
 using System.Diagnostics.Tracing;
 using Azure.Monitor.OpenTelemetry.Exporter;
 using GHCPSpendTray.Core;
+using GHCPSpendTray.MacBridge;
 using GHCPSpendTray.Shared;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
@@ -144,6 +145,28 @@ internal static class TelemetryTests
         using (var demo = new DemoController(ordinaryDemo, telemetry: new("1.2.3", "demo")))
             await demo.InitializeAsync();
         check(!Directory.Exists(ordinaryDemo), "Ordinary demo does not create a verification profile or enable tracking.");
+
+        int listeners = Trace.Listeners.Count;
+        string bridgeDirectory = Path.Combine(root, "mac-demo-telemetry");
+        using (var bridge = new BridgeRuntime())
+        {
+            check(bridge.Send(new()
+            {
+                Id = "telemetry-init", Method = "initialize", Directory = bridgeDirectory, Demo = true,
+                AppVersion = "1.2.3", ReleaseChannel = "Stable", OsVersion = "26.7.1"
+            }).Error is null, "Mac demo accepts native telemetry configuration.");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            BridgeEvent? completed = null;
+            while (completed is null)
+            {
+                await Task.Delay(10, timeout.Token);
+                completed = bridge.Poll().SingleOrDefault(e => e.Id == "telemetry-init" && e.Kind == "completed");
+            }
+            check(completed.Error is null && Trace.Listeners.Count == listeners + 1,
+                "Mac demo initializes diagnostic telemetry even in a release bundle.");
+        }
+        check(Trace.Listeners.Count == listeners, "Mac bridge shutdown disposes demo diagnostic telemetry.");
+        check(!Directory.Exists(bridgeDirectory), "Mac demo diagnostics never create a tracked verification profile.");
 
         string? previousStatsbeat = Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_STATSBEAT_DISABLED");
         string? previousResources = Environment.GetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES");
