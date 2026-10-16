@@ -24,7 +24,8 @@ Do not pass a semicolon-separated connection string directly as a `-p:` argument
 macOS Preview/Stable builds use the native bundle version and `github-release`
 installation source; Development builds never send tracked events. Windows
 reports Microsoft Store, sideload, or unpackaged installation context.
-Demo/smoke/isolated portable modes do not export tracked events.
+Demo/smoke/isolated portable modes do not export tracked events by default.
+Windows offers an explicit synthetic verification exception described below.
 
 The independent diagnostic pipeline uses standard `OTEL_EXPORTER_OTLP_*`
 environment settings. For an Aspire dashboard's HTTP/protobuf receiver:
@@ -72,6 +73,42 @@ network access. To opt into a synthetic live ingestion check, set
 It tags events with `operation_SyntheticSource=GHCPSpendTray.TelemetryVerification`;
 exclude synthetic events from usage reports. Never exercise real accounts or
 credentials in telemetry tests.
+
+### Interactive Windows telemetry verification
+
+Build with `GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` set, then launch the
+published app with an isolated absolute data directory and both `--demo` and
+`--verify-telemetry`:
+
+```powershell
+$env:GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING = '<Application Insights connection string>'
+.\tools\publish.ps1 -Runtime win-x64
+Remove-Item Env:\GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING
+$data = Join-Path $PWD 'artifacts\interactive-telemetry'
+& .\artifacts\publish\win-x64\GHCPSpendTray.exe --portable --data-dir $data --demo --verify-telemetry
+```
+
+The switch also supports `--demo-empty` and `--demo-unlimited`, but rejects
+normal-account and smoke-test modes and builds without ingestion configuration.
+Every tracked event uses the synthetic source
+`GHCPSpendTray.TelemetryVerification`, so the DAU query above excludes it.
+Startup emits `app.started`; demo refreshes emit `data.refresh` for each
+synthetic account. No real accounts or consumption APIs are accessed.
+The UUID and saved telemetry preference live under the isolated directory's
+`telemetry-verification` subdirectory. Settings > General > Share basic app
+telemetry still applies when saved; disabling it drops queued events and stops
+new ones. Restarting with the same directory preserves both UUID and opt-out.
+An in-flight request may finish after disabling.
+
+In Application Insights Logs, choose a suitable time range and run:
+
+```kusto
+customEvents
+| where operation_SyntheticSource == "GHCPSpendTray.TelemetryVerification"
+| where customDimensions["installation.source"] == "demo"
+| project timestamp, name, user_Id, customDimensions
+| order by timestamp desc
+```
 
 ## Choose platforms and version bumps
 

@@ -14,7 +14,7 @@ using OpenTelemetry.Trace;
 namespace GHCPSpendTray.Shared;
 
 public sealed record TelemetryConfiguration(string AppVersion, string InstallationSource, bool TrackedAllowed = true,
-    string? OsVersion = null)
+    string? OsVersion = null, bool SyntheticVerification = false)
 {
     public static string? ConnectionString => typeof(TelemetryConfiguration).Assembly
         .GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -33,7 +33,6 @@ internal sealed class AppTelemetry : IDisposable
     private readonly Action<string> _diagnostic;
     private readonly TraceListener _traceListener;
     private readonly bool _canTrack;
-    private readonly BaseProcessor<LogRecord>? _trackedProcessor;
     private ILoggerFactory? _trackedLogs;
     private ConsentExporter? _consent;
     private BatchLogRecordExportProcessor? _batch;
@@ -43,13 +42,11 @@ internal sealed class AppTelemetry : IDisposable
 
     internal AppTelemetry(TelemetryConfiguration configuration, Action<string> diagnostic,
         Func<BaseExporter<LogRecord>>? createExporter = null,
-        Action<OtlpExporterOptions>? configureDiagnosticExporter = null,
-        BaseProcessor<LogRecord>? trackedProcessor = null)
+        Action<OtlpExporterOptions>? configureDiagnosticExporter = null)
     {
         _configuration = configuration;
         _diagnostic = diagnostic;
         _createExporter = createExporter ?? CreateAzureExporter;
-        _trackedProcessor = trackedProcessor;
         _canTrack = configuration.TrackedAllowed &&
             (createExporter is not null || !string.IsNullOrWhiteSpace(TelemetryConfiguration.ConnectionString));
         bool enabled = DiagnosticEndpointConfigured(Environment.GetEnvironmentVariable) &&
@@ -138,7 +135,6 @@ internal sealed class AppTelemetry : IDisposable
                 {
                     // Never import OTEL_RESOURCE_ATTRIBUTES, machine names, or diagnostic scopes.
                     options.SetResourceBuilder(ResourceBuilder.CreateEmpty());
-                    if (_trackedProcessor is not null) options.AddProcessor(_trackedProcessor);
                     options.AddProcessor(new UncorrelatedLogProcessor());
                     _batch = new BatchLogRecordExportProcessor(_consent,
                         maxQueueSize: 256, scheduledDelayMilliseconds: 1000, exporterTimeoutMilliseconds: 4000,
@@ -174,6 +170,8 @@ internal sealed class AppTelemetry : IDisposable
                 new("account.count", count),
                 new("microsoft.internal", affiliation)
             ];
+            if (_configuration.SyntheticVerification)
+                attributes.Add(new("microsoft.synthetic_source", "GHCPSpendTray.TelemetryVerification"));
             if (key is not null) attributes.Add(new(key, value));
             _trackedLogs.CreateLogger("GHCPSpendTray.Tracked").Log(
                 name == "app.error" ? LogLevel.Error : LogLevel.Information, default, attributes, null,

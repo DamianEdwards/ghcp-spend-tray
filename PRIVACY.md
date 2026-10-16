@@ -118,7 +118,9 @@ Disabling telemetry stops new tracked events and discards pending in-memory
 events. A request already in flight may finish. There is no tracked telemetry
 disk backlog. Delivery is best-effort; offline events may be lost. Demonstration,
 smoke-test, isolated Windows portable, and unconfigured development builds do
-not send tracked telemetry.
+not send tracked telemetry by default. The explicit Windows
+`--demo --verify-telemetry` developer mode sends only synthetic demo events,
+marks them as synthetic, and still honors the saved telemetry preference.
 
 ## Developer diagnostics (untracked)
 

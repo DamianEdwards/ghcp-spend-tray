@@ -1,5 +1,31 @@
 # GHCPSpendTray validation and release gates
 
+## Interactive synthetic telemetry verification (October 16, 2026)
+
+The Windows app now accepts `--verify-telemetry` only alongside isolated
+portable demo mode and a build-time ingestion configuration. Normal portable,
+demo, and smoke runs retain their tracked-export restrictions. Verification
+events always carry `GHCPSpendTray.TelemetryVerification` as their synthetic
+source. A separate local verification profile persists the UUID and saved
+telemetry preference without involving real accounts.
+
+The published Windows x64 Native AOT app was launched with that switch, not
+through the test harness. Application Insights queries returned its startup
+event and per-account refresh events with the same UUID, account count of two,
+`installation.source=demo`, and the synthetic-source marker. Clicking Refresh
+in the actual UI produced two additional refresh events. Saving an opt-out in
+General and refreshing produced no additional events; saving an opt-in resumed
+delivery with the same UUID. The verification instance remains independent
+of the installed app.
+
+`.\tools\verify.ps1 -NativeTests` passed all four managed and executed Native
+AOT harnesses, including 227 shared assertions. Focused tests cover saved
+verification consent/UUID across restarts, default-demo isolation, and synthetic
+source mapping through the actual Azure exporter. The empty-demo real-app
+smoke passed. The populated-demo smoke timed out twice at its account-form
+scroll-readiness assertion; that broader UI smoke is not claimed as passing
+in this run. Native macOS verification remains outstanding.
+
 ## Isolated telemetry pipelines (October 15, 2026)
 
 Windows verification covers the tracked Azure Monitor pipeline independently

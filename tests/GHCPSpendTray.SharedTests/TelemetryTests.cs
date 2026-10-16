@@ -115,6 +115,36 @@ internal static class TelemetryTests
             """, GHCPSpendTray.MacBridge.BridgeJsonContext.Default.Command)!;
         check(settingsWire.Settings?.TrackedTelemetryEnabled == false, "Native bridge carries the opt-out preference.");
 
+        string demoDirectory = Path.Combine(root, "interactive-telemetry");
+        var demoStore = new JsonStore(Path.Combine(demoDirectory, "telemetry-verification"));
+        await demoStore.SaveSettingsAsync(new() { TrackedTelemetryEnabled = false });
+        Guid? demoId;
+        using (var demo = new DemoController(demoDirectory,
+            telemetry: new("1.2.3", "demo", TrackedAllowed: false, SyntheticVerification: true)))
+        {
+            await demo.InitializeAsync();
+            check(!demo.Settings.TrackedTelemetryEnabled, "Interactive verification loads opt-out before startup.");
+            demoId = (await demoStore.LoadSettingsAsync()).Value.TelemetryId;
+            check(demoId is not null && demoId != Guid.Empty, "Interactive verification persists its synthetic UUID.");
+            await demo.SaveSettingsAsync(demo.Settings with { TrackedTelemetryEnabled = true });
+        }
+        using (var demo = new DemoController(demoDirectory,
+            telemetry: new("1.2.3", "demo", TrackedAllowed: false, SyntheticVerification: true)))
+        {
+            await demo.InitializeAsync();
+            check(demo.Settings.TrackedTelemetryEnabled &&
+                (await demoStore.LoadSettingsAsync()).Value.TelemetryId == demoId,
+                "Interactive verification keeps consent and UUID across restarts.");
+            await demo.SaveSettingsAsync(demo.Settings with { TrackedTelemetryEnabled = false });
+            await demo.RefreshAsync();
+            check(!(await demoStore.LoadSettingsAsync()).Value.TrackedTelemetryEnabled,
+                "Interactive opt-out remains saved after refresh.");
+        }
+        string ordinaryDemo = Path.Combine(root, "ordinary-demo-telemetry");
+        using (var demo = new DemoController(ordinaryDemo, telemetry: new("1.2.3", "demo")))
+            await demo.InitializeAsync();
+        check(!Directory.Exists(ordinaryDemo), "Ordinary demo does not create a verification profile or enable tracking.");
+
         string? previousStatsbeat = Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_STATSBEAT_DISABLED");
         string? previousResources = Environment.GetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES");
         Environment.SetEnvironmentVariable("APPLICATIONINSIGHTS_STATSBEAT_DISABLED", "true");
@@ -125,11 +155,11 @@ internal static class TelemetryTests
             using var client = new HttpClient(capture);
             const string connection = "InstrumentationKey=00000000-0000-0000-0000-000000000001;IngestionEndpoint=https://telemetry.example.test/";
             Guid id = Guid.NewGuid();
-            using (var telemetry = new AppTelemetry(new("1.2.3", "synthetic"), diagnostics.Enqueue,
+            using (var telemetry = new AppTelemetry(new("1.2.3", "synthetic", SyntheticVerification: true), diagnostics.Enqueue,
                 () => new AzureMonitorLogExporter(new()
                 {
                     ConnectionString = connection, Transport = new HttpClientTransport(client), DisableOfflineStorage = true
-                }), trackedProcessor: new SyntheticProcessor()))
+                })))
             {
                 telemetry.Configure(true, id);
                 telemetry.Started(2, "yes");
@@ -155,8 +185,8 @@ internal static class TelemetryTests
             {
                 check(TelemetryConfiguration.ConnectionString == live, "Build-time connection string survives assembly metadata.");
                 using var listener = new IngestionDiagnostics();
-                using var telemetry = new AppTelemetry(new("1.2.3-verification", "synthetic"), diagnostics.Enqueue,
-                    AppTelemetry.CreateAzureExporter, trackedProcessor: new SyntheticProcessor());
+                using var telemetry = new AppTelemetry(new("1.2.3-verification", "synthetic", SyntheticVerification: true), diagnostics.Enqueue,
+                    AppTelemetry.CreateAzureExporter);
                 telemetry.Configure(true, id);
                 telemetry.Started(2, "unknown");
                 telemetry.Refreshed(2, "unknown", AccountStatus.Fresh);
@@ -285,12 +315,6 @@ internal static class TelemetryTests
             }
             return ExportResult.Success;
         }
-    }
-
-    private sealed class SyntheticProcessor : BaseProcessor<LogRecord>
-    {
-        public override void OnEnd(LogRecord log) =>
-            log.Attributes = [.. log.Attributes!, new("microsoft.synthetic_source", "GHCPSpendTray.TelemetryVerification")];
     }
 
     private sealed class IngestionDiagnostics : EventListener
