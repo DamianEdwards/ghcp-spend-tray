@@ -500,6 +500,11 @@ struct PreferencesView: View {
                     Text(model.settings?.startupDescription ?? "").font(.caption).foregroundStyle(.secondary)
                     Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() }.disabled(model.demo)
                     Button("Open Data Folder") { model.openDataFolder() }
+                    Toggle("Share basic app telemetry", isOn: $model.globalDraft.trackedTelemetryEnabled)
+                        .accessibilityIdentifier("TrackedTelemetryEnabled")
+                    Text("Share telemetry including app usage data and error reports to help the developer improve this application.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Link("Privacy Policy", destination: URL(string: "https://github.com/DamianEdwards/ghcp-spend-tray/blob/main/PRIVACY.md")!)
                 }
                 Section("Menu Bar") {
                     Text("Show fresh usage against custom budgets or API allocations independently of dollar totals. New accounts are included by default.")

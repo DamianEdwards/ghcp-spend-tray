@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -15,6 +16,7 @@ public static class HttpTransport
     {
         AllowAutoRedirect = false,
         UseCookies = false,
+        ActivityHeadersPropagator = DistributedContextPropagator.CreateNoOutputPropagator(),
         PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         ConnectTimeout = TimeSpan.FromSeconds(20)
     }) { Timeout = TimeSpan.FromSeconds(60) };
@@ -304,6 +306,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
 
     public async Task<UsageSnapshot> FetchAsync(Account account, CancellationToken cancellationToken = default)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("consumption.fetch");
         TokenSet tokens = await tokenManager.GetAsync(account, cancellationToken: cancellationToken).ConfigureAwait(false);
         try { return await FetchWithTokenAsync(account, tokens, cancellationToken).ConfigureAwait(false); }
         catch (ServiceException ex) when (ex.Status == AccountStatus.SignInRequired)
@@ -356,6 +359,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         {
             var result = new UsageSnapshot
             {
+                MicrosoftEnterprise = MicrosoftEnterprise(wire.EnterpriseList),
                 AccountKey = accountKey, FetchedAtUtc = fetched.ToUniversalTime(),
                 SourceTimestampUtc = source, ResetAtUtc = reset,
                 PeriodId = BillingPeriods.Resolve(fetched, reset),
@@ -370,6 +374,24 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         }
         catch (Exception ex) when (ex is OverflowException or ArgumentException)
         { throw new ServiceException(AccountStatus.InvalidData, "Quota values are outside the supported range."); }
+    }
+
+    private static bool? MicrosoftEnterprise(JsonElement enterprises)
+    {
+        if (enterprises.ValueKind != JsonValueKind.Array) return null;
+        bool unknown = false;
+        foreach (JsonElement enterprise in enterprises.EnumerateArray())
+        {
+            if (enterprise.ValueKind != JsonValueKind.Object ||
+                !enterprise.TryGetProperty("id", out var id) ||
+                id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out long number) || number <= 0)
+            {
+                unknown = true;
+                continue;
+            }
+            if (number is 134482 or 1578 or 13213) return true;
+        }
+        return unknown ? null : false;
     }
 
     private static DateTimeOffset? Timestamp(JsonElement element, string name)

@@ -1,5 +1,102 @@
 # GHCPSpendTray validation and release gates
 
+## Native macOS telemetry verification (October 16, 2026)
+
+`bash tools/macos/verify.sh` passed on Apple silicon/macOS 26.7.1 with the pinned
+.NET 10.0.401 SDK, stable Swift 6.4 Command Line Tools, and the stable macOS 26
+SDK. The final run also configured a loopback Aspire dashboard as the OTLP
+HTTP/protobuf destination. It passed 182 Core tests and 231 shared/controller/
+bridge assertions in both managed and executed arm64 Native AOT, 34 CI tooling
+tests (two existing opt-in skips), 30 release tests, 59 macOS tooling tests,
+native Swift tests, synthetic Keychain CRUD, arm64-only packaging/signature
+checks, and both populated and empty real-app UI smoke runs.
+
+The Mac bridge previously omitted telemetry configuration when constructing the
+demo controller, so isolated native demo/smoke runs exported no diagnostics.
+It now initializes diagnostics for both controllers while keeping tracked export
+disabled in demos, including Preview/Stable bundles. Initialization spans also
+start after the controller creates the tracing provider, rather than being
+dropped before any provider exists.
+
+Aspire received the real SwiftUI/Native AOT app's `ui.initialize` spans with
+child `demo.refresh` spans, subsequent settings/account operation spans, and
+correlated `Refreshing synthetic demo data` logs. Runtime instruments appeared
+in its metrics view. Native regression coverage checks bundle/product version
+handoff, telemetry-only dirty tracking, failed-save retention, Cancel, and
+diagnostic listener cleanup. Real-app smoke saves an opt-out through protected
+Settings close and saves an opt-in before Quit.
+
+An initial OTLP-enabled smoke attempt lost app activation while checking popup
+growth and failed its visibility deadline; the subsequent complete verification
+passed both app scenarios with OTLP still enabled. No production accounts,
+credentials, or consumption data were used. The actual Azure exporter payload
+tests passed in managed and Native AOT harnesses, but this Mac verification did
+not send events to live Azure ingestion or exercise a signed/notarized release
+with real accounts, and it does not establish macOS 15 execution evidence.
+
+## Interactive synthetic telemetry verification (October 16, 2026)
+
+The Windows app now accepts `--verify-telemetry` only alongside isolated
+portable demo mode and a build-time ingestion configuration. Normal portable,
+demo, and smoke runs retain their tracked-export restrictions. Verification
+events always carry `GHCPSpendTray.TelemetryVerification` as their synthetic
+source. A separate local verification profile persists the UUID and saved
+telemetry preference without involving real accounts.
+
+The published Windows x64 Native AOT app was launched with that switch, not
+through the test harness. Application Insights queries returned its startup
+event and per-account refresh events with the same UUID, account count of two,
+`installation.source=demo`, and the synthetic-source marker. Clicking Refresh
+in the actual UI produced two additional refresh events. Saving an opt-out in
+General and refreshing produced no additional events; saving an opt-in resumed
+delivery with the same UUID. The verification instance remains independent
+of the installed app.
+
+`.\tools\verify.ps1 -NativeTests` passed all four managed and executed Native
+AOT harnesses, including 227 shared assertions. Focused tests cover saved
+verification consent/UUID across restarts, default-demo isolation, and synthetic
+source mapping through the actual Azure exporter. The empty-demo real-app
+smoke passed. The populated-demo smoke timed out twice at its account-form
+scroll-readiness assertion; that broader UI smoke is not claimed as passing
+in this Windows run. Native macOS verification is recorded above.
+
+## Isolated telemetry pipelines (October 15, 2026)
+
+Windows verification covers the tracked Azure Monitor pipeline independently
+from the explicitly configured diagnostic OTLP pipeline. Synthetic tests check
+persisted UUIDs and opt-out, startup/refresh/error event names and allowlisted
+fields, queue discard on disable, enterprise classification without persisting
+enterprise metadata, and Windows preference-save behavior. The actual Azure
+exporter envelope maps the UUID to `ai.user.id`; diagnostic parent/child spans,
+structured logs, existing Trace diagnostics, and shared trace IDs are captured
+through the actual OTLP HTTP/protobuf exporter.
+Real loopback HTTP success and failure requests additionally verify native
+.NET 10 HTTP spans, URL redaction, exception-detail redaction before immutable
+events are created, and suppression of outbound trace headers. Diagnostic
+resource attributes do not enrich tracked Azure envelopes.
+
+`.\tools\verify.ps1 -NativeTests` passed: the Release build and release-tooling
+checks, 182 Core tests, 14 platform tests, 1,089 Windows application assertions,
+and 222 shared/controller/bridge assertions, with all four harnesses also
+published and executed as Windows x64 Native AOT. The CI and release Python
+suites passed 34 and 30 tests respectively. A self-contained Windows x64
+Native AOT publish passed both populated and empty real-app smoke runs without
+changing startup registration or accessing live accounts.
+
+An opt-in Native AOT live check sent only synthetic startup and refresh events.
+It also verified that the build-time connection string survives assembly
+metadata in a native executable. Querying
+Application Insights confirmed the generated UUID in `user_Id`, configured
+account count, OS/process architectures, and the synthetic-source marker.
+No real account identities, credentials, or consumption data were used.
+Release and Store builds read the ingestion configuration from the repository's
+`GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` Actions variable, not source code.
+
+The initial Windows run did not compile or execute the native macOS preference,
+dirty-draft, and bridge initialization changes; the later Mac verification is
+recorded above. These changes do not establish real-user delivery rates,
+daily-active-user totals, or production retention/deletion behavior.
+
 ## Native macOS budgets and protected settings drafts (October 9, 2026)
 
 The Mac frontend now edits per-account custom USD tracking budgets and explicitly

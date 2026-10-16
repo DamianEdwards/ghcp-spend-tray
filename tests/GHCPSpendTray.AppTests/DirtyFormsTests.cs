@@ -82,6 +82,7 @@ internal static class DirtyFormsTests
             "A successful asynchronous save completes the original navigation once.");
 
         session.SetInput(SettingsField.PollMinutes, "20");
+        session.TrackedTelemetryEnabled = false;
         session.Startup = true;
         session.RefreshStartup();
         Check(session.Startup && session.HasUnsavedChanges, "Window activation cannot overwrite a dirty startup draft.");
@@ -94,8 +95,9 @@ internal static class DirtyFormsTests
         await Until(() => !session.Busy);
         Check(session.Page == SettingsPage.Notifications && !session.HasUnsavedChanges &&
             controller.Settings.PollMinutes == 20 && controller.Settings.TrayStyle == TrayIconStyle.Percentage &&
+            !controller.Settings.TrackedTelemetryEnabled &&
             controller.Settings.ExcludedTrayAccounts!.Contains(personal),
-            "Global Save includes refresh, tray mode, style and account selections before navigating.");
+            "Global Save includes refresh, telemetry opt-out, tray mode, style and account selections before navigating.");
         session.Notifications = false;
         Check(session.HasUnsavedChanges, "Notification toggles participate in dirty tracking.");
         int closes = 0;

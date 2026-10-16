@@ -19,7 +19,7 @@ public sealed record SettingsView(int PollMinutes, string Thresholds, bool Notif
     decimal? SpendIncrementUsd = null, bool CanChangeStartup = false,
     string StartupDescription = "Unavailable in isolated portable mode.",
     TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
-    string[]? ExcludedTrayAccounts = null);
+    string[]? ExcludedTrayAccounts = null, bool TrackedTelemetryEnabled = true);
 public sealed record NotificationView(string? AccountKey, string Title, string Message,
     decimal? PercentConsumed = null, decimal? SpendMilestoneUsd = null);
 public sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)

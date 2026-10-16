@@ -82,6 +82,8 @@ jobs:
 
       - name: Build with the Partner Center identity
         shell: pwsh
+        env:
+          GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ vars.GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING }}
         working-directory: release-source
         run: |
           if (-not (Get-Command .\tools\package.ps1).Parameters.ContainsKey('Store')) {

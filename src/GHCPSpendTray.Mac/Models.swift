@@ -26,6 +26,7 @@ struct SettingsData: Codable {
     var trayStyle: TrayIconStyle = .pie
     var trayMode: TrayDisplayMode = .rollUp
     var excludedTrayAccounts: [String]?
+    var trackedTelemetryEnabled: Bool = true
 }
 
 struct Dashboard: Decodable {
@@ -196,6 +197,7 @@ struct GlobalDraft: Equatable {
     var increment = ""
     var notifications = true
     var startup = false
+    var trackedTelemetryEnabled = true
     var trayStyle: TrayIconStyle = .pie
     var trayMode: TrayDisplayMode = .rollUp
     var excludedAccounts = Set<String>()
@@ -207,6 +209,7 @@ struct GlobalDraft: Equatable {
         increment = decimalText(settings.spendIncrementUsd)
         notifications = settings.notifications
         startup = settings.startup
+        trackedTelemetryEnabled = settings.trackedTelemetryEnabled
         trayStyle = settings.trayStyle
         trayMode = settings.trayMode
         excludedAccounts = Set(settings.excludedTrayAccounts ?? [])

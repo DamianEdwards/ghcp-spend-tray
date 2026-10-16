@@ -27,10 +27,15 @@ internal static class Program
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
         bool unlimitedDemo = args.Contains("--demo-unlimited", StringComparer.Ordinal);
         bool demo = smoke || emptyDemo || unlimitedDemo || args.Contains("--demo", StringComparer.Ordinal);
+        bool verifyTelemetry = args.Contains("--verify-telemetry", StringComparer.Ordinal);
         string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and
-            not "--demo" and not "--demo-empty" and not "--demo-unlimited").ToArray();
+            not "--demo" and not "--demo-empty" and not "--demo-unlimited" and not "--verify-telemetry").ToArray();
         try
         {
+            if (verifyTelemetry && (!demo || smoke || !bootstrapArgs.Contains("--portable", StringComparer.Ordinal)))
+                throw new ArgumentException("--verify-telemetry requires --portable --data-dir <isolated-directory> and --demo (or a demo variant), and cannot be used with smoke tests.");
+            if (verifyTelemetry && string.IsNullOrWhiteSpace(TelemetryConfiguration.ConnectionString))
+                throw new ArgumentException("Telemetry verification requires a build with GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING configured.");
             if (packageSmoke && (!PackageContext.IsPackaged ||
                 Windows.ApplicationModel.Package.Current.Id.Name != "GHCPSpendTray.Development" ||
                 bootstrapArgs.Contains("--portable", StringComparer.Ordinal)))
@@ -48,8 +53,10 @@ internal static class Program
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
             var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
-            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo) :
-                new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
+            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo,
+                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: verifyTelemetry, SyntheticVerification: verifyTelemetry)) :
+                new ApplicationController(runtime.DataDirectory, runtime.IsPortable,
+                    telemetry: new(UI.UI.Version, PackageContext.InstallationSource));
             int smokeExit = 0;
             ReactorShell? shell = null;
             ReactorApp.ShutdownPolicy = ShutdownPolicy.Explicit;
