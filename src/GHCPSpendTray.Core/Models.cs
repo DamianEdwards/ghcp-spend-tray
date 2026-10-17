@@ -97,6 +97,8 @@ public sealed record AppSettings
     [JsonRequired] public int Version { get; set; } = 1;
     public int PollIntervalMinutes { get; set; } = 10;
     public bool NotificationsEnabled { get; set; } = true;
+    public bool TrackedTelemetryEnabled { get; set; } = true;
+    public Guid? TelemetryId { get; set; }
     public decimal[] AlertThresholds { get; set; } = [50m, 80m, 100m];
     public decimal? SpendIncrementUsd { get; set; }
     public Account[] Accounts { get; set; } = [];
@@ -168,6 +170,8 @@ public interface ICredentialStore
 
 public sealed record UsageSnapshot
 {
+    // Optional response metadata, not part of the persisted consumption history.
+    [JsonIgnore] public bool? MicrosoftEnterprise { get; init; }
     [JsonRequired] public string AccountKey { get; init; } = "";
     [JsonRequired] public DateTimeOffset FetchedAtUtc { get; init; }
     public DateTimeOffset? SourceTimestampUtc { get; init; }

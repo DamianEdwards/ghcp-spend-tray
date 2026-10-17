@@ -314,7 +314,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationWillTerminate(_ notification: Notification) {
         if smoke, let model {
             do {
-                guard model.settings?.pollMinutes == 20, !model.hasUnsavedChanges,
+                guard model.settings?.pollMinutes == 20, model.settings?.trackedTelemetryEnabled == true,
+                      !model.hasUnsavedChanges,
                       !model.saving, !model.pendingNavigation, model.formMessage == nil else {
                     throw AppError.message("Native Quit did not finish saving the protected preferences draft.")
                 }
@@ -598,11 +599,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             guard let window = settingsWindow else { throw AppError.message("Settings window missing.") }
             model.globalDraft.minutes = "18"
+            model.globalDraft.trackedTelemetryEnabled = false
             progress("saving before native Settings close")
             window.performClose(nil)
             try await chooseUnsavedButton(0)
             try await waitUntil { !window.isVisible && !model.busy }
-            guard model.settings?.pollMinutes == 18, !model.hasUnsavedChanges else {
+            guard model.settings?.pollMinutes == 18, model.settings?.trackedTelemetryEnabled == false,
+                  !model.hasUnsavedChanges else {
                 throw AppError.message("Native close Save must finish saving before closing Settings.")
             }
             openSettings()
@@ -647,6 +650,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             model.selectPage(.general)
             try await waitUntil { model.formLoaded && !model.busy }
             model.globalDraft.minutes = "20"
+            model.globalDraft.trackedTelemetryEnabled = true
             guard model.hasUnsavedChanges else { throw AppError.message("Native Quit must start with an unsaved draft.") }
             progress("saving before native Quit")
             NSApplication.shared.terminate(nil)

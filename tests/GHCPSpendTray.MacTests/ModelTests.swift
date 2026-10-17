@@ -17,6 +17,13 @@ enum ModelTests {
                   unlimitedBridge.lastRequest["empty"] as? Bool == false &&
                   unlimitedBridge.lastRequest["unlimited"] as? Bool == true,
                   "Unlimited sample mode reaches the shared initializer without real account access.")
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        try check(unlimitedBridge.lastRequest["appVersion"] as? String ==
+                    (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development") &&
+                  unlimitedBridge.lastRequest["releaseChannel"] as? String ==
+                    (Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development") &&
+                  unlimitedBridge.lastRequest["osVersion"] as? String == "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+                  "Native bundle version, release channel and macOS product version reach telemetry initialization.")
         let bridge = FixtureBridge()
         let model = AppModel(directory: URL(fileURLWithPath: "/synthetic-unused"), demo: true, bridge: bridge)
         var copies: [String] = []
@@ -138,11 +145,13 @@ enum ModelTests {
 
         let settings = try JSONDecoder().decode(SettingsData.self, from: Data("""
         {"pollMinutes":60,"thresholds":"50, 80, 100","notifications":true,"startup":false,"canChangeStartup":false,
-         "startupDescription":"Synthetic","trayStyle":1,"trayMode":1,"excludedTrayAccounts":["github.com:1"]}
+         "startupDescription":"Synthetic","trayStyle":1,"trayMode":1,"excludedTrayAccounts":["github.com:1"],
+         "trackedTelemetryEnabled":false}
         """.utf8))
         let roundTrip = try JSONDecoder().decode(SettingsData.self, from: JSONEncoder().encode(settings))
         try check(roundTrip.trayStyle == .percentage && roundTrip.trayMode == .perAccount &&
-                  roundTrip.excludedTrayAccounts == ["github.com:1"], "Tray options retain the generated C# enum contract.")
+                  roundTrip.excludedTrayAccounts == ["github.com:1"] && !roundTrip.trackedTelemetryEnabled,
+                  "Tray options and telemetry opt-out retain the generated C# contract.")
         let unlimited = try JSONDecoder().decode(TrayIndicator.self, from: Data("""
         {"name":"Synthetic","includedAccounts":1,"selectedAccounts":1,"details":"Unlimited allocation",
          "tooltip":"Unlimited allocation | 1/1 included","isPartial":false,"isOverAllocation":false,

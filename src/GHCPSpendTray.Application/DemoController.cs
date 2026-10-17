@@ -1,11 +1,19 @@
 using System.Globalization;
 using GHCPSpendTray.Core;
+using Microsoft.Extensions.Logging;
 
 namespace GHCPSpendTray.Shared;
 
 public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null,
-    bool unlimited = false) : IApplicationController
+    bool unlimited = false, TelemetryConfiguration? telemetry = null) : IApplicationController
 {
+    private readonly AppTelemetry? _telemetry = telemetry is null ? null :
+        new(telemetry with { TrackedAllowed = telemetry.TrackedAllowed && telemetry.SyntheticVerification },
+            message => System.Diagnostics.Trace.TraceWarning(message));
+    private readonly JsonStore? _verificationStore = telemetry?.SyntheticVerification == true
+        ? new(Path.Combine(directory, "telemetry-verification")) : null;
+    private Task? _verificationInitialization;
+    private AppSettings _verificationSettings = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly List<AccountView> _examples = [];
     private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
@@ -16,14 +24,34 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public event Action<DashboardView>? Changed;
     public SettingsView Settings { get; private set; } = new(10, "50, 80, 100", true, false);
     public Task InitializeAsync() => RefreshAsync();
-    public Task RefreshAsync(string? accountKey = null)
+    private Task InitializeVerificationAsync() => _verificationInitialization ??= LoadVerificationAsync();
+    private async Task LoadVerificationAsync()
     {
+        if (_verificationStore is null) return;
+        var loaded = await _verificationStore.LoadSettingsAsync();
+        if (loaded.Diagnostics.Length > 0)
+            throw new AppOperationException(string.Join(" ", loaded.Diagnostics));
+        _verificationSettings = loaded.Value;
+        if (_verificationSettings.TelemetryId is null || _verificationSettings.TelemetryId == Guid.Empty)
+        {
+            _verificationSettings = _verificationSettings with { TelemetryId = Guid.NewGuid() };
+            await _verificationStore.SaveSettingsAsync(_verificationSettings);
+        }
+        Settings = Settings with { TrackedTelemetryEnabled = _verificationSettings.TrackedTelemetryEnabled };
+        _telemetry?.Configure(Settings.TrackedTelemetryEnabled, _verificationSettings.TelemetryId.Value);
+        _telemetry?.Started(empty ? 0 : unlimited ? 1 : 2, "unknown");
+    }
+    public async Task RefreshAsync(string? accountKey = null)
+    {
+        await InitializeVerificationAsync();
+        using var activity = AppInstrumentation.Activities.StartActivity("demo.refresh");
+        _telemetry?.Logger.LogInformation("Refreshing synthetic demo data");
         var now = _time.GetUtcNow();
         if (empty && _examples.Count == 0)
         {
             Changed?.Invoke(new("No accounts", "Synthetic demonstration only.", "GHCPSpendTray DEMO | No accounts", [],
                 Tray: TrayUsage.Create(new() { TrayStyle = Settings.TrayStyle, TrayMode = Settings.TrayMode }, [], now)));
-            return Task.CompletedTask;
+            return;
         }
         List<AccountView> views = [];
         if (!empty && unlimited)
@@ -49,7 +77,9 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         decimal total = views.Sum(account => account.ConsumptionUsd!.Value);
         string amount = total.ToString("0.00", CultureInfo.InvariantCulture);
         var dashboard = new DashboardView($"DEMO - MTD consumption: ${amount} | {views.Count}/{views.Count} accounts",
-            "Synthetic demonstration only. No network, real account data, installation, or startup changes.",
+            _verificationStore is null
+                ? "Synthetic demonstration only. No network, real account data, installation, or startup changes."
+                : "Synthetic telemetry verification. Demo events are sent to Azure; no real account data is accessed.",
             $"GHCPSpendTray DEMO | MTD ${amount} | {views.Count} accounts", views, total, true);
         var accounts = dashboard.Accounts.Select((a, i) => new Account
         {
@@ -86,7 +116,8 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             }, states, now),
             TrayStates = states
         });
-        return Task.CompletedTask;
+        foreach (var state in states.Where(s => accountKey is null || s.Account.Key == accountKey))
+            _telemetry?.Refreshed(states.Length, "unknown", AccountStatus.Fresh);
     }
     public Task AddExampleAccountAsync()
     {
@@ -98,10 +129,18 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         return RefreshAsync();
     }
     public Task RefreshAccountAsync(string accountKey) => RefreshAsync(accountKey);
-    public Task SaveSettingsAsync(SettingsView settings)
+    public async Task SaveSettingsAsync(SettingsView settings)
     {
+        await InitializeVerificationAsync();
+        if (_verificationStore is not null)
+        {
+            var next = _verificationSettings with { TrackedTelemetryEnabled = settings.TrackedTelemetryEnabled };
+            await _verificationStore.SaveSettingsAsync(next);
+            _verificationSettings = next;
+            _telemetry?.Configure(next.TrackedTelemetryEnabled, next.TelemetryId!.Value);
+        }
         Settings = settings with { Startup = false };
-        return RefreshAsync();
+        await RefreshAsync();
     }
     public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
         bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false)
@@ -146,5 +185,5 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     }
     public Task ResumeAsync() => RefreshAsync();
     public void SetNotificationHandler(Func<NotificationView, Task<bool>> handler) { }
-    public void Dispose() { }
+    public void Dispose() => _telemetry?.Dispose();
 }

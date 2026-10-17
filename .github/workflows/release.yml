@@ -145,6 +145,8 @@ jobs:
         run: .\tools\verify.ps1 -NativeTests
       - name: Build native bundle
         shell: pwsh
+        env:
+          GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ vars.GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING }}
         run: |
           .\tools\package.ps1 -Version $env:RELEASE_VERSION `
             -IdentityName $env:MSIX_IDENTITY_NAME -Publisher $env:MSIX_PUBLISHER `
@@ -319,6 +321,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Build release version
+        env:
+          GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ vars.GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING }}
         run: |
           channel=Stable
           if [ "$PRERELEASE" = true ]; then channel=Preview; fi
