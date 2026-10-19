@@ -323,9 +323,22 @@ normal active control colors. On Usage and account details,
 click anywhere across the **Advanced Details** heading to expand or collapse
 the diagnostics, not just the disclosure arrow.
 
-The estimate extrapolates the account's average consumption so far across a
-UTC calendar month, not its recent usage trend. It assumes the same pace
-continues and is not an invoice. A supplied reset must match the next first
+When suitable daily reports are available for the same account and enterprises,
+the estimate uses the latest seven consecutive complete reported UTC days.
+Early in the month it uses fewer complete days if the reporting period contains
+fewer than seven. Today's partial usage and derived/estimated chart bars are
+never used in that average. The forecast is **current period usage + recent
+daily average multiplied by the exact time remaining until reset**; it does not
+apply the recent pace retroactively to usage already incurred.
+
+The averaging window must end within three UTC dates of the current usage
+observation. Missing days in that window, stale reports, incompatible periods,
+incomplete enterprise scope, or daily totals exceeding the current usage cause a
+fallback to the existing period-to-date calculation. Accounts without daily
+reports always use that existing calculation, unchanged. The compact forecast
+identifies recent reported-day estimates; Advanced Details shows their actual
+date range and calculation method. Both approaches assume the selected pace
+continues and are not an invoice. A supplied reset must match the next first
 of the month at midnight UTC; a missing reset uses the calendar-month
 fallback. Estimates remain unavailable for the first 24 hours, are labeled
 early before 72 hours, and show a reason when data is stale, failed, expired,

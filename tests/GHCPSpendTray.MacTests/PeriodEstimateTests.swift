@@ -40,6 +40,16 @@ enum PeriodEstimateTests {
         ]).periodEstimate!
         try check(early.summary.contains("Early estimate") && early.summary.contains("Less than $1 over limit"),
                   "Early projections and fractional projected exceedances are truthful.")
+        let recent = try account(estimate: [
+            "estimatedConsumptionUsd": 125, "averageDailyConsumptionUsd": 5,
+            "reportedDayCount": 7, "averageStartDate": "2026-10-04", "averageEndDate": "2026-10-10",
+            "isEarly": false
+        ]).periodEstimate!
+        try check(recent.reportedDayCount == 7 && recent.summary.contains("Latest 7 reported days") &&
+                  recent.method.contains("time remaining") && recent.averageStartDate == "2026-10-04" &&
+                  recent.averageEndDate == "2026-10-10" && estimate.reportedDayCount == 0 &&
+                  estimate.method.contains("Period-to-date"),
+                  "Native forecasts distinguish rolling reported-day averages from the period-to-date fallback.")
 
         let off = try account()
         let unavailable = try account(estimate: [
@@ -78,7 +88,11 @@ enum PeriodEstimateTests {
             "details": ["unlimited": false, "isCurrentPeriod": true],
             "freshness": "Fresh", "consumptionUsd": 42.75, "allocationUsd": 100, "percent": 42.75
         ]
-        if let estimate { fields["periodEstimate"] = estimate }
+        if let estimate {
+            var value = estimate
+            if value["reportedDayCount"] == nil { value["reportedDayCount"] = 0 }
+            fields["periodEstimate"] = value
+        }
         return try JSONDecoder().decode(AccountData.self, from: JSONSerialization.data(withJSONObject: fields))
     }
 }

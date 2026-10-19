@@ -3,11 +3,13 @@ namespace GHCPSpendTray.Core;
 public sealed record PeriodEstimate(decimal? EstimatedConsumptionUsd = null,
     decimal? AverageDailyConsumptionUsd = null, decimal? OverAllocationUsd = null,
     DateTimeOffset? PeriodStartUtc = null, DateTimeOffset? ResetAtUtc = null,
-    DateTimeOffset? ObservedAtUtc = null, bool IsEarly = false, string? UnavailableReason = null);
+    DateTimeOffset? ObservedAtUtc = null, bool IsEarly = false, string? UnavailableReason = null,
+    string? AverageStartDate = null, string? AverageEndDate = null, int ReportedDayCount = 0);
 
 public static class PeriodEstimates
 {
-    public static PeriodEstimate? Create(AccountState state, DateTimeOffset now, TimeSpan freshness)
+    public static PeriodEstimate? Create(AccountState state, DateTimeOffset now, TimeSpan freshness,
+        DailyConsumption? dailyConsumption = null)
     {
         if (!state.Account.ShowPeriodEstimate) return null;
         if (state.Snapshot is not { } snapshot)
@@ -50,8 +52,19 @@ public static class PeriodEstimates
         {
             decimal elapsedDays = (decimal)elapsedTicks / TimeSpan.TicksPerDay;
             decimal periodDays = (decimal)(reset - start).Ticks / TimeSpan.TicksPerDay;
-            decimal projected = snapshot.ConsumptionUsd * periodDays / elapsedDays;
             decimal daily = snapshot.ConsumptionUsd / elapsedDays;
+            decimal projected;
+            if (RecentAverage(dailyConsumption, snapshot, start, observed, now, freshness) is { } recent)
+            {
+                daily = recent.Average;
+                decimal remainingDays = (decimal)(reset - observed).Ticks / TimeSpan.TicksPerDay;
+                projected = snapshot.ConsumptionUsd + daily * remainingDays;
+                estimate = estimate with
+                {
+                    AverageStartDate = recent.Start, AverageEndDate = recent.End, ReportedDayCount = recent.Count
+                };
+            }
+            else projected = snapshot.ConsumptionUsd * periodDays / elapsedDays;
             decimal? over = !snapshot.Unlimited && snapshot.AllocationUsd is > 0
                 ? Math.Max(0, projected - snapshot.AllocationUsd.Value) : null;
             return estimate with
@@ -64,5 +77,49 @@ public static class PeriodEstimates
         {
             return estimate with { UnavailableReason = "Estimate exceeds the supported amount range." };
         }
+    }
+
+    private static (decimal Average, string Start, string End, int Count)? RecentAverage(
+        DailyConsumption? data, UsageSnapshot snapshot, DateTimeOffset periodStart, DateTimeOffset observed,
+        DateTimeOffset now, TimeSpan freshness)
+    {
+        if (data is null || !DailyConsumptionChart.HasCompleteEnterpriseScope(snapshot) ||
+            data.AsOf > now.AddMinutes(5) || now - data.AsOf > freshness + TimeSpan.FromMinutes(15))
+            return null;
+        var start = DateOnly.FromDateTime(periodStart.UtcDateTime);
+        var today = DateOnly.FromDateTime(observed.UtcDateTime);
+        if (!DateOnly.TryParseExact(data.StartDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var responseStart) || responseStart != start ||
+            !DateOnly.TryParseExact(data.EndDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var responseEnd) || responseEnd > today || responseEnd <= start)
+            return null;
+        var days = new Dictionary<DateOnly, decimal?>();
+        foreach (var day in data.Days)
+        {
+            if (!DateOnly.TryParseExact(day.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var date) ||
+                date < start || date >= responseEnd || day.AmountUsd < 0 || !days.TryAdd(date, day.AmountUsd))
+                return null;
+        }
+        var reported = days.Where(d => d.Value is not null).ToArray();
+        if (reported.Length == 0) return null;
+        var last = reported.Max(d => d.Key);
+        // Daily reports may lag; do not move the averaging window arbitrarily far back.
+        if (today.DayNumber - last.DayNumber > 3) return null;
+        var first = last.AddDays(-Math.Min(6, last.DayNumber - start.DayNumber));
+        int count = last.DayNumber - first.DayNumber + 1;
+        decimal sum = 0;
+        try
+        {
+            if (reported.Sum(d => d.Value!.Value) > snapshot.ConsumptionUsd) return null;
+            for (var date = first; date <= last; date = date.AddDays(1))
+            {
+                if (!days.TryGetValue(date, out var amount) || amount is null) return null;
+                sum += amount.Value;
+            }
+        }
+        catch (OverflowException) { return null; }
+        return (sum / count, first.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            last.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), count);
     }
 }

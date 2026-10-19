@@ -651,6 +651,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                         avatar = null;
                     }
                     EnterpriseConsumptionView? enterprise = null;
+                    DailyConsumption? estimateReports = null;
                     if (_enterpriseClient.IsConfigured && snapshot is not null && DailyConsumptionChart.EnterpriseNames(snapshot).Length > 0)
                     {
                         enterprise = _enterpriseViews.GetValueOrDefault(state.Account.Key) ??
@@ -662,6 +663,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                             enterprise.PendingIdentity is null && now - saved.FetchedAt <= TimeSpan.FromMinutes(_settings.PollIntervalMinutes + 15) &&
                             saved.Scope == string.Join(",", DailyConsumptionChart.EnterpriseNames(snapshot)))
                         {
+                            estimateReports = saved.Data;
                             var chart = DailyConsumptionChart.Create(saved.Data, snapshot, now, visibleStatus == "Fresh");
                             enterprise = enterprise with { Bars = chart.Bars, ChartMessage = chart.Message,
                                 AxisTicks = chart.Bars.Length > 0 ? DailyChartPresentation.Ticks(chart.Bars) : null };
@@ -673,7 +675,7 @@ public class ApplicationController : IApplicationController, INotificationSink
                         current ? snapshot?.ConsumptionUsd : null, current ? snapshot?.AllocationUsd : null,
                         visibleStatus, snapshot?.FetchedAtUtc,
                         avatar ?? AccountAvatar.Resolve(state.Account),
-                        PeriodEstimates.Create(state, now, TimeSpan.FromMinutes(_settings.PollIntervalMinutes)), enterprise));
+                        PeriodEstimates.Create(state, now, TimeSpan.FromMinutes(_settings.PollIntervalMinutes), estimateReports), enterprise));
                 }
                 var qualification = total.IsComplete ? "" : total.IsLastKnown ? "Last-known / partial " : "Partial ";
                 var amount = total.IncludedAccounts == 0 ? "unavailable" : Money(total.ConsumptionUsd);

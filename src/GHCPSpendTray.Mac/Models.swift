@@ -96,10 +96,20 @@ struct PeriodEstimateData: Decodable {
     let observedAtUtc: String?
     let isEarly: Bool
     let unavailableReason: String?
+    let averageStartDate: String?
+    let averageEndDate: String?
+    let reportedDayCount: Int
+
+    var method: String {
+        reportedDayCount > 0
+            ? "Current usage plus the average of the latest \(reportedDayCount) complete reported UTC days multiplied by the time remaining until reset. Excludes today's partial usage and estimated bars. Reports may lag by up to 3 days; not an invoice."
+            : "Period-to-date usage divided by exact elapsed UTC time, scaled to the whole UTC calendar month. Uses the source observation time, or fetch time when absent; not an invoice."
+    }
 
     var summary: String {
         var parts: [String] = []
         if isEarly { parts.append("Early estimate") }
+        if reportedDayCount > 0 { parts.append("Latest \(reportedDayCount) reported days") }
         if let over = overAllocationUsd, over > 0 {
             parts.append(over < 1 ? "Less than $1 over limit" : "About \(wholeMoney(over)) over limit")
         }

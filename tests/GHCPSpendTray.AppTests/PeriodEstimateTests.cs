@@ -15,6 +15,12 @@ internal static class PeriodEstimateTests
         session.Initialize();
         await Until(() => session.Initialized && !session.Busy);
         var account = session.Dashboard.Accounts[0];
+        var recent = new PeriodEstimate(EstimatedConsumptionUsd: 100, AverageDailyConsumptionUsd: 2,
+            AverageStartDate: "2026-10-08", AverageEndDate: "2026-10-14", ReportedDayCount: 7);
+        Check(UI.EstimateContext(recent).Contains("Latest 7 reported days") &&
+            UI.EstimateMethodFor(recent).Contains("time remaining") &&
+            UI.EstimateMethodFor(new()) == UI.EstimateMethod,
+            "Recent and period-to-date forecasts identify their actual calculation method.");
         var noDaily = account with
         {
             EnterpriseConsumption = new(true, "Daily usage connected", Connected: true, Bars: [],

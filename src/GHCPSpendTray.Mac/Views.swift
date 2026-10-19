@@ -73,7 +73,7 @@ struct PeriodEstimateRow: View {
             }
         }
         .font(.caption).foregroundStyle(.secondary)
-        .help("Based on your average consumption so far this UTC calendar month. Assumes the same pace continues; not an invoice.")
+        .help(estimate.method)
         .accessibilityIdentifier("PeriodEstimate")
     }
 }
@@ -316,7 +316,10 @@ struct AccountDiagnosticsView: View {
                 row("Next refresh", dateText(account.details.nextRefreshUtc))
                 row("Period", account.details.periodId ?? "Unavailable")
                 if let estimate = account.periodEstimate {
-                    row("Estimate method", "Average pace so far this UTC calendar month. Assumes the same pace continues; not an invoice.")
+                    row("Estimate method", estimate.method)
+                    if let first = estimate.averageStartDate, let last = estimate.averageEndDate {
+                        row("Averaging window", "\(dailyDateText(first)) - \(dailyDateText(last)) (UTC)")
+                    }
                     row("Estimated at reset", estimatedMoney(estimate.estimatedConsumptionUsd))
                     row("Average per day (estimated)", estimatedMoney(estimate.averageDailyConsumptionUsd))
                     row("Estimate period starts", utcTimestampText(estimate.periodStartUtc))
@@ -461,7 +464,7 @@ struct AccountEditor: View {
                 Toggle("Show estimated period consumption", isOn: $showPeriodEstimate)
                     .disabled(!loaded || model.busy)
                     .accessibilityIdentifier("ShowPeriodEstimate")
-                Text("Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.")
+                Text("Estimate usage at reset using up to 7 recent reported days when available, otherwise the period-to-date pace. Actual usage may differ.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Save") {

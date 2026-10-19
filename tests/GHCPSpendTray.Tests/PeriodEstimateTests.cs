@@ -175,5 +175,89 @@ internal static partial class Program
             await alerts.EvaluateAsync(enabled, state.Snapshot!, Settings(enabled));
             Equal(80m, sink.Alerts.Single().HighestThreshold);
         });
+        var observed = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        var recentState = State(observed, credits: 100000m) with
+        {
+            Snapshot = State(observed, credits: 100000m).Snapshot! with { EnterpriseIds = [1578] }
+        };
+        DailyConsumption Reports(int lastDay = 18) => new("2026-10-01", "2026-10-19", observed,
+            Enumerable.Range(1, lastDay).Select(day =>
+                new DailyReportedSpend($"2026-10-{day:00}", day < 12 ? 20m : 10m)).ToArray());
+        PeriodEstimate Recent(DailyConsumption? reports, AccountState? state = null) =>
+            PeriodEstimates.Create(state ?? recentState, observed, freshness, reports)!;
+        await Test("recent forecast projects only remaining exact time from the latest seven reported days", () =>
+        {
+            var value = Recent(Reports());
+            Equal(10m, value.AverageDailyConsumptionUsd);
+            Equal(1125m, value.EstimatedConsumptionUsd);
+            Equal(7, value.ReportedDayCount);
+            Equal("2026-10-12", value.AverageStartDate);
+            Equal("2026-10-18", value.AverageEndDate);
+            Equal(observed, value.ObservedAtUtc);
+            True(value != Estimate(recentState));
+            Equal(Recent(Reports()), PeriodEstimates.Create(recentState, observed.AddMinutes(30), freshness, Reports()));
+        });
+        await Test("recent forecast respects the reporting lag boundary and a full consecutive window", () =>
+        {
+            Equal(7, Recent(Reports(16)).ReportedDayCount);
+            Equal(Estimate(recentState), Recent(Reports(15)));
+            var missing = Reports() with { Days = Reports().Days.Where(d => d.Date != "2026-10-15").ToArray() };
+            Equal(Estimate(recentState), Recent(missing));
+            var unavailable = Reports() with { Days = Reports().Days.Select(d => d.Date == "2026-10-15" ? d with { AmountUsd = null } : d).ToArray() };
+            Equal(Estimate(recentState), Recent(unavailable));
+            // Missing data outside the averaging window does not bias a rolling average.
+            Equal(7, Recent(Reports() with { Days = Reports().Days.Where(d => d.Date != "2026-10-01").ToArray() }).ReportedDayCount);
+        });
+        await Test("early recent forecast uses fewer days only when fewer exist in the reporting period", () =>
+        {
+            foreach (int completeDays in new[] { 1, 2, 6, 7, 8 })
+            {
+                var at = new DateTimeOffset(2024, 2, completeDays + 1, 0, 0, 0, TimeSpan.Zero);
+                var state = State(at, credits: 20000) with
+                {
+                    Snapshot = State(at, credits: 20000).Snapshot! with { EnterpriseIds = [13213] }
+                };
+                var reports = new DailyConsumption("2024-02-01", $"2024-02-{completeDays + 1:00}", at,
+                    Enumerable.Range(1, completeDays).Select(day => new DailyReportedSpend($"2024-02-{day:00}", 2)).ToArray());
+                var value = PeriodEstimates.Create(state, at, freshness, reports)!;
+                Equal(Math.Min(7, completeDays), value.ReportedDayCount);
+                Equal(200m + 2m * (29 - completeDays), value.EstimatedConsumptionUsd);
+                Equal(completeDays < 3, value.IsEarly);
+            }
+        });
+        await Test("recent zero days are valid but missing, invalid, stale, or mismatched reports preserve fallback", () =>
+        {
+            var baseline = Estimate(recentState);
+            Equal(baseline, Recent(null));
+            foreach (var invalid in new[]
+            {
+                Reports() with { Days = [] },
+                Reports() with { Days = Reports().Days.Select(d => d with { AmountUsd = (decimal?)null }).ToArray() },
+                Reports() with { AsOf = observed.AddDays(-1) },
+                Reports() with { AsOf = observed.AddMinutes(6) },
+                Reports() with { StartDate = "2026-09-01" },
+                Reports() with { EndDate = "2026-10-20" },
+                Reports() with { Days = [.. Reports().Days, Reports().Days[0]] },
+                Reports() with { Days = [.. Reports().Days, new("2026-10-19", 200)] },
+                Reports() with { Days = Reports().Days.Select(d => d with { AmountUsd = -1 }).ToArray() },
+                Reports() with { Days = Reports().Days.Select(d => d with { AmountUsd = 1000 }).ToArray() },
+                Reports() with { Days = [new("invalid", 1)] }
+            }) Equal(baseline, Recent(invalid));
+            var zero = Recent(Reports() with { Days = Reports().Days.Select(d => d with { AmountUsd = 0 }).ToArray() });
+            Equal(7, zero.ReportedDayCount);
+            Equal(1000m, zero.EstimatedConsumptionUsd);
+            Equal(0m, zero.AverageDailyConsumptionUsd);
+            var partialScope = recentState with { Snapshot = recentState.Snapshot! with { EnterpriseIds = [1578, 999] } };
+            Equal(Estimate(partialScope), Recent(Reports(), partialScope));
+        });
+        await Test("recent forecast preserves stale-account safety, opt-in, and generated serialization", () =>
+        {
+            var stale = recentState with { Status = AccountStatus.Stale };
+            Equal(Estimate(stale), Recent(Reports(), stale));
+            Equal(null, PeriodEstimates.Create(recentState with { Account = Account }, observed, freshness, Reports()));
+            var expected = Recent(Reports());
+            var json = JsonSerializer.Serialize(expected, CoreJsonContext.Default.PeriodEstimate);
+            Equal(expected, JsonSerializer.Deserialize(json, CoreJsonContext.Default.PeriodEstimate));
+        });
     }
 }

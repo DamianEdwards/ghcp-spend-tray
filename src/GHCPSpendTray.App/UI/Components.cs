@@ -87,7 +87,7 @@ internal static class UI
     internal static string Timestamp(DateTimeOffset? value, string missing = "Not available") =>
         value?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? missing;
     internal const string EstimateDescription =
-        "Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.";
+        "Estimate usage at reset using up to 7 recent reported days when available, otherwise the period-to-date pace. Actual usage may differ.";
     internal const string EstimateMethod =
         "Period-to-date consumption divided by exact elapsed UTC time, scaled to the whole UTC calendar month. " +
         "Uses the source observation time, or fetch time when not supplied, not when this account was connected. " +
@@ -100,11 +100,17 @@ internal static class UI
         value?.ToUniversalTime().ToString("MMM d, yyyy HH:mm:ss 'UTC'", CultureInfo.CurrentCulture) ?? "Not available";
     internal static string EstimateAmount(PeriodEstimate estimate) =>
         estimate.EstimatedConsumptionUsd is { } amount ? ApproximateMoney(amount) : "Unavailable";
+    internal static string EstimateMethodFor(PeriodEstimate estimate) => estimate.ReportedDayCount > 0
+        ? "Current period usage plus the average of the latest " + estimate.ReportedDayCount +
+            " complete reported UTC days multiplied by the exact time remaining until reset. " +
+            "Excludes today's partial usage and estimated bars. Reports may lag by up to 3 days. Not an invoice."
+        : EstimateMethod;
     internal static string EstimateContext(PeriodEstimate estimate)
     {
         if (estimate.UnavailableReason is { } reason) return reason;
         var parts = new List<string>();
         if (estimate.IsEarly) parts.Add("Early estimate");
+        if (estimate.ReportedDayCount > 0) parts.Add($"Latest {estimate.ReportedDayCount} reported days");
         if (estimate.OverAllocationUsd is > 0 and < 1)
             parts.Add("Less than $1 over limit");
         else if (estimate.OverAllocationUsd is { } over && over > 0)
@@ -130,11 +136,14 @@ internal static class UI
                         .Foreground(estimate.OverAllocationUsd is > 0
                             ? Theme.Ref("SystemFillColorCautionBrush") : Theme.SecondaryText)
                         .AutomationId(idPrefix + "PeriodEstimateContext").Grid(column: 1))
-            ).ToolTip(EstimateDescription + " " + EstimateMethod).AutomationId(idPrefix + "PeriodEstimate")
+            ).ToolTip(EstimateDescription + " " + EstimateMethodFor(estimate)).AutomationId(idPrefix + "PeriodEstimate")
             : null;
     internal static Element? EstimateDetails(AccountView account, string idPrefix = "") => account.PeriodEstimate is { } estimate
         ? VStack(12,
-            DetailRow("Estimate method", EstimateMethod, idPrefix + "PeriodEstimateMethod"),
+            DetailRow("Estimate method", EstimateMethodFor(estimate), idPrefix + "PeriodEstimateMethod"),
+            estimate.AverageStartDate is { } first && estimate.AverageEndDate is { } last
+                ? DetailRow("Averaging window", $"{DailyChartPresentation.DateLabel(first)} - {DailyChartPresentation.DateLabel(last)} (UTC)",
+                    idPrefix + "PeriodEstimateWindow") : null,
             DetailRow("Estimated at reset", EstimateAmount(estimate), idPrefix + "PeriodEstimateDetailAmount"),
             DetailRow("Average per day", estimate.AverageDailyConsumptionUsd is { } daily
                 ? ApproximateMoney(daily) : "Unavailable", idPrefix + "PeriodEstimateDaily"),

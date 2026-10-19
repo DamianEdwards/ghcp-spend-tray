@@ -1,5 +1,34 @@
 # GHCPSpendTray validation and release gates
 
+## Recent reported-day forecasts (October 19, 2026)
+
+Opt-in end-of-period forecasts use the latest seven consecutive complete
+reported UTC days when suitable scoped daily reports exist. Early-month windows
+may contain fewer complete days. The forecast adds the recent daily average
+times exact remaining period duration to actual usage already incurred.
+It never averages today's partial usage or the chart's derived/estimated bars.
+
+Reports must match the current UTC calendar period and complete account enterprise
+scope, and their last reported day must be within three dates of the usage
+observation. Stale responses, missing/unavailable days in the averaging window,
+invalid dates/amounts, or reported amounts exceeding actual period usage restore
+the existing period-to-date calculation. Missing daily integration uses that
+same existing formula unchanged.
+
+Synthetic coverage includes seven-day selection, smaller early-month windows,
+leap-year duration, exact fractional time remaining, lag boundaries, internal
+gaps, zero reported days, invalid/duplicate/future data, stale/identity mismatch
+fallback, generated bridge serialization, and account controller integration.
+Advanced Details exposes the actual method, reporting date range, and daily
+average; compact Windows/macOS rows identify recent reported-day forecasts.
+
+Local release-tooling checks and all four managed/executed x64 Native AOT
+harnesses passed (191 Core tests, 14 platform tests, 932 Windows assertions,
+107 shared/bridge assertions). The published empty/single-account native smoke
+passed. Populated smoke reached the existing account-Usage scrolling check and
+timed out bringing the second account into view; that run is not a pass.
+Swift model/view changes and native forecast fixtures require macOS CI.
+
 ## Optional enterprise daily consumption (October 14, 2026)
 
 The shared controller gates corporate setup, Azure CLI invocation, and API

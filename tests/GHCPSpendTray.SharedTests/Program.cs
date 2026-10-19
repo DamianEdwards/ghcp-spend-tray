@@ -274,7 +274,7 @@ try
         bridge.Dispose();
         Check(bridge.Send(new() { Id = "late", Method = "refresh" }).Error is not null, "Shutdown cancels outstanding native work.");
     }
-    var enterpriseHandler = new FixtureHttp { Eligible = true };
+    var enterpriseHandler = new FixtureHttp { Eligible = true, CompleteDailyWindow = true };
     var enterpriseTokens = new FixtureEnterpriseTokens();
     if (EnterpriseConsumptionEndpoint.BuildTimeBaseUri is null)
     {
@@ -324,6 +324,16 @@ try
             await Until(() => view!.Accounts[0].EnterpriseConsumption is { IsLoading: false, Bars.Length: > 0 });
             Check(enterpriseHandler.DailyRequests == 1, "Confirmed consumption uses the corporate service.");
             Check(view.Accounts[0].EnterpriseConsumption?.Bars?.Length > 0, "Reported days reach the shared chart model.");
+            await controller.SaveAccountAsync("github.com:1", "", "", showPeriodEstimate: true);
+            var forecast = view!.Accounts[0].PeriodEstimate!;
+            Check(forecast.ReportedDayCount == Math.Min(7, DateTimeOffset.UtcNow.Day - 1) &&
+                forecast.AverageDailyConsumptionUsd == 0.25m,
+                "Confirmed daily reports drive the controller's recent-usage forecast.");
+            var forecastEvents = new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = view } };
+            var decodedForecast = JsonSerializer.Deserialize(
+                JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
+                BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].PeriodEstimate;
+            Check(decodedForecast == forecast, "Recent forecast method and date range cross the generated native bridge.");
         }
         var saved = (await new JsonStore(Path.Combine(root, "enterprise")).LoadSettingsAsync()).Value;
         Check(saved.Accounts[0].ConsumptionIdentity == enterpriseTokens.Identity, "Confirmed identity is persistent.");
@@ -342,6 +352,9 @@ try
         await controller.RefreshAsync();
         Check(view!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity, "Changed identity requires confirmation.");
         Check(view.Accounts[0].EnterpriseConsumption?.Bars is null, "Changed identity removes the old chart.");
+        if (DateTimeOffset.UtcNow.Day > 1)
+            Check(view.Accounts[0].PeriodEstimate?.ReportedDayCount == 0,
+                "Identity reconfirmation removes daily reports from the forecast and restores period-to-date fallback.");
         var roundtrip = JsonSerializer.Deserialize(JsonSerializer.Serialize(new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = view } },
             BridgeJsonContext.Default.BridgeEventArray), BridgeJsonContext.Default.BridgeEventArray)!;
         Check(roundtrip[0].Dashboard!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity,
@@ -470,6 +483,7 @@ sealed class FixtureHttp : HttpMessageHandler
     private int _dailyRequests;
     public int DailyRequests => Volatile.Read(ref _dailyRequests);
     public bool UnavailableDaily { get; set; }
+    public bool CompleteDailyWindow { get; init; }
     public Func<int, CancellationToken, Task>? BeforeDailyResponse { get; init; }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -487,6 +501,16 @@ sealed class FixtureHttp : HttpMessageHandler
             "asOf":"{{{DateTimeOffset.UtcNow:O}}}","coverage":{"measure":"daily-ai-credit-report-usage","timezone":"UTC","currency":"USD"},
             "days":[{"date":"{{{start}}}","results":[{"enterpriseId":"dotcom:microsoftopensource","status":"available","usage":{"grossAmountUsd":1}}]}]}
             """;
+            if (CompleteDailyWindow)
+            {
+                var first = DateOnly.ParseExact(start, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                var limit = DateOnly.ParseExact(end, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                string rows = string.Join(",", Enumerable.Range(0, limit.DayNumber - first.DayNumber).Select(i =>
+                    "{\"date\":\"" + first.AddDays(i).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) +
+                    "\",\"results\":[{\"enterpriseId\":\"dotcom:microsoftopensource\",\"status\":\"available\",\"usage\":{\"grossAmountUsd\":0.25}}]}"));
+                int offset = json.IndexOf("\"days\":", StringComparison.Ordinal);
+                json = json[..offset] + "\"days\":[" + rows + "]}";
+            }
             if (UnavailableDaily)
                 json = json.Replace("\"status\":\"available\",\"usage\":{\"grossAmountUsd\":1}", "\"status\":\"unavailable\",\"usage\":null");
         }

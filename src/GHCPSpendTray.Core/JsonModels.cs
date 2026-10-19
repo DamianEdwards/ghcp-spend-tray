@@ -64,6 +64,7 @@ internal sealed class PremiumWire
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(TokenSet))]
 [JsonSerializable(typeof(UsageSnapshot))]
+[JsonSerializable(typeof(PeriodEstimate))]
 [JsonSerializable(typeof(AlertLedger))]
 public partial class CoreJsonContext : JsonSerializerContext;
 

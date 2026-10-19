@@ -57,6 +57,10 @@ public static class DailyConsumptionChart
         })
         .Distinct().Order(StringComparer.Ordinal).ToArray();
 
+    public static bool HasCompleteEnterpriseScope(UsageSnapshot snapshot) =>
+        EnterpriseNames(snapshot).Length > 0 &&
+        (IsEsme(snapshot) || snapshot.EnterpriseIds.All(id => id is 1578 or 134482 or 13213));
+
     public static (DailySpend[] Bars, string? Message) Create(DailyConsumption data, UsageSnapshot quota,
         DateTimeOffset now, bool fresh)
     {
@@ -71,7 +75,7 @@ public static class DailyConsumptionChart
         var reported = days.Where(d => d.AmountUsd is not null).ToArray();
         var bars = reported.Select(d => new DailySpend(d.Date, d.AmountUsd!.Value, false)).ToList();
         if (reported.Length == 0) return ([], "Daily usage is connected, but no daily reports are available for this account yet.");
-        if (!IsEsme(quota) && quota.EnterpriseIds.Any(id => id is not (1578 or 134482 or 13213)))
+        if (!HasCompleteEnterpriseScope(quota))
             return (bars.ToArray(), "Reported days cover only the supported enterprises; this account's broader usage cannot be used to estimate the remainder.");
         var last = DateOnly.ParseExact(reported[^1].Date, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         bool contiguous = Enumerable.Range(0, last.DayNumber - start.DayNumber + 1)
