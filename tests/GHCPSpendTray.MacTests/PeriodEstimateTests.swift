@@ -41,7 +41,7 @@ enum PeriodEstimateTests {
         try check(early.summary.contains("Early estimate") && early.summary.contains("Less than $1 over limit"),
                   "Early projections and fractional projected exceedances are truthful.")
         let recent = try account(estimate: [
-            "estimatedConsumptionUsd": 125, "averageDailyConsumptionUsd": 5,
+            "estimatedConsumptionUsd": 125, "averageDailyConsumptionUsd": 5, "overAllocationUsd": 25,
             "reportedDayCount": 7, "averageStartDate": "2026-10-04", "averageEndDate": "2026-10-10",
             "isEarly": false
         ]).periodEstimate!
@@ -50,6 +50,9 @@ enum PeriodEstimateTests {
                   recent.averageEndDate == "2026-10-10" && estimate.reportedDayCount == 0 &&
                   estimate.method.contains("Period-to-date"),
                   "Native forecasts distinguish rolling reported-day averages from the period-to-date fallback.")
+        try check(recent.summary(customBudget: true).contains("About $25 over custom budget") &&
+                  recent.summary.contains("About $25 over limit"),
+                  "Reported-day forecasts label custom-budget comparisons without changing the forecast amount.")
 
         let off = try account()
         let unavailable = try account(estimate: [

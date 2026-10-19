@@ -7,6 +7,23 @@ enum ModelTests {
         func check(_ condition: Bool, _ message: String) throws {
             if !condition { throw AppError.message(message) }
         }
+        let unlimitedBridge = FixtureBridge()
+        let unlimitedModel = AppModel(directory: URL(fileURLWithPath: "/synthetic-unlimited-unused"),
+                                      demo: true, bridge: unlimitedBridge)
+        defer { unlimitedModel.shutdown() }
+        unlimitedModel.start(empty: false, unlimited: true)
+        try check(unlimitedBridge.lastRequest["method"] as? String == "initialize" &&
+                  unlimitedBridge.lastRequest["demo"] as? Bool == true &&
+                  unlimitedBridge.lastRequest["empty"] as? Bool == false &&
+                  unlimitedBridge.lastRequest["unlimited"] as? Bool == true,
+                  "Unlimited sample mode reaches the shared initializer without real account access.")
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        try check(unlimitedBridge.lastRequest["appVersion"] as? String ==
+                    (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development") &&
+                  unlimitedBridge.lastRequest["releaseChannel"] as? String ==
+                    (Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development") &&
+                  unlimitedBridge.lastRequest["osVersion"] as? String == "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+                  "Native bundle version, release channel and macOS product version reach telemetry initialization.")
         let bridge = FixtureBridge()
         let model = AppModel(directory: URL(fileURLWithPath: "/synthetic-unused"), demo: true, bridge: bridge)
         var copies: [String] = []
@@ -128,11 +145,21 @@ enum ModelTests {
 
         let settings = try JSONDecoder().decode(SettingsData.self, from: Data("""
         {"pollMinutes":60,"thresholds":"50, 80, 100","notifications":true,"startup":false,"canChangeStartup":false,
-         "startupDescription":"Synthetic","trayStyle":1,"trayMode":1,"excludedTrayAccounts":["github.com:1"]}
+         "startupDescription":"Synthetic","trayStyle":1,"trayMode":1,"excludedTrayAccounts":["github.com:1"],
+         "trackedTelemetryEnabled":false}
         """.utf8))
         let roundTrip = try JSONDecoder().decode(SettingsData.self, from: JSONEncoder().encode(settings))
         try check(roundTrip.trayStyle == .percentage && roundTrip.trayMode == .perAccount &&
-                  roundTrip.excludedTrayAccounts == ["github.com:1"], "Tray options retain the generated C# enum contract.")
+                  roundTrip.excludedTrayAccounts == ["github.com:1"] && !roundTrip.trackedTelemetryEnabled,
+                  "Tray options and telemetry opt-out retain the generated C# contract.")
+        let unlimited = try JSONDecoder().decode(TrayIndicator.self, from: Data("""
+        {"name":"Synthetic","includedAccounts":1,"selectedAccounts":1,"details":"Unlimited allocation",
+         "tooltip":"Unlimited allocation | 1/1 included","isPartial":false,"isOverAllocation":false,
+         "valueText":"Unlimited allocation","numericText":"\\u221e","isUnlimited":true}
+        """.utf8))
+        try check(unlimited.isUnlimited && unlimited.percent == nil && unlimited.numericText == "\u{221e}" &&
+                  unlimited.valueText == "Unlimited allocation" && !unlimited.isPartial,
+                  "Generated bridge unlimited state decodes without a percentage or warning.")
 
         print("PASS: Mac automatic sign-in, clipboard recovery, cancellation, reconnect and menu-bar models.")
     }
@@ -142,11 +169,15 @@ enum ModelTests {
 final class FixtureBridge: ApplicationBridge {
     var requests: [[String: Any]] = []
     var events: [BridgeEvent] = []
+    var requestError: String?
     var lastRequest: [String: Any] { requests.last! }
 
     func request(_ fields: [String: Any]) throws -> Receipt {
         requests.append(fields)
-        return Receipt(error: nil)
+        if fields["method"] as? String == "form.validate" {
+            return try NativeApplicationBridge().request(fields)
+        }
+        return Receipt(error: requestError)
     }
 
     func poll() throws -> [BridgeEvent] {

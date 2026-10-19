@@ -1,5 +1,31 @@
 # GHCPSpendTray validation and release gates
 
+## Latest-main/custom-budget integration (October 19, 2026)
+
+The enterprise daily-usage branch merges main through `b63a499`, including
+Windows/macOS custom budgets, protected settings drafts, source clock-skew
+tolerance, Store/Sparkle updates, and telemetry. Both enterprise identity
+configuration and custom budget values survive account saves and reconnects.
+Custom budgets change percentage/alert targets and forecast excess comparisons,
+not actual usage, daily chart bars, or rolling reported-day forecast amounts.
+
+Combined synthetic tests cover daily forecasts with lower/higher custom
+budgets, unlimited API limits with finite custom budgets, removing a budget
+without losing daily reports, source clock skew with rolling forecasts, and
+popup Usage navigation protecting an unsaved custom-budget draft.
+The existing budget bridge, dirty-form, telemetry, and recent-day tests remain
+enabled together. Native macOS setup includes both corporate daily usage and
+the saved/draft budget controls; Apple-silicon CI remains required to verify it.
+
+Local release tooling and all managed/executed x64 Native AOT harnesses passed
+after the merge: 204 Core tests, 14 platform tests, 1100 Windows integration
+assertions, and 260 shared/bridge assertions. The unconfigured build passed
+263 shared assertions including hidden-feature checks. Fourteen targeted
+workflow/CI tests and 30 release-planning tests passed.
+The empty/single-account published native smoke passed, including Store update
+and budget-form behavior. Populated smoke reached the previously recorded
+account-Usage scrolling timeout; that run is not recorded as a pass.
+
 ## Recent reported-day forecasts (October 19, 2026)
 
 Opt-in end-of-period forecasts use the latest seven consecutive complete
@@ -140,6 +166,288 @@ Missing reports produce an explicit connected-but-no-data Usage status, not an
 empty hidden chart or fabricated zeroes. Loading state is exercised through the
 source-generated bridge; the native demo includes a no-report account, and
 populated smoke checks that its explanatory Usage status exists.
+## Native macOS telemetry verification (October 16, 2026)
+
+`bash tools/macos/verify.sh` passed on Apple silicon/macOS 26.7.1 with the pinned
+.NET 10.0.401 SDK, stable Swift 6.4 Command Line Tools, and the stable macOS 26
+SDK. The final run also configured a loopback Aspire dashboard as the OTLP
+HTTP/protobuf destination. It passed 182 Core tests and 231 shared/controller/
+bridge assertions in both managed and executed arm64 Native AOT, 34 CI tooling
+tests (two existing opt-in skips), 30 release tests, 59 macOS tooling tests,
+native Swift tests, synthetic Keychain CRUD, arm64-only packaging/signature
+checks, and both populated and empty real-app UI smoke runs.
+
+The Mac bridge previously omitted telemetry configuration when constructing the
+demo controller, so isolated native demo/smoke runs exported no diagnostics.
+It now initializes diagnostics for both controllers while keeping tracked export
+disabled in demos, including Preview/Stable bundles. Initialization spans also
+start after the controller creates the tracing provider, rather than being
+dropped before any provider exists.
+
+Aspire received the real SwiftUI/Native AOT app's `ui.initialize` spans with
+child `demo.refresh` spans, subsequent settings/account operation spans, and
+correlated `Refreshing synthetic demo data` logs. Runtime instruments appeared
+in its metrics view. Native regression coverage checks bundle/product version
+handoff, telemetry-only dirty tracking, failed-save retention, Cancel, and
+diagnostic listener cleanup. Real-app smoke saves an opt-out through protected
+Settings close and saves an opt-in before Quit.
+
+An initial OTLP-enabled smoke attempt lost app activation while checking popup
+growth and failed its visibility deadline; the subsequent complete verification
+passed both app scenarios with OTLP still enabled. No production accounts,
+credentials, or consumption data were used. The actual Azure exporter payload
+tests passed in managed and Native AOT harnesses, but this Mac verification did
+not send events to live Azure ingestion or exercise a signed/notarized release
+with real accounts, and it does not establish macOS 15 execution evidence.
+
+## Interactive synthetic telemetry verification (October 16, 2026)
+
+The Windows app now accepts `--verify-telemetry` only alongside isolated
+portable demo mode and a build-time ingestion configuration. Normal portable,
+demo, and smoke runs retain their tracked-export restrictions. Verification
+events always carry `GHCPSpendTray.TelemetryVerification` as their synthetic
+source. A separate local verification profile persists the UUID and saved
+telemetry preference without involving real accounts.
+
+The published Windows x64 Native AOT app was launched with that switch, not
+through the test harness. Application Insights queries returned its startup
+event and per-account refresh events with the same UUID, account count of two,
+`installation.source=demo`, and the synthetic-source marker. Clicking Refresh
+in the actual UI produced two additional refresh events. Saving an opt-out in
+General and refreshing produced no additional events; saving an opt-in resumed
+delivery with the same UUID. The verification instance remains independent
+of the installed app.
+
+`.\tools\verify.ps1 -NativeTests` passed all four managed and executed Native
+AOT harnesses, including 227 shared assertions. Focused tests cover saved
+verification consent/UUID across restarts, default-demo isolation, and synthetic
+source mapping through the actual Azure exporter. The empty-demo real-app
+smoke passed. The populated-demo smoke timed out twice at its account-form
+scroll-readiness assertion; that broader UI smoke is not claimed as passing
+in this Windows run. Native macOS verification is recorded above.
+
+## Isolated telemetry pipelines (October 15, 2026)
+
+Windows verification covers the tracked Azure Monitor pipeline independently
+from the explicitly configured diagnostic OTLP pipeline. Synthetic tests check
+persisted UUIDs and opt-out, startup/refresh/error event names and allowlisted
+fields, queue discard on disable, enterprise classification without persisting
+enterprise metadata, and Windows preference-save behavior. The actual Azure
+exporter envelope maps the UUID to `ai.user.id`; diagnostic parent/child spans,
+structured logs, existing Trace diagnostics, and shared trace IDs are captured
+through the actual OTLP HTTP/protobuf exporter.
+Real loopback HTTP success and failure requests additionally verify native
+.NET 10 HTTP spans, URL redaction, exception-detail redaction before immutable
+events are created, and suppression of outbound trace headers. Diagnostic
+resource attributes do not enrich tracked Azure envelopes.
+
+`.\tools\verify.ps1 -NativeTests` passed: the Release build and release-tooling
+checks, 182 Core tests, 14 platform tests, 1,089 Windows application assertions,
+and 222 shared/controller/bridge assertions, with all four harnesses also
+published and executed as Windows x64 Native AOT. The CI and release Python
+suites passed 34 and 30 tests respectively. A self-contained Windows x64
+Native AOT publish passed both populated and empty real-app smoke runs without
+changing startup registration or accessing live accounts.
+
+An opt-in Native AOT live check sent only synthetic startup and refresh events.
+It also verified that the build-time connection string survives assembly
+metadata in a native executable. Querying
+Application Insights confirmed the generated UUID in `user_Id`, configured
+account count, OS/process architectures, and the synthetic-source marker.
+No real account identities, credentials, or consumption data were used.
+Release and Store builds read the ingestion configuration from the repository's
+`GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` Actions variable, not source code.
+
+The initial Windows run did not compile or execute the native macOS preference,
+dirty-draft, and bridge initialization changes; the later Mac verification is
+recorded above. These changes do not establish real-user delivery rates,
+daily-active-user totals, or production retention/deletion behavior.
+
+## Native macOS budgets and protected settings drafts (October 9, 2026)
+
+The Mac frontend now edits per-account custom USD tracking budgets and explicitly
+resets them to API allocation. Source-generated command/preferences contracts are
+additive: omitted or false `updateCustomBudget` preserves an override; a null
+budget with true clears it. Native usage and estimate labels identify the
+effective target while Advanced Details retain raw API allocation and percentage.
+Draft preview arithmetic and form validation run in the Native AOT bridge using
+the shared budget and threshold rules, not a separate Swift calculation.
+
+The consolidated implementation retains the native Quit approach and additional
+coverage contributed by [Sébastien Ros in PR #79](https://github.com/DamianEdwards/ghcp-spend-tray/pull/79),
+while preserving PR #80's bridge-side validation and native stack 81.
+Quit cancels the initial AppKit termination request and retries only after the
+draft is saved or discarded, keeping the bridge's default-mode polling timer
+running. The new real-app Quit smoke reproduced a 90-second timeout with the
+previous deferred-termination implementation before this fix was applied.
+
+`bash tools/macos/verify.sh` passed locally on Apple silicon/macOS 26.7.1 using
+the pinned .NET 10.0.401 SDK, stable Swift 6.4 Command Line Tools, and the selected
+stable macOS 26 SDK. The consolidated run includes 179 Core tests and 170 shared/controller/
+bridge assertions in both managed and executed arm64 Native AOT, plus native
+Swift tests, synthetic Keychain CRUD, arm64-only bundle/signature checks, and
+populated/empty real-app UI smoke runs. The CI tooling suite retains two existing
+opt-in skips; they are not claimed as passes.
+
+Focused coverage checks budget set/omission/false/clear, unrelated account and
+global saves, unchanged diagnostics, weighted menu-bar percentages, estimates,
+and draft previews against both finite and unlimited API allocations. Native
+fixtures cover custom-budget labels with unlimited or unknown API allocation,
+shared allowed input values, all-invalid-field feedback,
+override error clearing, exact failed drafts, clean-on-revert behavior, inherited
+overrides/toggles, and dirty refresh protection. A native AppKit field editor
+remains the same object and keeps focus and selection as inline errors appear
+and disappear.
+Immediate bridge receipt failures and cancelled saves retain the exact draft.
+SwiftUI bounds preferences measure both footer buttons inside the constrained
+form, including validation-message insertion.
+Synthetic clicks exercise both fixed footer actions in scrolled account, General,
+and Notifications forms constrained to 500 by 400 points.
+
+Real native sheet buttons exercise Save, Discard, and Keep Editing, including
+invalid Save and synthetic persistence failure. Model coverage guards Back,
+sidebar/account switches, Add/Reconnect, close/Quit continuations, and navigation
+during asynchronous saves. Explicit system logout/restart/shutdown Apple Event
+reasons bypass interactive prompts; no actual OS shutdown was initiated. The
+real-app smoke saves and clears budgets through the C ABI, rejects invalid drafts,
+preserves a budget across an unrelated save, and renders account budget preferences
+at the minimum Settings window size. Real Settings close and Quit use native sheet
+buttons: Save completes before navigation/close, invalid Save and Keep Editing
+cancel Quit, and Discard restores the draft before closing. Final smoke success
+is recorded only during actual app termination after a valid Save-on-Quit has
+completed with a clean baseline.
+
+The original synthetic native form screenshots from PR #79 are retained with
+their contributor's credit: [custom budget](images/macos-budget-preferences/custom-budget.png),
+[constrained account](images/macos-budget-preferences/account-constrained.png),
+[General](images/macos-budget-preferences/general-constrained.png), and
+[Notifications](images/macos-budget-preferences/notifications-constrained.png).
+They document the original form revision, not the exact consolidated layout;
+current interaction and geometry assertions exercise the rebuilt app and views.
+
+All new examples are synthetic and isolated. No real account credentials,
+consumption data, login-item changes, or production signing/notarization
+credentials were used. Windows execution, macOS 15 runtime coverage, VoiceOver
+interaction, and actual OS shutdown remain separate checks; this local run does
+not claim them.
+
+## Local real-app Sparkle replacement rehearsal (October 9, 2026)
+
+`python3 tools/macos/rehearsal.py --signing-identity '<Developer ID identity>'`
+now runs a repeatable, opt-in update exercise with two different builds of the
+actual SwiftUI/AppKit app and Native AOT bridge. All embedded code is arm64,
+Developer ID signed with hardened runtime, and timestamped. The local runner
+uses disposable bundle identities, ephemeral Ed25519 keys, authenticated feeds
+and signed DMGs, and downloads solely through a native loopback listener.
+It neither publishes a release nor changes production updater configuration.
+
+Local macOS 26 / Apple-silicon execution passes eight real-engine scenarios:
+manual download/install/relaunch, background download followed by the existing
+Install and Relaunch action, install on quit, cancel download, cancel prepared
+installation, corrupted archive, archive signed by a wrong key, and interrupted
+download. Each successful case checks exact candidate file hashes, executable
+permissions/framework symlinks, a new process at the same installation path,
+preservation of synthetic external settings/history files and a device-local
+Keychain item, and native update-check/download preferences. The installed B
+then rejects an authenticated older A feed without replacing itself. Negative
+cases require signature-validation/download error codes or explicit
+cancellation and an unchanged, correctly signed, runnable A. Reports and
+callback traces remain under `artifacts/macos-rehearsal/<run-id>`.
+
+The rehearsal initially exposed two fixture assumptions: ad-hoc A/B binaries
+do not have stable cross-version Keychain trust, and background-install
+readiness can temporarily toggle during Sparkle's installer-status probe.
+Developer ID signing resolves the former; the latter now waits on actual
+readiness notifications and rechecks state at dispatch, rather than delaying
+or treating a transient ready sample as final. Neither required relaxing
+production signature validation or increasing deadlines.
+
+Automation uses a supported custom Sparkle user driver in the real app; normal
+builds retain the standard controller/dialogs. Rehearsal code lives outside the
+shipping Swift glob, requires explicit development-only compiler flags, is
+rejected by production package validation, and removes only its unique
+synthetic Keychain/defaults data. The ordinary development bundle is rebuilt
+after the runner finishes. Private seeds are never retained in evidence.
+
+This is strong evidence for the actual downloader, helpers, replacement and
+relaunch, **not** a full production acceptance result: these builds are not
+notarized, use local HTTP, have unique synthetic identities/state, and automate
+choices instead of clicking the standard UI. Notarization/quarantine/Gatekeeper,
+privileged/read-only install paths, normal update-dialog interaction, macOS 15
+full replacement, real account/schema migration, and public Pages/HTTPS delivery
+remain distinct gates. Production Sparkle signing keys, notarization credentials,
+tags and public assets were not used for the rehearsal.
+
+## Microsoft Store update detection and installation (October 9, 2026)
+
+Synthetic Windows tests cover periodic/throttled checks, unavailable vs current
+status, notification deduplication, About's no-button/current and Update/available
+states, download/install progress, consent cancellation, actionable errors,
+completion/restart fallback, concurrent operation suppression and disposal.
+Update notifications use distinct download artwork, with native icon creation,
+DPI, contrast tinting and unchanged About-click routing covered.
+Native HWND tests accept Restart Manager shutdown and ignore canceled shutdown.
+The source-generated restart registration/cleanup calls are exercised without
+initiating a deployment or restarting the test process.
+
+Local Release verification passed all four managed and executed x64 Native AOT
+harnesses, and the x64 Native AOT application passed populated and empty-account
+UI smoke runs. Those smoke runs inject synthetic Store availability, invoke the
+actual About Update button, check consent-cancellation retry, open About through
+both the native update-notification callback (including a closed Settings window)
+and the in-app update notice, and verify that clearing availability removes the button.
+They do not call real Store update APIs.
+
+One-off offline probes additionally passed 37 assertions against the unchanged
+production Store service source with controlled Store/dispatcher endpoints and
+real Windows restart registration. These cover Store-only gating, main-package
+selection, the actual uptime delay, UI-thread ownership, registration before
+consent, progress, canceled/failed installs, shutdown cancellation and retained
+registration after completion.
+
+A separate x64 Native AOT probe built from the production app project activated
+the real StoreContext and initialized it with the production About window HWND
+without querying or downloading. With About open and a synthetic install still
+pending, ordinary native close was blocked, while actual Restart Manager shutdown
+and restart succeeded. Windows App SDK restart also succeeded. Both produced a
+different process, accepted `--startup`, reacquired the production single-instance
+mutex and initialized the production shell. These isolated probes use synthetic
+data and a test entrypoint, not the packaged production bootstrap; they do not
+establish package replacement or execution of a newer version. No persistent CI
+upgrade test, package registration, certificate or Developer Mode change was added.
+
+The documented Store flow can terminate a desktop app before its install await
+returns. Registration therefore precedes the install request, with a 61-second
+process-uptime guard for the documented restart minimum. Windows owns termination,
+package replacement and relaunch. A surviving completed call requests Windows App
+SDK restart; an unsuccessful request is visible and retryable.
+
+An actual Store-signed, older package with a newer update offered to the same
+account/device is required to validate the real consent dialogs, replacement
+and new-version relaunch. Portable/development package smoke and fake Store
+results do not establish that end-to-end behavior. No real Store deployment has
+been performed locally for this change. The incoming version is not supplied by
+the supported Store update API; the UI deliberately does not invent it or use
+GitHub's independently published version as a proxy.
+
+## Windows tray recovery after wake/reconnect (October 8, 2026)
+
+Runtime tray updates and `TaskbarCreated` recovery retry temporary Windows
+Shell failures on the hidden window's message loop, at one-second intervals
+with at most five retries. Pending dashboard and display changes coalesce
+into the latest presentation without resetting that budget. Exhaustion is
+logged and shown through the existing application error surface; startup
+registration and unrelated callback failures still fail explicitly.
+Disposal cancels the recovery timer. Notification submission is not replayed.
+
+A rejected modify/re-add no longer allows the unchanged-render cache to skip
+a missing registration when the dashboard returns to its previous values.
+Synthetic HWND tests cover transient restart recovery, coalescing, reverted
+presentations, version-four callbacks, bounded persistent failure, later
+recovery and disposal. Failure diagnostics include the callback message ID
+and native error code where available, never exception messages or account
+data. These synthetic cases do not establish behavior for every real
+Explorer restart or monitor/network transition.
 
 ## Windows tray selection and smoke readiness (October 5, 2026)
 
@@ -249,8 +557,10 @@ macOS UI and bridge commands are unchanged by this Windows integration.
 
 The three macOS reference screenshots on issue #47 were compared with the
 Windows estimate surfaces. Windows keeps native Fluent cards and controls while
-matching the secondary row hierarchy: Estimated at reset at the left,
-approximate amount at the right, then early/projected-excess/UTC-reset context.
+matching the secondary row hierarchy: Estimated at reset and an approximate
+amount, then early/projected-excess/UTC-reset context. Following issue #64,
+Usage and account settings keep the amount beside the label with a 12-pixel
+gap; the flyout retains right alignment to match its observed consumption.
 Projected excess uses a theme-aware caution brush and a warning glyph, not
 a projected progress bar. Small positive amounts use `<$1` and small excesses
 use Less than $1 over allocation, matching macOS without implying zero.
@@ -269,8 +579,10 @@ consumption, totals and tray allocation.
 An x64 Native AOT app publish passed populated and empty native WinUI smoke.
 Populated smoke drives the real preference checkbox, Save and accessible
 expanders, checks all three estimate surfaces, and measures that the label
-and amount share a baseline, the amount reaches the row's right edge without
-overlapping the label, and forecast text remains smaller than actual consumption.
+and amount share a baseline without overlap, and forecast text remains smaller
+than actual consumption. The geometry assertions now require a 12-pixel
+label-to-amount gap in Usage and account settings (including unavailable
+estimates), and right-edge alignment in the flyout.
 It also checks label association/help, expanded diagnostics on Usage and
 account settings, and unavailable/explicit-off behavior. These are synthetic
 controls and geometry checks, not proof of pixel-identical cross-platform
@@ -302,6 +614,68 @@ harnesses passed. The instrumented Store x64 Native AOT app also passed both
 local packaged smoke scenarios, retained their final phase, and removed its
 isolated development registration. Hosted confirmation remains required.
 
+## macOS Sparkle updates (October 3, 2026)
+
+The native Swift frontend now embeds checksum-pinned Sparkle 2.10.0 without
+changing the `swiftc`/Native AOT build model. Every embedded Sparkle Mach-O
+file is thinned to arm64 before inside-out signing. Package inspection covers
+framework/helper presence, executable permissions, architecture, dependency
+paths, signed-feed/verification configuration and consent/profiling defaults.
+Public builds use a retained standard updater controller; development, demo
+and smoke modes do not instantiate it or read/write updater preferences.
+
+Local full `bash tools/macos/verify.sh` passes the existing 170 Core tests and
+81 shared controller/bridge assertions in managed and executed arm64 Native
+AOT, 17 CI-routing tests, 30 release-planning/workflow tests and 52 Mac tooling
+tests, plus native Swift fixtures and both populated/empty UI smoke runs.
+Updater fixtures cover isolation, duplicate startup, preference forwarding,
+disabled actions, update reminders, downloaded/install-on-quit relaunch
+availability, startup failure and explicit errors. The real Sparkle updater
+reads signed synthetic appcasts from a loopback-only native fixture server and
+rejects tampered/unsigned feeds and incompatible OS requirements without
+downloading or installing an archive. Test preferences use unique synthetic
+defaults domains, and fixture servers/files are removed after each case.
+
+PR #62's first hosted macOS 26 run failed while the Sparkle fixture awaited
+Python subprocess/file-sentinel readiness, not in a navigation/UI assertion.
+The generic startup error and absent retained diagnostics did not establish
+whether Python exited or missed its deadline. The fixture now uses an
+in-process Network.framework listener bound exclusively to `127.0.0.1` and
+awaits its ready callback and Sparkle's completion callback directly. An actual
+HTTP request verifies the listener serves the exact feed bytes before starting
+Sparkle. There are no fixture polling loops or unconditional settling delays;
+ten-second deadlines only guard missing callbacks. Callback fixtures cover
+early completion, duplicate completion, timeout and cancellation.
+
+Per-scenario progress, listener states, HTTP responses, signing exit status and
+Sparkle callback errors go to stderr and `artifacts/macos-test-diagnostics`.
+The native harness exits with a readable failure instead of trapping on an
+uncaught Swift error, and Verify/Release retain these synthetic logs on failure.
+The signed/tampered/unsigned/OS-incompatible cases still execute the real
+Sparkle updater, and negative cases assert appcast-verification callbacks and
+the precise signature-validation/OS-incompatibility error codes rather than
+accepting an arbitrary transport failure as success. The existing UI geometry
+assertions, readiness thresholds and job limits are unchanged. Hosted
+confirmation of the revised fixture remains required.
+
+Real Sparkle signing tools also generate an appcast from a synthetic arm64 DMG.
+Fixtures verify the signature of the exact archive bytes, tampered-feed/archive
+rejection, private/public-key mismatch, immutable versioned download URLs,
+stable-only numeric ordering, preview/Windows/draft exclusion, metadata
+constraints, retention of older entries, missing-latest-feed failure, and feed
+retry orchestration after an already-published release. Only public test-vector
+or ephemeral synthetic keys are used.
+
+Production Apple signing/notarization with the new embedded helpers, GitHub
+Pages deployment, macOS 15 execution, and replacement/relaunch between two
+Developer ID signed/notarized versions remain release acceptance gates.
+Configure the dedicated production Sparkle key pair and Actions-based Pages
+site as described in [RELEASING.md](RELEASING.md) before publishing. Exercise
+manual and opt-in automatic updates, read-only/translocated installations,
+declined authorization, unavailable feeds, login startup, and preservation of
+synthetic history/settings/Keychain items. No production keys were generated
+or cloud configuration changed during local implementation.
+
 ## macOS per-account period estimates (October 3, 2026)
 
 Account preferences now include an off-by-default Show estimated period
@@ -314,10 +688,14 @@ actual totals, allocation meters, menu-bar icons, or alert thresholds.
 
 The shared C# calculation explicitly assumes UTC calendar months and rejects
 provider resets that disagree with the next month boundary. Source observation
-time is used when supplied, otherwise fetch time; frozen data never changes its
-pace estimate merely because the clock advances. Freshness and rollover still
-invalidate it. Estimates are unavailable before 24 elapsed hours and marked
-early before 72 hours. Unknown/unlimited allocation does not prevent a dollar
+time is used when supplied, otherwise fetch time. A source timestamp up to one
+minute ahead of the local fetch is clamped to fetch time for the estimate to
+tolerate server/client clock skew; the saved source timestamp is unchanged.
+Larger future timestamps and previous-period observations remain unavailable.
+Frozen data never changes its pace estimate merely because the clock advances.
+Freshness and rollover still invalidate it. Estimates are unavailable before
+24 elapsed hours and marked early before 72 hours. Unknown/unlimited allocation
+does not prevent a dollar
 projection. These are transparent estimation assumptions, not a verified
 provider billing contract or a promise about invoices.
 
@@ -1003,7 +1381,8 @@ dotnet run --project tests\GHCPSpendTray.AppTests -c Release --no-build -- --tra
 The bitmap contains exact 16px output and 2x nearest-neighbor magnifications,
 composited on the light/dark palette backgrounds. Append a pixel size (for
 example `24`) after the output path to inspect higher-DPI output.
-Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, and partial 50%;
+Columns are unavailable, zero, 0.1%, 50%, 100%, 105%, 1000%, partial 50%,
+unlimited (infinity), and partial unlimited;
 rows are light pie, light number, dark pie, dark number. Renderer samples are
 not screenshots of Explorer's notification area.
 

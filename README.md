@@ -127,6 +127,11 @@ Requires Windows 11 22H2 (build 22621) or newer on x64 or ARM64.
 Install [GHCPSpendTray from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295),
 then start it from the Start menu. It stays in the notification area.
 
+Store-installed copies automatically check for updates. Click an update
+notification to open **Settings > About**, then select **Update** to install
+and restart the app. If no update is available, About shows that you're running
+the latest version.
+
 Alternatively, download `GHCPSpendTray-<version>.msixbundle` from
 [GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases),
 open the signed bundle in Windows App Installer, and select **Install**.
@@ -178,9 +183,18 @@ The monochrome template graphics adapt to macOS light/dark menu-bar appearance.
 Per-account icons open account settings. If macOS hides icons on a crowded
 menu bar, reopening GHCPSpendTray brings its settings window forward.
 
-Updates are manual: quit GHCPSpendTray, then replace the app in Applications
-with a newer macOS release. Its stable bundle identifier preserves access to
-local settings, history, and Keychain credentials. Windows (`v*`) and macOS
+Public builds use [Sparkle](https://sparkle-project.org/) for in-app updates.
+Choose **Check for Updates...** from the menu-bar context menu or **Settings >
+About**. Sparkle asks permission to check automatically; automatic downloads
+and installation on quit are optional. An available update appears in the
+popup, and a downloaded update offers **Install and Relaunch...** without
+waiting for you to quit the app. Stable releases are the only automatic update
+channel, including for preview builds. Development and demonstration builds
+never check for updates. Older releases without Sparkle need one final manual
+upgrade: quit the app and replace it in Applications.
+
+The stable bundle identifier preserves access to local settings, history,
+and Keychain credentials. Windows (`v*`) and macOS
 (`macos-v*`) releases have independent versions; neither platform upgrades or
 migrates the other's local data. The Mac app does not use the App Store.
 
@@ -189,6 +203,16 @@ Each platform has `no release`, `Major`, `Minor`, or `Patch` choices (default
 `Minor`), calculated from its latest stable release. With none, the baseline
 is `0.0.0`, making the default first release `0.1.0`.
 See [release setup and retry rules](docs/RELEASING.md).
+
+To preview unlimited quota on Windows without accessing real accounts, run a
+development build with an isolated data directory:
+
+```powershell
+.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-unlimited --portable --data-dir C:\Temp\ghcp-unlimited-preview
+```
+
+This starts one synthetic unlimited account, disables authentication and
+notifications, and keeps sample settings in memory.
 
 ## Connect an account
 
@@ -255,6 +279,29 @@ The default refresh interval
 is 10 minutes (configurable from 5 to 1440), and the default limit alerts
 are 50%, 80%, and 100%.
 
+Open **Settings > Accounts > Manage > Usage budget** (or **Manage account** on macOS) to choose
+**Use a custom budget** and enter a positive USD amount (up to two decimal
+places). **Save account** (**Save** on macOS) applies it to that account's usage percentage, tray
+icon, estimated excess, and percentage alerts. The draft shows a preview before
+saving. Budgets follow the API billing period (or the calendar-month fallback);
+they are tracking targets, not spending caps or changes to your GitHub quota.
+The API limit remains available in **Advanced details**. Select **Use API
+limit** and save to remove the override. Accounts without overrides behave
+as before. Changing the budget rearms
+percentage alerts for the new target on the next successful refresh, without
+repeating already-notified dollar milestones.
+Invalid settings inputs are outlined in red with a message immediately
+below the field and a reminder beside Save. Correcting a value clears its error;
+invalid drafts are never saved.
+Account, General, and Notifications forms keep **Save** and **Cancel**
+visible in a fixed footer, with an **Unsaved changes** indicator. Cancel restores
+the saved values. Leaving a changed form with Back, switching pages or accounts,
+closing Settings, or quitting prompts **Save**, **Discard**, or **Keep editing**.
+Failed or invalid saves retain the draft and keep the form open.
+On macOS the same native sheet protects Add/Reconnect and account links from the
+menu bar or notifications. Background refreshes do not replace dirty preferences;
+logout, restart, and shutdown do not wait for an interactive draft decision.
+
 In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
 number**, one roll-up or per-account icons, and the connected accounts to include.
 Choose **Save changes** to apply and persist the preferences. By default all
@@ -270,11 +317,19 @@ refresh, Settings, notifications and Exit remain available. If no accounts are
 selected or connected, a neutral access icon remains.
 
 The roll-up percentage is **eligible consumption divided by the same accounts'
-eligible limits**, not an average of account percentages. Only valid, fresh,
+eligible limit (or custom budget)**, not an average of account percentages. Only valid, fresh,
 current-period observations with known, finite positive limits qualify.
 Stale, failed, unsupported, unknown/zero-limit and unlimited accounts are
-excluded from both sides. `!` marks a partial roll-up; `?` means no percentage is
-available, not zero. On macOS, an unavailable pie stays an empty outline with
+excluded from both sides unless a custom budget supplies a finite positive
+target. A budget never makes stale or unavailable consumption eligible.
+`!` marks a partial roll-up; `?` means no percentage is
+available, not zero. Fresh unlimited accounts show an infinity sign in either
+icon style, with an **Unlimited** tooltip. A roll-up shows infinity
+when its usable accounts are all unlimited; unavailable accounts still cause a
+partial `!` badge. Mixed finite/unlimited roll-ups retain the finite accounts'
+weighted percentage and identify unlimited accounts in the details. Stale or
+failed unlimited observations remain unavailable, never infinity.
+On macOS, an unavailable pie stays an empty outline with
 an `!` badge; percentage mode still shows `?`. The badged empty pie does not
 mean 0% usage. Hover for the percentage and included/selected counts;
 **Settings > Usage** lists every selected account and its inclusion or exclusion
@@ -442,8 +497,10 @@ open -n artifacts/macos/GHCPSpendTray.app --args --demo-empty --data-dir "$previ
 check its live resizing and position without signing in. The button appears
 only in sample mode, both before and after adding examples. Each click adds
 one account; examples last only for that process and are not saved. Use
-`--demo` instead of `--demo-empty` to start with the existing sample accounts.
-Both modes require a separate data directory and disable authentication,
+`--demo` instead of `--demo-empty` to start with the existing sample accounts,
+or `--demo-unlimited` for one synthetic account with unlimited allocation and
+an infinity menu-bar indicator.
+All demo modes require a separate data directory and disable authentication,
 notifications, and launch-at-login changes; they do not access saved accounts
 or credentials.
 

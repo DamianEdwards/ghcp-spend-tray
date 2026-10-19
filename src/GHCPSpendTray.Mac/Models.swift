@@ -1,4 +1,5 @@
 import Foundation
+import Carbon
 
 enum SettingsPage: String, CaseIterable, Identifiable {
     case usage = "Usage", accounts = "Accounts", general = "General", notifications = "Notifications", about = "About"
@@ -25,6 +26,7 @@ struct SettingsData: Codable {
     var trayStyle: TrayIconStyle = .pie
     var trayMode: TrayDisplayMode = .rollUp
     var excludedTrayAccounts: [String]?
+    var trackedTelemetryEnabled: Bool = true
 }
 
 struct Dashboard: Decodable {
@@ -53,6 +55,16 @@ struct AccountData: Decodable, Identifiable {
     let avatarUrl: String?
     let periodEstimate: PeriodEstimateData?
     let enterpriseConsumption: EnterpriseConsumptionData?
+    var customBudgetUsd: Decimal? = nil
+
+    var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
+    var allocationSummary: String {
+        if let percent {
+            return "\(decimalText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
+        }
+        if let customBudgetUsd { return "\(money(customBudgetUsd)) custom budget · Consumption unavailable" }
+        return details.unlimited ? "Unlimited API limit" : "API limit unavailable"
+    }
 }
 
 struct EnterpriseConsumptionData: Decodable {
@@ -107,11 +119,16 @@ struct PeriodEstimateData: Decodable {
     }
 
     var summary: String {
+        summary(customBudget: false)
+    }
+
+    func summary(customBudget: Bool) -> String {
         var parts: [String] = []
         if isEarly { parts.append("Early estimate") }
         if reportedDayCount > 0 { parts.append("Latest \(reportedDayCount) reported days") }
         if let over = overAllocationUsd, over > 0 {
-            parts.append(over < 1 ? "Less than $1 over limit" : "About \(wholeMoney(over)) over limit")
+            let target = customBudget ? "custom budget" : "limit"
+            parts.append(over < 1 ? "Less than $1 over \(target)" : "About \(wholeMoney(over)) over \(target)")
         }
         if let reset = resetAtUtc { parts.append("Resets \(utcDateText(reset))") }
         return parts.joined(separator: " · ")
@@ -138,6 +155,7 @@ struct AccountPreferences: Decodable {
     let spendIncrementUsd: Decimal?
     let clientId: String?
     let showPeriodEstimate: Bool
+    var customBudgetUsd: Decimal? = nil
 }
 
 struct DevicePrompt: Decodable {
@@ -175,7 +193,77 @@ struct BridgeEvent: Decodable {
     let key: String?
 }
 
-struct Receipt: Decodable { let error: String? }
+struct Receipt: Decodable {
+    var error: String? = nil
+    var fieldErrors: [String: String]? = nil
+    var incrementUsd: Decimal? = nil
+    var customBudgetUsd: Decimal? = nil
+    var pollMinutes: Int? = nil
+    var text: String? = nil
+}
+
+struct AccountDraft: Equatable {
+    var name = ""
+    var thresholds = ""
+    var increment = ""
+    var inheritIncrement = true
+    var showPeriodEstimate = false
+    var useCustomBudget = false
+    var budget = ""
+
+    init() {}
+    init(_ preferences: AccountPreferences) {
+        name = preferences.displayName
+        thresholds = preferences.thresholds
+        increment = decimalText(preferences.spendIncrementUsd)
+        inheritIncrement = preferences.spendIncrementUsd == nil
+        showPeriodEstimate = preferences.showPeriodEstimate
+        useCustomBudget = preferences.customBudgetUsd != nil
+        budget = decimalText(preferences.customBudgetUsd)
+    }
+
+    var activeValues: Self {
+        var value = self
+        if inheritIncrement { value.increment = "" }
+        if !useCustomBudget { value.budget = "" }
+        return value
+    }
+    var form: [String: Any] {
+        ["page": "account", "displayName": name, "thresholds": thresholds, "increment": increment,
+         "inheritIncrement": inheritIncrement, "useCustomBudget": useCustomBudget, "customBudget": budget]
+    }
+}
+
+struct GlobalDraft: Equatable {
+    var minutes = ""
+    var thresholds = ""
+    var increment = ""
+    var notifications = true
+    var startup = false
+    var trackedTelemetryEnabled = true
+    var trayStyle: TrayIconStyle = .pie
+    var trayMode: TrayDisplayMode = .rollUp
+    var excludedAccounts = Set<String>()
+
+    init() {}
+    init(_ settings: SettingsData) {
+        minutes = String(settings.pollMinutes)
+        thresholds = settings.thresholds
+        increment = decimalText(settings.spendIncrementUsd)
+        notifications = settings.notifications
+        startup = settings.startup
+        trackedTelemetryEnabled = settings.trackedTelemetryEnabled
+        trayStyle = settings.trayStyle
+        trayMode = settings.trayMode
+        excludedAccounts = Set(settings.excludedTrayAccounts ?? [])
+    }
+}
+
+enum UnsavedChangesChoice { case save, discard, keepEditing }
+
+func isSystemTermination(_ reason: UInt32) -> Bool {
+    [UInt32(kAEQuitAll), UInt32(kAEShutDown), UInt32(kAERestart), UInt32(kAEReallyLogOut)].contains(reason)
+}
 
 enum TrayIconStyle: Int, Codable, CaseIterable {
     case pie, percentage
@@ -198,11 +286,12 @@ struct TrayIndicator: Decodable, Identifiable, Sendable {
     let isOverAllocation: Bool
     let valueText: String
     let numericText: String
+    let isUnlimited: Bool
 
     static let unavailable = TrayIndicator(accountKey: nil, name: "GHCPSpendTray", percent: nil,
         includedAccounts: 0, selectedAccounts: 0, details: "Consumption unavailable.",
         tooltip: "GHCPSpendTray | Consumption unavailable", isPartial: false, isOverAllocation: false,
-        valueText: "Unavailable", numericText: "?")
+        valueText: "Unavailable", numericText: "?", isUnlimited: false)
 }
 
 struct TrayPresentation: Decodable {

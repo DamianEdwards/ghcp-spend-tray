@@ -11,10 +11,46 @@ Directory.CreateDirectory(root);
 int assertions = 0;
 try
 {
+    await TelemetryTests.RunAsync(Check, root);
     var credentials = new MemoryCredentials();
     var startup = new Startup();
     var handler = new FixtureHttp();
     using var http = new HttpClient(handler);
+    using (var bridge = new BridgeRuntime())
+    {
+        var command = JsonSerializer.Deserialize("""
+            {"id":"unlimited-demo","method":"initialize","directory":"/synthetic-unused","demo":true,"unlimited":true}
+            """, BridgeJsonContext.Default.Command)!;
+        command = command with { Directory = Path.Combine(root, "unlimited-bridge-demo") };
+        DashboardView? preview = null;
+        Check(bridge.Send(command).Error is null, "Generated bridge command accepts unlimited sample mode.");
+        var initialized = await Complete(bridge, command.Id, e => { if (e.Dashboard is not null) preview = e.Dashboard; });
+        Check(initialized.Error is null && preview?.Accounts.Count == 1 &&
+            preview.Accounts[0].Details.Unlimited && preview.ConsumptionUsd == 26.25m &&
+            preview.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" },
+            "Native bridge initializes the unlimited synthetic account and infinity indicator.");
+    }
+    using (var demo = new DemoController(Path.Combine(root, "unlimited-demo"), unlimited: true))
+    {
+        DashboardView? preview = null;
+        demo.Changed += value => preview = value;
+        await demo.InitializeAsync();
+        Check(preview!.Accounts.Count == 1 && preview.Accounts[0].Details.Unlimited &&
+            preview.Accounts[0].Percent is null && preview.Tray!.RollUp.IsUnlimited &&
+            preview.ConsumptionUsd == 26.25m, "Unlimited demo starts with one synthetic unlimited account.");
+        preview.TrayStates!.Single().Snapshot!.Validate();
+        Check(demo.AccountSettings("github.com:1").DisplayName == "Unlimited (demo)",
+            "Unlimited demo account preferences match the displayed account.");
+        await demo.SaveSettingsAsync(demo.Settings with { TrayStyle = TrayIconStyle.Percentage });
+        Check(preview!.Tray!.Style == TrayIconStyle.Percentage && preview.Tray.RollUp.NumericText == "\u221e",
+            "Unlimited demo supports a live percentage-style infinity preview.");
+        await demo.RefreshAsync();
+        Check(preview!.Tray!.RollUp.IsUnlimited, "Refreshing synthetic unlimited data retains infinity.");
+        await demo.AddExampleAccountAsync();
+        Check(preview!.Accounts.Count == 2 && preview.Accounts[1].Key == "github.com:2" &&
+            preview.Tray!.RollUp is { IsUnlimited: false, Percent: 25, IsPartial: true },
+            "Additional finite examples have unique identities and produce a truthful mixed roll-up.");
+    }
     using (var controller = new ApplicationController(root, false, credentials, http, () => Task.FromResult<IStartupRegistration>(startup)))
     {
         DashboardView? dashboard = null;
@@ -70,6 +106,21 @@ try
             "Artwork data uses current consumption rather than rounding down to the crossed allocation threshold.");
         Check(credentials.Values.Count == 1, "Credentials are persisted through injected platform store.");
         Check(dashboard?.Tray?.RollUp.Percent == 105 && dashboard.Tray.RollUp.IsOverAllocation, "Shared dashboard includes truthful tray allocation.");
+        handler.Unlimited = true;
+        await controller.RefreshAsync();
+        Check(dashboard!.IsComplete && dashboard.ConsumptionUsd == 26.25m &&
+            dashboard.Accounts[0].Details.Unlimited && dashboard.Accounts[0].Percent is null &&
+            dashboard.Tray!.RollUp is { IsUnlimited: true, NumericText: "\u221e", IsPartial: false },
+            "Successful unlimited refresh retains observed dollars and exposes infinity rather than unavailable usage.");
+        var unlimitedEvents = new[] { new BridgeEvent { Kind = "changed", Dashboard = dashboard, Tray = dashboard.Tray } };
+        var unlimitedJson = JsonSerializer.Serialize(unlimitedEvents, BridgeJsonContext.Default.BridgeEventArray);
+        var unlimitedRoundTrip = JsonSerializer.Deserialize(unlimitedJson, BridgeJsonContext.Default.BridgeEventArray)!.Single();
+        Check(unlimitedRoundTrip.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" } &&
+            unlimitedRoundTrip.Dashboard!.Tray!.Icons[0].IsUnlimited &&
+            unlimitedRoundTrip.Tray.Accounts[0].IsUnlimited,
+            "Generated bridge JSON preserves unlimited state and infinity in standalone and dashboard tray payloads.");
+        handler.Unlimited = false;
+        await controller.RefreshAsync();
         await controller.SaveAccountAsync("github.com:1", "", "", showPeriodEstimate: true);
         Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate && dashboard!.Accounts[0].PeriodEstimate is not null,
             "Enabling an account estimate updates the shared dashboard.");
@@ -108,6 +159,24 @@ try
             "Explicit disable persists and completely removes the estimate.");
         handler.UserId = "1";
         await controller.RefreshAccountAsync("github.com:1");
+        await controller.SaveAccountAsync("github.com:1", "Example", "", customBudgetUsd: 50m, updateCustomBudget: true);
+        Check(dashboard!.Accounts[0] is { Percent: 52.5m, AllocationUsd: 50m, CustomBudgetUsd: 50m } &&
+            dashboard.Accounts[0].Details is { ObservedAllocationUsd: 25m, ObservedPercentConsumed: 105m },
+            "Shared budget view preserves the original API diagnostics.");
+        Check((await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].CustomBudgetUsd == 50m,
+            "Custom budget persists through the generated settings serializer.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "");
+        await controller.SaveSettingsAsync(controller.Settings);
+        await controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default);
+        Check(dashboard!.Accounts[0].CustomBudgetUsd == 50m &&
+            (await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].CustomBudgetUsd == 50m,
+            "Account saves without budget arguments, global saves and reconnect preserve the budget.");
+        await Reject<AppOperationException>(() => controller.SaveAccountAsync("github.com:1", "Example", "",
+            customBudgetUsd: 0m, updateCustomBudget: true));
+        Check(dashboard!.Accounts[0].CustomBudgetUsd == 50m, "Rejected budgets leave the saved target intact.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "", updateCustomBudget: true);
+        Check(dashboard!.Accounts[0] is { CustomBudgetUsd: null, Percent: 105m },
+            "Explicitly clearing a budget restores API percentages.");
         var persisted = await new JsonStore(root).LoadSettingsAsync();
         Check(persisted.Value.Accounts[0].AvatarUrl is null, "Avatar URLs are not persisted.");
         credentials.FailDelete = true;
@@ -334,6 +403,20 @@ try
                 JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
                 BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].PeriodEstimate;
             Check(decodedForecast == forecast, "Recent forecast method and date range cross the generated native bridge.");
+            var chartBeforeBudget = view.Accounts[0].EnterpriseConsumption!.Bars!;
+            await controller.SaveAccountAsync("github.com:1", "", "", customBudgetUsd: 50, updateCustomBudget: true);
+            var budgetView = view!.Accounts[0];
+            Check(budgetView is { CustomBudgetUsd: 50m, AllocationUsd: 50m, Percent: 52.5m, ConsumptionUsd: 26.25m } &&
+                budgetView.Details.ObservedAllocationUsd == 25m &&
+                budgetView.PeriodEstimate!.EstimatedConsumptionUsd == forecast.EstimatedConsumptionUsd &&
+                budgetView.PeriodEstimate.ReportedDayCount == forecast.ReportedDayCount &&
+                budgetView.PeriodEstimate.OverAllocationUsd == Math.Max(0, forecast.EstimatedConsumptionUsd!.Value - 50),
+                "Custom budgets coexist with daily forecasts while preserving observed API limits and usage.");
+            Check(budgetView.EnterpriseConsumption!.Bars!.SequenceEqual(chartBeforeBudget),
+                "Saving a custom budget does not change reported or derived daily chart bars.");
+            await controller.SaveAccountAsync("github.com:1", "", "", updateCustomBudget: true);
+            Check(view!.Accounts[0].PeriodEstimate == forecast && view.Accounts[0].Percent == 105m,
+                "Removing a custom budget restores API-limit comparison without losing daily forecasts.");
         }
         var saved = (await new JsonStore(Path.Combine(root, "enterprise")).LoadSettingsAsync()).Value;
         Check(saved.Accounts[0].ConsumptionIdentity == enterpriseTokens.Identity, "Confirmed identity is persistent.");
@@ -411,6 +494,8 @@ try
         finally { release.TrySetResult(); }
         await Until(() => parallelView!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption is { IsLoading: false });
     }
+    assertions += await BudgetBridgeTests.RunAsync(Path.Combine(root, "budget-bridge"));
+    assertions += await BudgetBridgeTests.RunAsync(Path.Combine(root, "budget-bridge-unlimited"), unlimited: true);
     Console.WriteLine($"PASS: {assertions} shared application and native bridge assertions; synthetic data only.");
 }
 finally { Directory.Delete(root, recursive: true); }
@@ -485,6 +570,7 @@ sealed class FixtureHttp : HttpMessageHandler
     public bool UnavailableDaily { get; set; }
     public bool CompleteDailyWindow { get; init; }
     public Func<int, CancellationToken, Task>? BeforeDailyResponse { get; init; }
+    public bool Unlimited { get; set; }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string json;
@@ -519,7 +605,8 @@ sealed class FixtureHttp : HttpMessageHandler
             "/login/device/code" => """{"device_code":"synthetic-device","user_code":"SYNTHETIC","verification_uri":"https://github.com/login/device","expires_in":60,"interval":1}""",
             "/login/oauth/access_token" => $$"""{"access_token":"synthetic-token-{{UserId}}","token_type":"bearer","scope":"read:user"}""",
             "/user" => $$"""{"id":{{UserId}},"login":"synthetic-user"}""",
-            "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":false}}}""",
+            "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":""" +
+                Unlimited.ToString().ToLowerInvariant() + "}}}",
             _ => throw new InvalidOperationException("Unexpected synthetic request.")
         };
         if (Eligible && request.RequestUri.AbsolutePath == "/copilot_internal/user")

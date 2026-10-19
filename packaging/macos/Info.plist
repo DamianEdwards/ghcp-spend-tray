@@ -17,5 +17,10 @@
     <key>NSHighResolutionCapable</key><true/>
     <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Damian Edwards</string>
     <key>GHCPReleaseChannel</key><string>Development</string>
+    <key>SUFeedURL</key><string>https://damianedwards.github.io/ghcp-spend-tray/appcast.xml</string>
+    <key>SUAutomaticallyUpdate</key><false/>
+    <key>SUEnableSystemProfiling</key><false/>
+    <key>SUVerifyUpdateBeforeExtraction</key><true/>
+    <key>SURequireSignedFeed</key><true/>
 </dict>
 </plist>

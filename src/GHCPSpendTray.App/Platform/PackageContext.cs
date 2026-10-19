@@ -22,6 +22,8 @@ internal static partial class PackageContext
         }
     }
     internal static string FamilyName => Package.Current.Id.FamilyName;
+    internal static string InstallationSource => !IsPackaged ? "unpackaged" :
+        Package.Current.SignatureKind == PackageSignatureKind.Store ? "microsoft-store" : "sideload";
     internal static string DataDirectory => Path.Combine(ApplicationData.Current.LocalFolder.Path, "Data");
 
     [LibraryImport("kernel32.dll")]

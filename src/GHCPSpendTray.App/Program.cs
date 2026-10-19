@@ -25,10 +25,17 @@ internal static class Program
         bool packageSmoke = args.Contains("--package-smoke-test", StringComparer.Ordinal);
         bool smoke = packageSmoke || args.Contains("--smoke-test", StringComparer.Ordinal);
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
-        bool demo = smoke || emptyDemo || args.Contains("--demo", StringComparer.Ordinal);
-        string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and not "--demo" and not "--demo-empty").ToArray();
+        bool unlimitedDemo = args.Contains("--demo-unlimited", StringComparer.Ordinal);
+        bool demo = smoke || emptyDemo || unlimitedDemo || args.Contains("--demo", StringComparer.Ordinal);
+        bool verifyTelemetry = args.Contains("--verify-telemetry", StringComparer.Ordinal);
+        string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and
+            not "--demo" and not "--demo-empty" and not "--demo-unlimited" and not "--verify-telemetry").ToArray();
         try
         {
+            if (verifyTelemetry && (!demo || smoke || !bootstrapArgs.Contains("--portable", StringComparer.Ordinal)))
+                throw new ArgumentException("--verify-telemetry requires --portable --data-dir <isolated-directory> and --demo (or a demo variant), and cannot be used with smoke tests.");
+            if (verifyTelemetry && string.IsNullOrWhiteSpace(TelemetryConfiguration.ConnectionString))
+                throw new ArgumentException("Telemetry verification requires a build with GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING configured.");
             if (packageSmoke && (!PackageContext.IsPackaged ||
                 Windows.ApplicationModel.Package.Current.Id.Name != "GHCPSpendTray.Development" ||
                 bootstrapArgs.Contains("--portable", StringComparer.Ordinal)))
@@ -45,8 +52,11 @@ internal static class Program
             }
             runtime.Diagnostic += ex => Diagnostics.Record($"Instance coordination failed ({ex.GetType().Name}).");
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
-            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime) :
-                new ApplicationController(runtime.DataDirectory, runtime.IsPortable);
+            var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
+            using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo,
+                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: verifyTelemetry, SyntheticVerification: verifyTelemetry)) :
+                new ApplicationController(runtime.DataDirectory, runtime.IsPortable,
+                    telemetry: new(UI.UI.Version, PackageContext.InstallationSource));
             int smokeExit = 0;
             ReactorShell? shell = null;
             ReactorApp.ShutdownPolicy = ShutdownPolicy.Explicit;
@@ -55,7 +65,7 @@ internal static class Program
                 ReactorApp.Run(context =>
                 {
                     if (smoke) RecordSmokePhase(runtime.DataDirectory, "Reactor initialized; creating tray shell");
-                    shell = new ReactorShell(controller);
+                    shell = new ReactorShell(controller, storeUpdates: !demo, updateService: smokeUpdates);
                     Application.Current.UnhandledException += (_, e) =>
                     {
                         Diagnostics.Record($"Reactor dispatch failed ({e.Exception.GetType().Name}).");
@@ -73,7 +83,7 @@ internal static class Program
                     shell.Start(!smoke && !runtime.IsStartup);
                     runtime.SignalReady();
                     if (smoke) RecordSmokePhase(runtime.DataDirectory, "Tray shell ready; starting synthetic smoke");
-                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, code => smokeExit = code);
+                    if (smoke) _ = RunSmokeAsync(shell, runtime.DataDirectory, smokeTime!, smokeUpdates!, code => smokeExit = code);
                 });
             }
             finally { shell?.Dispose(); }
@@ -93,7 +103,8 @@ internal static class Program
         File.AppendAllText(Path.Combine(directory, "native-smoke-progress.txt"),
             $"{DateTimeOffset.UtcNow:O} {phase}{Environment.NewLine}");
 
-    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time, Action<int> setExit)
+    private static async Task RunSmokeAsync(ReactorShell shell, string directory, SmokeTimeProvider time,
+        SmokeStoreUpdates updates, Action<int> setExit)
     {
         try
         {
@@ -230,6 +241,8 @@ internal static class Program
             RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
             await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
+            await SmokeFormValidationAsync(shell);
+            await SmokeDirtyFormsAsync(shell);
             RecordSmokePhase(directory, "Testing flyout focus transitions and account onboarding");
             await OnUI(shell, () => SendTraySelection(shell, Win32.NIN_KEYSELECT));
             await WaitForFlyoutVisibility(shell, true, "after opening from settings");
@@ -359,15 +372,19 @@ internal static class Program
             await WaitForSettingsUI(shell, "reopened Notifications settings");
             if (!empty) await SmokeUsageDeepLinksAsync(shell);
             if (empty) await SmokeSingleAccountPopupAsync(shell);
+            RecordSmokePhase(directory, "Testing synthetic Store update About controls");
+            await SmokeStoreUpdatesAsync(shell, updates);
             await OnUI(shell, () =>
             {
                 AssertBackAccelerators(shell.SettingsWindow!);
-                if (shell.Session.Page != SettingsPage.Notifications) throw new InvalidOperationException("Settings navigation failed.");
+                if (shell.Session.Page != SettingsPage.About) throw new InvalidOperationException("Settings navigation failed.");
                 SmokeCredentials();
                 if (shell.Session.TestNotification?.Invoke() != true) throw new InvalidOperationException("Shell notification rejected.");
                 RecordSmokePhase(directory, "All synthetic smoke assertions passed; exiting Reactor");
                 File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"),
-                    "PASS: immediate semantic mouse/keyboard tray toggle, raw mouse callbacks ignored, no double-click shortcut, " +
+                    "PASS: fixed Save/Cancel footer, dirty Back/page/close/quit prompts and safe draft decisions, " +
+                    "inline settings validation borders, field messages and accessible help text, correction and override reset, " +
+                    "immediate semantic mouse/keyboard tray toggle, raw mouse callbacks ignored, no double-click shortcut, " +
                     "popup settings gear, hide/reopen and focus transitions, synchronized automation and committed UI layout, " +
                     "Reactor cost flyout, usage-first settings without sampled chart, independent collapsed account diagnostics, " +
                     "per-account estimate opt-in/off/unavailable, UTC disclosure and unchanged observed totals/tray, " +
@@ -376,6 +393,7 @@ internal static class Program
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
                     "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
                     "simulated TaskbarCreated recovery and display-change repaint, " +
+                    "synthetic Store latest/update About controls, native update notification opens About, consent cancellation and retry, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -388,6 +406,88 @@ internal static class Program
             File.WriteAllText(Path.Combine(directory, "native-smoke-result.txt"), $"FAIL: {ex.GetType().Name}: {ex.Message}\n");
             ReactorApp.UIDispatcher?.TryEnqueue(() => ReactorApp.Exit(1));
         }
+    }
+    private sealed class SmokeStoreUpdates : IStoreUpdates
+    {
+        internal bool Available { get; set; }
+        internal int Installs { get; private set; }
+        public Task<bool> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(Available);
+        public Task<StoreInstallResult> InstallAsync(nint owner, Action<StoreUpdateProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            if (owner == 0) throw new InvalidOperationException("Synthetic Store request has no owner HWND.");
+            Installs++;
+            return Task.FromResult(StoreInstallResult.Canceled);
+        }
+        public void Restart() => throw new InvalidOperationException("Synthetic canceled update must not restart.");
+    }
+    private static async Task SmokeStoreUpdatesAsync(ReactorShell shell, SmokeStoreUpdates updates)
+    {
+        await OnUI(shell, () => shell.ShowSettings(SettingsPage.About));
+        await WaitForSettingsUI(shell, "Store latest-version About");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "You're running the latest version." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not null)
+                throw new InvalidOperationException("Current Store app must show latest-version status without an Update button.");
+            updates.Available = true;
+            shell.Session.StoreUpdates!.Check(force: true);
+        });
+        await WaitForSettingsUI(shell, "Store update available");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "An update is available." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { Content: "Update", IsEnabled: true })
+                throw new InvalidOperationException("Available Store update must render its enabled Update action.");
+            shell.Session.Navigate(SettingsPage.Usage);
+            shell.SettingsWindow!.NativeWindow.Close();
+        });
+        await WaitForUI(shell, "settings closed before notification click", () => shell.SettingsWindow is null);
+        await OnUI(shell, () =>
+        {
+            var icon = shell.TrayIcons.Single(icon => icon.NotificationAccount == "store-update");
+            Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0,
+                (nint)((icon.Id << 16) | (uint)Win32.NIN_BALLOONUSERCLICK));
+        });
+        await WaitForSettingsUI(shell, "native Store notification opens About");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Page != SettingsPage.About ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("Clicking the Store update notification must open About with its Update action.");
+        });
+        await InvokeButtonAsync(shell, "InstallStoreUpdate");
+        await WaitForSettingsUI(shell, "Store consent cancellation");
+        await OnUI(shell, () =>
+        {
+            if (updates.Installs != 1 || shell.Session.StoreUpdates!.Updating ||
+                Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Update canceled. You can try again." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("Canceled Store consent must leave a retryable Update action.");
+            shell.Session.Navigate(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "Store update in-app notice");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "ViewStoreUpdate") is not Button { IsEnabled: true })
+                throw new InvalidOperationException("An available update must be discoverable outside About.");
+        });
+        await InvokeButtonAsync(shell, "ViewStoreUpdate");
+        await WaitForSettingsUI(shell, "Store update notice opens About");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Page != SettingsPage.About)
+                throw new InvalidOperationException("Update notice did not open About.");
+            updates.Available = false;
+            shell.Session.StoreUpdates!.Check(force: true);
+        });
+        await WaitForSettingsUI(shell, "Store update cleared externally");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "You're running the latest version." } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not null)
+                throw new InvalidOperationException("A cleared Store update must remove the Update action.");
+        });
     }
     private sealed class SmokeTimeProvider : TimeProvider
     {
@@ -406,7 +506,7 @@ internal static class Program
             await OnUI(shell, () =>
             {
                 var panel = Find(shell.SettingsWindow!, key + "_UsagePanel") as FrameworkElement;
-                var scroll = Find(shell.SettingsWindow!, "SettingsContentScroll");
+                var scroll = Find(shell.SettingsWindow!, "SettingsScroll");
                 RecordSmokePhase(shell.Session.Controller.DataDirectory,
                     $"Usage destination key={key}, target={shell.Session.UsageAccountKey}, panel={panel?.GetType().Name}, " +
                     $"scroll={scroll?.GetType().Name}, top={(scroll is UIElement element ? panel?.TransformToVisual(element).TransformPoint(default).Y : null)}.");
@@ -417,7 +517,7 @@ internal static class Program
                 if (shell.Session.Page != SettingsPage.Usage || shell.Session.UsageAccountKey != key ||
                     shell.Session.SelectedAccount is not null || shell.Session.ShowAddForm ||
                     Find(window, key + "_UsagePanel") is not FrameworkElement panel ||
-                    Find(window, "SettingsContentScroll") is not ScrollView scroll)
+                    Find(window, "SettingsScroll") is not ScrollView scroll)
                     return false;
                 double top = panel.TransformToVisual(scroll).TransformPoint(default).Y;
                 return top >= -1 && top < scroll.ActualHeight - 40;
@@ -461,6 +561,242 @@ internal static class Program
             });
         }
         await OnUI(shell, () => shell.Flyout!.Hide());
+    }
+
+    private static async Task SmokeDirtyFormsAsync(ReactorShell shell)
+    {
+        if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        var account = shell.Session.Dashboard.Accounts[0];
+        await OnUI(shell, () => shell.Session.EditAccount(account.Key));
+        await WaitForSettingsUI(shell, "fixed account actions");
+        double footerY = 0;
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            var root = (FrameworkElement)window.NativeWindow.Content;
+            var footer = (FrameworkElement)Find(window, "SettingsFormActions")!;
+            if (Find(window, "SaveAccount") is not Button { IsEnabled: false } ||
+                Find(window, "CancelSettingsChanges") is not Button { IsEnabled: false })
+                throw new InvalidOperationException("Clean forms must have visible, disabled Save and Cancel actions.");
+            for (DependencyObject? parent = VisualTreeHelper.GetParent(footer); parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                if (ReferenceEquals(parent, Find(window, "SettingsScroll")))
+                    throw new InvalidOperationException("Save and Cancel must not be inside scrolling form content.");
+            footerY = footer.TransformToVisual(root).TransformPoint(new Windows.Foundation.Point()).Y;
+            ((ScrollView)Find(window, "SettingsScroll")!).ScrollTo(0, double.MaxValue,
+                new ScrollingScrollOptions(ScrollingAnimationMode.Disabled, ScrollingSnapPointsMode.Ignore));
+        });
+        await WaitForUI(shell, "account form actually scrolled", () =>
+            Find(shell.SettingsWindow!, "SettingsScroll") is ScrollView { VerticalOffset: > 0 });
+        await WaitForSettingsUI(shell, "scrolled account form");
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            var root = (FrameworkElement)window.NativeWindow.Content;
+            var footer = (FrameworkElement)Find(window, "SettingsFormActions")!;
+            double y = footer.TransformToVisual(root).TransformPoint(new Windows.Foundation.Point()).Y;
+            if (Math.Abs(y - footerY) > 1 || y + footer.ActualHeight > root.ActualHeight + 1)
+                throw new InvalidOperationException("Scrolling must leave the form action footer visible and stationary.");
+            ((TextBox)Find(window, "DisplayName")!).Text = "Unsaved native draft";
+        });
+        await WaitForSettingsUI(shell, "dirty account status");
+        await InvokeButtonAsync(shell, "AccountBack");
+        await ChooseDialog("Keep editing");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.SelectedAccount != account.Key || shell.Session.DisplayName != "Unsaved native draft" ||
+                Find(shell.SettingsWindow!, "SettingsDraftStatus") is not TextBlock { Text: "Unsaved changes" })
+                throw new InvalidOperationException("Keep editing must preserve the form and its dirty draft.");
+            var navigation = FindNode<NavigationView>((DependencyObject)shell.SettingsWindow!.NativeWindow.Content)!;
+            navigation.SelectedItem = navigation.MenuItems.OfType<NavigationViewItem>().Single(item => Equals(item.Tag, "General"));
+        });
+        await ChooseDialog("Keep editing");
+        await OnUI(shell, () =>
+        {
+            var navigation = FindNode<NavigationView>((DependencyObject)shell.SettingsWindow!.NativeWindow.Content)!;
+            if (shell.Session.Page != SettingsPage.Accounts ||
+                navigation.SelectedItem is not NavigationViewItem item || !Equals(item.Tag, "Accounts"))
+                throw new InvalidOperationException("Canceled navigation must keep both content and selected page on Accounts.");
+        });
+        await InvokeButtonAsync(shell, "CancelSettingsChanges");
+        await WaitForSettingsUI(shell, "canceled account draft");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.HasUnsavedChanges || shell.Session.DisplayName != shell.Session.Controller.AccountSettings(account.Key).DisplayName)
+                throw new InvalidOperationException("The fixed Cancel action must restore saved account settings.");
+            ((ComboBox)Find(shell.SettingsWindow!, "BudgetBasis")!).SelectedIndex = 1;
+        });
+        await WaitForSettingsUI(shell, "budget input before guarded Save");
+        await OnUI(shell, () => ((TextBox)Find(shell.SettingsWindow!, "CustomBudget")!).Text = "test");
+        await WaitForUI(shell, "invalid budget draft becomes dirty", () => shell.Session.CustomBudget == "test" && shell.Session.HasUnsavedChanges);
+        await InvokeButtonAsync(shell, "AccountBack");
+        await ChooseDialog("Save");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.SelectedAccount != account.Key || !shell.Session.HasUnsavedChanges ||
+                Find(shell.SettingsWindow!, "CustomBudgetError") is not TextBlock ||
+                shell.Session.Dashboard.Accounts[0].CustomBudgetUsd is not null)
+                throw new InvalidOperationException("Save from the leave prompt must retain and highlight an invalid draft without navigating.");
+        });
+        await InvokeButtonAsync(shell, "CancelSettingsChanges");
+        await WaitForSettingsUI(shell, "invalid guarded draft canceled");
+        string originalName = shell.Session.Controller.AccountSettings(account.Key).DisplayName;
+        foreach (string name in new[] { "Saved native draft", originalName })
+        {
+            await OnUI(shell, () => ((TextBox)Find(shell.SettingsWindow!, "DisplayName")!).Text = name);
+            await WaitForUI(shell, "account name draft becomes dirty", () => shell.Session.DisplayName == name && shell.Session.HasUnsavedChanges);
+            await InvokeButtonAsync(shell, "AccountBack");
+            await ChooseDialog("Save");
+            await OnUI(shell, () =>
+            {
+                if (shell.Session.SelectedAccount is not null || shell.Session.Controller.AccountSettings(account.Key).DisplayName != name)
+                    throw new InvalidOperationException("Save from the leave prompt must persist the draft before navigating Back.");
+                shell.Session.EditAccount(account.Key);
+            });
+            await WaitForSettingsUI(shell, "saved account reopened");
+        }
+        await OnUI(shell, () =>
+        {
+            shell.Session.Navigate(SettingsPage.General);
+        });
+        await WaitForSettingsUI(shell, "fixed global actions");
+        await OnUI(shell, () => ((TextBox)Find(shell.SettingsWindow!, "PollMinutes")!).Text = "20");
+        await WaitForUI(shell, "global draft becomes dirty", () => shell.Session.HasUnsavedChanges);
+        await OnUI(shell, shell.Exit);
+        await ChooseDialog("Keep editing");
+        var settings = shell.SettingsWindow!;
+        await OnUI(shell, RequestSettingsClose);
+        await ChooseDialog("Keep editing");
+        await OnUI(shell, () =>
+        {
+            if (!ReferenceEquals(shell.SettingsWindow, settings) || shell.Session.PollMinutes != "20")
+                throw new InvalidOperationException("Keep editing must cancel Settings close and app quit without losing the draft.");
+            RequestSettingsClose();
+        });
+        await ChooseDialog("Discard");
+        await WaitForUI(shell, "discarded settings window closes", () => shell.SettingsWindow is null);
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.Controller.Settings.PollMinutes != 10)
+                throw new InvalidOperationException("Discard must not save the global draft.");
+            shell.ShowSettings(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "settings reopened after protected close");
+
+        void RequestSettingsClose() => Win32.SendMessage(
+            WinRT.Interop.WindowNative.GetWindowHandle(settings.NativeWindow), Win32.WM_CLOSE, 0, 0);
+
+        async Task ChooseDialog(string label)
+        {
+            await WaitForUI(shell, "unsaved changes dialog opens", () => LiveDialog() is { IsLoaded: true, ActualWidth: > 0 });
+            try
+            {
+                await InvokeButtonAsync(shell, "Unsaved changes: " + label, findButton: () =>
+                    LiveDialog() is { } dialog ? FindDialogButton(dialog, label) : null);
+            }
+            catch (TimeoutException ex)
+            {
+                string details = "";
+                await OnUI(shell, () =>
+                {
+                    if (LiveDialog() is { } dialog)
+                        details = $"primary={dialog.PrimaryButtonText}, secondary={dialog.SecondaryButtonText}, close={dialog.CloseButtonText}; " +
+                            string.Join("; ", DialogControls(dialog));
+                });
+                throw new TimeoutException("Unsaved changes dialog did not expose the requested action: " + details, ex);
+            }
+            await WaitForUI(shell, "unsaved changes decision completes", () => !shell.Session.HasPendingNavigation && LiveDialog() is null);
+            if (shell.SettingsWindow is not null) await WaitForSettingsUI(shell, "unsaved changes decision renders");
+        }
+        ContentDialog? LiveDialog()
+        {
+            if (shell.SettingsWindow?.NativeWindow.Content is not FrameworkElement root) return null;
+            return VisualTreeHelper.GetOpenPopupsForXamlRoot(root.XamlRoot)
+                .Select(popup => popup.Child is { } child ? FindNode<ContentDialog>(child) : null)
+                .FirstOrDefault(dialog => dialog is not null);
+        }
+        static T? FindNode<T>(DependencyObject node) where T : DependencyObject
+        {
+            if (node is T result) return result;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                if (FindNode<T>(VisualTreeHelper.GetChild(node, i)) is { } child) return child;
+            return null;
+        }
+        static Button? FindDialogButton(DependencyObject node, string label)
+        {
+            if (node is Button button && (Equals(button.Content, label) ||
+                new ButtonAutomationPeer(button).GetName() == label)) return button;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                if (FindDialogButton(VisualTreeHelper.GetChild(node, i), label) is { } child) return child;
+            return null;
+        }
+        static IEnumerable<string> DialogControls(DependencyObject node)
+        {
+            if (node is Button button)
+                yield return $"button={new ButtonAutomationPeer(button).GetName()}, name={button.Name}, " +
+                    $"enabled={button.IsEnabled}, loaded={button.IsLoaded}, size={button.ActualWidth}x{button.ActualHeight}";
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                foreach (string value in DialogControls(VisualTreeHelper.GetChild(node, i))) yield return value;
+        }
+    }
+
+    private static async Task SmokeFormValidationAsync(ReactorShell shell)
+    {
+        if (shell.Session.Dashboard.Accounts.Count == 0) return;
+        var account = shell.Session.Dashboard.Accounts[0];
+        await OnUI(shell, () => shell.Session.EditAccount(account.Key));
+        await WaitForSettingsUI(shell, "budget validation preferences");
+        await OnUI(shell, () => ((ComboBox)Find(shell.SettingsWindow!, "BudgetBasis")!).SelectedIndex = 1);
+        await WaitForSettingsUI(shell, "custom budget input");
+        TextBox? budgetInput = null;
+        await OnUI(shell, () =>
+        {
+            budgetInput = (TextBox)Find(shell.SettingsWindow!, "CustomBudget")!;
+            budgetInput.Text = "test";
+        });
+        await WaitForSettingsUI(shell, "invalid budget draft");
+        await InvokeButtonAsync(shell, "SaveAccount");
+        await WaitForSettingsUI(shell, "inline budget validation");
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "CustomBudgetError") is not TextBlock message || !message.Text.Contains("greater than $0") ||
+                Find(window, "CustomBudgetValidationBorder") is not Border { BorderThickness.Left: 2, BorderBrush: not null } ||
+                Find(window, "CustomBudget") is not TextBox input || AutomationProperties.GetHelpText(input) != message.Text ||
+                Find(window, "SettingsValidationFeedback") is null || shell.Session.Busy ||
+                shell.Session.Dashboard.Accounts[0].CustomBudgetUsd is not null)
+                throw new InvalidOperationException("Invalid budget must have a visible field border, local error and accessible help without saving.");
+            input.Text = "50";
+        });
+        await WaitForSettingsUI(shell, "corrected budget validation");
+        await OnUI(shell, () =>
+        {
+            var window = shell.SettingsWindow!;
+            if (Find(window, "CustomBudgetError") is not null ||
+                Find(window, "CustomBudgetValidationBorder") is not Border { BorderThickness.Left: 0 } ||
+                Find(window, "SettingsValidationFeedback") is not null ||
+                Find(window, "CustomBudget") is not TextBox input || AutomationProperties.GetHelpText(input) != "" ||
+                !ReferenceEquals(input, budgetInput))
+                throw new InvalidOperationException("Correction must clear validation without replacing the active input. " +
+                    $"error={Find(window, "CustomBudgetError") is not null}, " +
+                    $"border={(Find(window, "CustomBudgetValidationBorder") as Border)?.BorderThickness.Left}, " +
+                    $"summary={Find(window, "SettingsValidationFeedback") is not null}, " +
+                    $"help={(Find(window, "CustomBudget") is TextBox value ? AutomationProperties.GetHelpText(value) : "missing")}, " +
+                    $"retained={ReferenceEquals(Find(window, "CustomBudget"), budgetInput)}.");
+            input.Text = "test";
+        });
+        await WaitForSettingsUI(shell, "invalid budget again");
+        await InvokeButtonAsync(shell, "SaveAccount");
+        await WaitForSettingsUI(shell, "budget override reset");
+        await OnUI(shell, () => ((ComboBox)Find(shell.SettingsWindow!, "BudgetBasis")!).SelectedIndex = 0);
+        await WaitForSettingsUI(shell, "API allocation reset");
+        await OnUI(shell, () =>
+        {
+            if (shell.Session.HasFieldErrors || Find(shell.SettingsWindow!, "CustomBudgetError") is not null ||
+                Find(shell.SettingsWindow!, "SettingsValidationFeedback") is not null)
+                throw new InvalidOperationException("An inactive budget must not retain its validation error.");
+            shell.Session.Navigate(SettingsPage.Usage);
+        });
+        await WaitForSettingsUI(shell, "Usage after validation");
     }
 
     private static async Task SmokePeriodEstimateAsync(ReactorShell shell, SmokeTimeProvider time, Action<string> phase)
@@ -533,7 +869,7 @@ internal static class Program
         await WaitForFlyoutUI(shell, "flyout estimate row");
         await OnUI(shell, () =>
         {
-            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount);
+            AssertEstimateRow(shell.Flyout!, key + "_Flyout_", amount, rightAlignAmount: true);
             if (Find(shell.Flyout!, "example.ghe.com:2_Flyout_PeriodEstimate") is not null ||
                 Find(shell.Flyout!, "TotalConsumption") is not TextBlock { Text: "$42.75" })
                 throw new InvalidOperationException("Flyout estimate changed observed totals or another account.");
@@ -606,7 +942,7 @@ internal static class Program
                 throw new InvalidOperationException("Estimate disclosure is not keyboard/screen-reader accessible.");
             expand.Expand();
         }
-        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected)
+        static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
                 Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||
@@ -621,11 +957,17 @@ internal static class Program
                     $"help={(Find(window, prefix + "PeriodEstimate") is FrameworkElement estimate ? ToolTipService.GetToolTip(estimate) is not null : false)}.");
             var labelOrigin = label.TransformToVisual(row).TransformPoint(new(0, 0));
             var amountOrigin = amount.TransformToVisual(row).TransformPoint(new(0, 0));
+            double labelGap = amountOrigin.X - (labelOrigin.X + label.ActualWidth);
+            bool aligned = rightAlignAmount
+                ? Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) <= 1
+                : Math.Abs(labelGap - 12) <= 1 && Math.Abs(labelOrigin.X) <= 1;
             if (row.ActualWidth <= 0 || Math.Abs(labelOrigin.Y - amountOrigin.Y) > 1 ||
                 amountOrigin.X < labelOrigin.X + label.ActualWidth ||
-                Math.Abs(amountOrigin.X + amount.ActualWidth - row.ActualWidth) > 1 ||
+                !aligned ||
                 amount.FontSize >= 21)
-                throw new InvalidOperationException("Estimate is not a secondary, right-aligned row like the macOS reference.");
+                throw new InvalidOperationException(rightAlignAmount
+                    ? "Flyout estimate is not a secondary row with the amount at the right edge."
+                    : "Settings estimate is not a secondary row with the amount 12 pixels beside the left-aligned label.");
         }
         static void AssertEstimateDisclosure(ReactorWindow window, string prefix, string expected)
         {
@@ -837,7 +1179,21 @@ internal static class Program
             if (complete) return;
             await Task.Delay(25);
         } while (elapsed.Elapsed < TimeSpan.FromSeconds(5));
-        throw new TimeoutException($"UI readiness timed out at {stage} after {elapsed.Elapsed.TotalSeconds:F2}s: {state}");
+        string renderFailure = "";
+        if (shell.SettingsRenderedRevision < 0 && shell.SettingsWindow is { } failedWindow)
+            await OnUI(shell, () =>
+            {
+                if (failedWindow.NativeWindow.Content is DependencyObject root)
+                    renderFailure = " | Rendered text: " + string.Join(" | ", TextInTree(root));
+            });
+        throw new TimeoutException($"UI readiness timed out at {stage} after {elapsed.Elapsed.TotalSeconds:F2}s: {state}{renderFailure}");
+
+        static IEnumerable<string> TextInTree(DependencyObject node)
+        {
+            if (node is TextBlock text) yield return text.Text;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                foreach (string fragment in TextInTree(VisualTreeHelper.GetChild(node, i))) yield return fragment;
+        }
     }
 
     private static async Task SmokeTraySettingsAsync(ReactorShell shell)
@@ -891,8 +1247,10 @@ internal static class Program
         });
         await WaitForSettingsUI(shell, "tray account selections");
         (uint Id, nint Image)[] installedIcons = [];
+        bool hasTrayAccounts = false;
         await OnUI(shell, () =>
         {
+            hasTrayAccounts = shell.Session.Dashboard.Accounts.Count > 0;
             installedIcons = shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).ToArray();
             foreach (var account in shell.Session.Dashboard.Accounts)
             {
@@ -907,9 +1265,16 @@ internal static class Program
             AssertTrayPreview(shell);
             if (!shell.TrayIcons.Select(icon => (icon.Id, icon.ImageHandle)).SequenceEqual(installedIcons))
                 throw new InvalidOperationException("Draft exclusions changed installed tray icons.");
+            if (!hasTrayAccounts && (shell.Session.HasUnsavedChanges ||
+                Find(shell.SettingsWindow!, "SaveGeneralSettings") is not Button { IsEnabled: false } ||
+                Find(shell.SettingsWindow!, "CancelSettingsChanges") is not Button { IsEnabled: false }))
+                throw new InvalidOperationException("Empty account exclusions created a draft or enabled Save/Cancel.");
         });
-        await InvokeButtonAsync(shell, "SaveGeneralSettings");
-        await WaitForTraySave();
+        if (hasTrayAccounts)
+        {
+            await InvokeButtonAsync(shell, "SaveGeneralSettings");
+            await WaitForTraySave();
+        }
         await OnUI(shell, () =>
         {
             if (shell.TrayIcons.Count != 1 || shell.TrayIcons.First().AccountKey is not null ||
@@ -1012,9 +1377,9 @@ internal static class Program
     private static void SendTraySelection(ReactorShell shell, int notification, uint id = 1) =>
         Win32.SendMessage(shell.TrayHandle, Win32.WM_TRAY, 0, (nint)((id << 16) | (uint)notification));
 
-    private static async Task InvokeButtonAsync(ReactorShell shell, string id, bool flyout = false)
+    private static async Task InvokeButtonAsync(ReactorShell shell, string id, bool flyout = false, Func<Button?>? findButton = null)
     {
-        Button? FindButton() => (flyout ? shell.Flyout : shell.SettingsWindow) is { } window
+        Button? FindButton() => findButton is not null ? findButton() : (flyout ? shell.Flyout : shell.SettingsWindow) is { } window
             ? Find(window, id) as Button : null;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Button? button = null;

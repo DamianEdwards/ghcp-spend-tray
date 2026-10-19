@@ -8,6 +8,8 @@ public sealed record PeriodEstimate(decimal? EstimatedConsumptionUsd = null,
 
 public static class PeriodEstimates
 {
+    private static readonly TimeSpan SourceClockSkewTolerance = TimeSpan.FromMinutes(1);
+
     public static PeriodEstimate? Create(AccountState state, DateTimeOffset now, TimeSpan freshness,
         DailyConsumption? dailyConsumption = null)
     {
@@ -40,6 +42,10 @@ public static class PeriodEstimates
             return estimate with { UnavailableReason = "Billing period differs from a UTC calendar month." };
 
         var observed = snapshot.SourceTimestampUtc ?? snapshot.FetchedAtUtc;
+        // Tolerate minor server/client clock skew without projecting from a future observation.
+        if (observed > snapshot.FetchedAtUtc &&
+            observed - snapshot.FetchedAtUtc <= SourceClockSkewTolerance)
+            observed = snapshot.FetchedAtUtc;
         estimate = estimate with { ObservedAtUtc = observed.ToUniversalTime() };
         if (observed < start || observed > snapshot.FetchedAtUtc)
             return estimate with { UnavailableReason = "Usage observation time is outside the supported period." };
@@ -65,8 +71,9 @@ public static class PeriodEstimates
                 };
             }
             else projected = snapshot.ConsumptionUsd * periodDays / elapsedDays;
-            decimal? over = !snapshot.Unlimited && snapshot.AllocationUsd is > 0
-                ? Math.Max(0, projected - snapshot.AllocationUsd.Value) : null;
+            decimal? allocation = UsageBudget.Allocation(state.Account, snapshot);
+            decimal? over = allocation is > 0
+                ? Math.Max(0, projected - allocation.Value) : null;
             return estimate with
             {
                 EstimatedConsumptionUsd = projected, AverageDailyConsumptionUsd = daily,

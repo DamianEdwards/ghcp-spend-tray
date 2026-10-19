@@ -187,6 +187,7 @@ class MacVerificationLaneTests(unittest.TestCase):
             tools.mkdir(parents=True)
             shutil.copyfile(ROOT / "tools/macos/verify.sh", tools / "verify.sh")
             (tools / "sdk.sh").write_text("# Synthetic SDK setup.\n")
+            (tools / "sparkle.sh").write_text('export SPARKLE_ROOT="/synthetic-sparkle"\n')
             binaries = root / "bin"
             binaries.mkdir()
             stub = '#!/bin/bash\nprintf "%s %s\\n" "${0##*/}" "$*" >> "$TRACE"\n'

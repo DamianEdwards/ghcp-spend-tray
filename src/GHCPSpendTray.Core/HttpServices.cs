@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -15,6 +16,7 @@ public static class HttpTransport
     {
         AllowAutoRedirect = false,
         UseCookies = false,
+        ActivityHeadersPropagator = DistributedContextPropagator.CreateNoOutputPropagator(),
         PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         ConnectTimeout = TimeSpan.FromSeconds(20)
     }) { Timeout = TimeSpan.FromSeconds(60) };
@@ -304,6 +306,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
 
     public async Task<UsageSnapshot> FetchAsync(Account account, CancellationToken cancellationToken = default)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("consumption.fetch");
         TokenSet tokens = await tokenManager.GetAsync(account, cancellationToken: cancellationToken).ConfigureAwait(false);
         try { return await FetchWithTokenAsync(account, tokens, cancellationToken).ConfigureAwait(false); }
         catch (ServiceException ex) when (ex.Status == AccountStatus.SignInRequired)
@@ -356,10 +359,11 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         {
             var result = new UsageSnapshot
             {
+                MicrosoftEnterprise = MicrosoftEnterprise(wire.EnterpriseList),
                 AccountKey = accountKey, FetchedAtUtc = fetched.ToUniversalTime(),
                 SourceTimestampUtc = source, ResetAtUtc = reset,
                 PeriodId = BillingPeriods.Resolve(fetched, reset),
-                EnterpriseIds = wire.Enterprises?.Select(e => e.Id).Distinct().ToArray() ?? [],
+                EnterpriseIds = EnterpriseIds(wire.EnterpriseList),
                 CreditsUsed = quota.CreditsUsed.Value, Entitlement = quota.Entitlement,
                 Unlimited = quota.Unlimited.Value,
                 ConsumptionUsd = CreditPolicy.ToUsd(quota.CreditsUsed.Value),
@@ -371,6 +375,35 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         }
         catch (Exception ex) when (ex is OverflowException or ArgumentException)
         { throw new ServiceException(AccountStatus.InvalidData, "Usage or limit values are outside the supported range."); }
+    }
+
+    private static long[] EnterpriseIds(JsonElement enterprises)
+    {
+        if (enterprises.ValueKind != JsonValueKind.Array) return [];
+        var ids = new HashSet<long>();
+        foreach (var enterprise in enterprises.EnumerateArray())
+            if (enterprise.ValueKind == JsonValueKind.Object && enterprise.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out var value) && value > 0)
+                ids.Add(value);
+        return ids.ToArray();
+    }
+
+    private static bool? MicrosoftEnterprise(JsonElement enterprises)
+    {
+        if (enterprises.ValueKind != JsonValueKind.Array) return null;
+        bool unknown = false;
+        foreach (JsonElement enterprise in enterprises.EnumerateArray())
+        {
+            if (enterprise.ValueKind != JsonValueKind.Object ||
+                !enterprise.TryGetProperty("id", out var id) ||
+                id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out long number) || number <= 0)
+            {
+                unknown = true;
+                continue;
+            }
+            if (number is 134482 or 1578 or 13213) return true;
+        }
+        return unknown ? null : false;
     }
 
     private static DateTimeOffset? Timestamp(JsonElement element, string name)
