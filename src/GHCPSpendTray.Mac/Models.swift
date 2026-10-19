@@ -82,6 +82,9 @@ struct DailySpendData: Decodable, Identifiable {
     let amountUsd: Decimal
     let estimated: Bool
     let derived: Bool
+
+    var kind: String { estimated ? "Estimated" : derived ? "Today - from current usage" : "Reported" }
+    var tooltip: String { "\(dailyDateText(date)): \(money(amountUsd)) USD - \(kind)" }
 }
 
 struct PeriodEstimateData: Decodable {
@@ -261,6 +264,20 @@ func dateValue(_ text: String?) -> Date? {
 
 func dateText(_ text: String?) -> String {
     dateValue(text)?.formatted(date: .abbreviated, time: .shortened) ?? "Unavailable"
+}
+
+func dailyDateText(_ text: String, month: Bool = false) -> String {
+    let parser = DateFormatter()
+    parser.locale = Locale(identifier: "en_US_POSIX")
+    parser.timeZone = TimeZone(secondsFromGMT: 0)
+    parser.dateFormat = "yyyy-MM-dd"
+    guard let date = parser.date(from: text) else { return text }
+    let formatter = DateFormatter()
+    formatter.locale = .current
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    if month { formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy") }
+    else { formatter.dateStyle = .short }
+    return formatter.string(from: date)
 }
 
 func utcDateText(_ text: String?) -> String {

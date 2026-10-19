@@ -31,8 +31,31 @@ token, or consumption values. This is not evidence of access for every corporate
 identity or enterprise. Production refresh rotation and provider availability
 remain subject to Azure CLI sign-in and service permissions.
 
-SwiftUI changes require the native Apple-silicon macOS verification lane;
-macOS compilation and visual rendering were not verified on this Windows host.
+Local Apple-silicon macOS verification now covers Swift 6 compilation, arm64
+Native AOT packaging, synthetic Keychain CRUD, and populated/empty app smoke.
+Native fixtures render all six corporate setup states, full and compact daily
+charts, today's derived remainder, loading, and connected-without-reports.
+Chart snapshots were visually inspected for labeled USD scales, gridlines,
+solid accent fills and translucent dashed estimates. Each column now has an
+explicit plot-height container so its baseline aligns with the USD grid rather
+than accumulating extra spacer spacing. Light/dark native bitmap assertions
+check alignment within one point, translucent fills and dashed edge gaps on
+both chart sizes; the alignment regression fails against the original layout.
+Native tests exercise setup bridge commands and identity confirmation, regional
+tooltip formatting west of UTC, and actual repeated popup-account clicks into
+Usage. Populated app smoke validates chart bars, axis bounds, setup state and
+no-report messages across the executed Native AOT/Swift boundary. Stale native
+forecast assertions now expect the current "over limit" terminology.
+An opt-in live macOS check also exercised the production Azure CLI token
+provider, GitHub identity and quota parsers, enterprise eligibility, corporate
+API client and daily-chart reconciliation. The live report reconciled with
+current usage and produced today's derived bar. Forced token reacquisition
+retained the same stable work identity. The user confirmed that the locally
+built app displayed daily usage in both Usage and the menu-bar popup.
+No token, identity value, usage amount, response body or real-account screenshot
+was included in the verification output or committed artifacts. The production
+endpoint remained a build-time input. This establishes access for that manual
+verification only, not other identities or expiry-driven token rotation.
 Windows background screenshots returned black content, so pixel-level visual
 confirmation was unavailable; native accessibility inspection and synthetic
 WinUI style/layout assertions provide the local UI evidence.

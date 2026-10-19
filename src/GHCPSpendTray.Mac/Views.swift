@@ -166,6 +166,8 @@ struct FlyoutView: View {
                                 model.viewUsage(account.key)
                             } label: { AccountRow(account: account) }
                                 .buttonStyle(.plain)
+                                .help("View usage for \(account.name)")
+                                .accessibilityIdentifier(account.key + "_ViewUsage")
                             DailyConsumptionChartView(account: account, compact: true)
                             Divider()
                         }
@@ -502,24 +504,6 @@ struct DailyConsumptionChartView: View {
     let account: AccountData
     var compact = false
 
-    private func regionalDate(_ text: String, month: Bool = false) -> String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.timeZone = TimeZone(secondsFromGMT: 0)
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: text) else { return text }
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        if month { formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy") }
-        else { formatter.dateStyle = .short }
-        return formatter.string(from: date)
-    }
-
-    private func kind(_ bar: DailySpendData) -> String {
-        bar.estimated ? "Estimated" : bar.derived ? "Today - from current usage" : "Reported"
-    }
-
     var body: some View {
         if let view = account.enterpriseConsumption, let bars = view.bars, !bars.isEmpty,
            let ticks = view.axisTicks, let maximum = ticks.last, maximum > 0 {
@@ -527,7 +511,7 @@ struct DailyConsumptionChartView: View {
             let plotHeight: CGFloat = compact ? 64 : 150
             let stride = max(1, Int(ceil(Double(bars.count) / (compact ? 6 : 16))))
             VStack(alignment: .leading, spacing: 8) {
-                Text("Daily Usage - \(regionalDate(bars[0].date, month: true))\(compact ? "" : " (UTC)")")
+                Text("Daily Usage - \(dailyDateText(bars[0].date, month: true))\(compact ? "" : " (UTC)")")
                     .font(compact ? .caption : .headline)
                 Text("USD").font(.caption2).foregroundStyle(.secondary)
                 HStack(alignment: .top, spacing: 6) {
@@ -552,7 +536,6 @@ struct DailyConsumptionChartView: View {
                         HStack(alignment: .bottom, spacing: compact ? 2 : 4) {
                             ForEach(Array(bars.enumerated()), id: \.element.id) { index, bar in
                                 VStack(spacing: 4) {
-                                    Spacer(minLength: 0)
                                     Rectangle()
                                         .fill(Color.accentColor.opacity(bar.estimated ? 0.2 : 1))
                                         .overlay {
@@ -561,13 +544,14 @@ struct DailyConsumptionChartView: View {
                                             }
                                         }
                                         .frame(height: max(1, CGFloat(NSDecimalNumber(decimal: bar.amountUsd).doubleValue / maxAmount) * plotHeight))
+                                        .frame(height: plotHeight, alignment: .bottom)
                                     Text(index % stride == 0 || index == bars.count - 1 ? String(Int(bar.date.suffix(2)) ?? 0) : " ")
                                         .font(.caption2).frame(height: 14)
                                 }
                                 .frame(maxWidth: .infinity)
                                 .contentShape(Rectangle())
-                                .help("\(regionalDate(bar.date)): \(money(bar.amountUsd)) USD - \(kind(bar))")
-                                .accessibilityLabel("\(regionalDate(bar.date)): \(money(bar.amountUsd)) USD - \(kind(bar))")
+                                .help(bar.tooltip)
+                                .accessibilityLabel(bar.tooltip)
                             }
                         }.frame(height: plotHeight + 18)
                     }

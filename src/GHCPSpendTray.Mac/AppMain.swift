@@ -280,6 +280,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                   dashboard.consumptionUsd == (empty ? nil : Decimal(string: "42.75")),
                   money(dashboard.consumptionUsd) == (empty ? "Unavailable" : "$42.75"),
                   model.settings?.startup == false else { throw AppError.message("Synthetic dashboard contract failed.") }
+            if !empty {
+                guard let daily = dashboard.accounts[0].enterpriseConsumption,
+                      daily.state == .connected, daily.connected, !daily.isLoading,
+                      let bars = daily.bars, !bars.isEmpty,
+                      let maximum = daily.axisTicks?.last, let largest = bars.map(\.amountUsd).max(), maximum >= largest,
+                      let unavailable = dashboard.accounts[1].enterpriseConsumption,
+                      unavailable.connected, unavailable.bars?.isEmpty == true,
+                      unavailable.chartMessage?.contains("no daily reports") == true else {
+                    throw AppError.message("Daily consumption did not cross the native bridge with its chart and no-data status.")
+                }
+            }
             guard statusItems.count == 1, statusItems["rollup"]?.button?.image?.isTemplate == true else {
                 throw AppError.message("Adaptive menu bar indicator was not created.")
             }

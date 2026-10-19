@@ -64,7 +64,26 @@ enum NavigationInteractionTests {
         try click(window, view: accounts, x: 300, fromTop: accounts.bounds.height - 14)
         try waitForLayout(accounts, phase: "explicit management navigation") { _ in model.selectedAccount == account.key }
         try check(model.selectedAccount == account.key, "The visible Manage account action also opens account management.")
-        print("PASS: title/whole-row/chevron disclosure clicks and explicit/full-row account management clicks.")
+        let popup = NSHostingView(rootView: FlyoutView(model: model))
+        window.contentView = popup
+        window.setContentSize(popup.fittingSize)
+        try waitForLayout(popup, phase: "popup Usage navigation") { $0.width == 400 && $0.height > 150 }
+        var opened = 0
+        model.showSettings = { opened += 1 }
+        for _ in 0..<2 {
+            model.page = .accounts
+            model.selectedAccount = account.key
+            let revision = model.usageNavigationRevision
+            try click(window, view: popup, x: 100, fromTop: 75)
+            try waitForLayout(popup, phase: "popup account Usage action") { _ in model.usageNavigationRevision > revision }
+            try check(model.page == .usage && model.selectedAccount == nil && model.usageAccount == account.key &&
+                      model.usageNavigationRevision == revision + 1,
+                      "Popup account clicks open Usage and repeat its scroll request rather than opening management.")
+        }
+        try check(opened == 2, "Every popup account click opens the settings window.")
+        model.viewUsage("github.com:removed")
+        try check(opened == 2 && model.error != nil, "Removed accounts fail explicitly instead of navigating.")
+        print("PASS: title/whole-row/chevron disclosure clicks, full-row account management and repeated popup-to-Usage clicks.")
     }
 
     private static func waitForLayout(_ view: NSView, phase: String, ready: (NSSize) -> Bool) throws {
