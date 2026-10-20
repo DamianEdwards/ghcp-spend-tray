@@ -47,6 +47,14 @@ Shared serialization tests cover the separate actual-usage marker/severity;
 native macOS fixtures include independent actual/forecast risk states and remain
 pending execution on Apple-silicon CI.
 
+Forecast text uses semantic normal/secondary foreground colors, not the accent
+or risk colors. The `est. total` subtitle is 11 DIPs, with no extra text-opacity
+reduction. Dash, marker, and icon severity colors are unchanged. Native smoke
+checks the normal/secondary brush roles, subtitle size, and at least 4.5:1 text
+contrast against composited native panel backgrounds in the current theme;
+both populated and empty/single-account runs passed. This is not evidence of
+pixel-level contrast across every custom OS theme or unexecuted macOS renderer.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

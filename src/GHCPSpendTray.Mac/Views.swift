@@ -80,7 +80,7 @@ struct PeriodEstimateRow: View {
                 Text(reason).fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(estimate.summary(customBudget: customBudget)).fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle((estimate.overAllocationUsd ?? 0) > 0 ? Color.orange : Color.secondary)
+                    .foregroundStyle(.secondary)
             }
         }
         .font(.caption).foregroundStyle(.secondary)
@@ -169,12 +169,12 @@ struct AccountUsageTrack: View {
                     }.stroke(tint, lineWidth: 1.5)
                     VStack(alignment: .center, spacing: 0) {
                         Text(estimatedMoney(estimate.estimatedConsumptionUsd)).font(.callout).bold().monospacedDigit()
-                        Text("est. total").font(.system(size: 10))
+                            .foregroundStyle(.primary)
+                        Text("est. total").font(.system(size: 11)).foregroundStyle(.secondary)
                         if forecast.band == .over {
-                            Text("(\(decimalText(forecast.percent))%)").font(.system(size: 10))
+                            Text("(\(decimalText(forecast.percent))%)").font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                     }
-                    .foregroundStyle(tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .fixedSize(horizontal: true, vertical: false)
@@ -190,7 +190,7 @@ struct AccountUsageTrack: View {
                 }
             }
         }
-        .frame(height: 54 + (account.forecast == nil ? 2 : account.forecast?.band == .over ? 63 : 51))
+        .frame(height: 54 + (account.forecast == nil ? 2 : account.forecast?.band == .over ? 65 : 53))
         .onPreferenceChange(ForecastCalloutWidth.self) { calloutWidth = $0 }
         .onPreferenceChange(ActualCalloutWidth.self) { actualWidth = $0 }
         .accessibilityElement(children: .contain)

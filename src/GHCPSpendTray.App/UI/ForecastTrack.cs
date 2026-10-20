@@ -51,7 +51,7 @@ internal sealed class ForecastTrack
     }
 
     internal static double Height(AccountView account, bool compact) =>
-        (compact ? 54 : 72) + (account.Forecast is { } projected ? projected.Band == ForecastBand.Over ? 63 : 51 : 2);
+        (compact ? 54 : 72) + (account.Forecast is { } projected ? projected.Band == ForecastBand.Over ? 65 : 53 : 2);
 
     internal static void Apply(Canvas canvas, AccountView account, string prefix, bool compact = false)
     {
@@ -145,7 +145,7 @@ internal sealed class ForecastTrack
 
         var label = new TextBlock
         {
-            Text = "est. total", FontSize = 10, Foreground = projectedBrush,
+            Text = "est. total", FontSize = 11, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             HorizontalAlignment = HorizontalAlignment.Center
         };
         AutomationProperties.SetAutomationId(label, _prefix + "PeriodEstimateLabel");
@@ -153,19 +153,20 @@ internal sealed class ForecastTrack
         var amount = new TextBlock
         {
             Text = UI.EstimateAmount(estimate), FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = projectedBrush, HorizontalAlignment = HorizontalAlignment.Center
+            Foreground = foreground, HorizontalAlignment = HorizontalAlignment.Center
         };
         AutomationProperties.SetAutomationId(amount, _prefix + "PeriodEstimateAmount");
         AutomationProperties.SetLabeledBy(amount, label);
         var callout = new StackPanel { Spacing = 0, MaxWidth = width };
-        callout.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, width, 46) };
+        callout.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, width, 48) };
         callout.Children.Add(amount);
         callout.Children.Add(label);
         if (forecast.Band == ForecastBand.Over)
             callout.Children.Add(new TextBlock
             {
                 Text = "(" + forecast.Percent.ToString("0.#", CultureInfo.CurrentCulture) + "%)",
-                FontSize = 10, Foreground = projectedBrush, TextTrimming = TextTrimming.CharacterEllipsis,
+                FontSize = 10, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                TextTrimming = TextTrimming.CharacterEllipsis,
                 HorizontalAlignment = HorizontalAlignment.Center
             });
         string status = forecast.Band switch { ForecastBand.Near => "Near target", ForecastBand.Over => "At or over target", _ => "Under target" };
@@ -173,7 +174,7 @@ internal sealed class ForecastTrack
             (_account.CustomBudgetUsd is not null ? "custom budget" : "limit") + $"). {status}. " + UI.EstimateMethodFor(estimate);
         ToolTipService.SetToolTip(callout, tooltip);
         AutomationProperties.SetName(callout, tooltip);
-        callout.Measure(new Windows.Foundation.Size(width, 46));
+        callout.Measure(new Windows.Foundation.Size(width, 48));
         Canvas.SetLeft(callout, Math.Clamp(endX - callout.DesiredSize.Width / 2, 0, Math.Max(0, width - callout.DesiredSize.Width)));
         Canvas.SetTop(callout, lineY + 17);
         Add(callout, _prefix + "ForecastCallout");

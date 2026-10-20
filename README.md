@@ -369,12 +369,16 @@ For a finite custom budget (or API limit), a dashed segment continues the
 solid actual-usage line to the forecast endpoint. A callout beneath
 the endpoint stacks the approximate whole-dollar amount above a smaller
 **est. total** subtitle, centered on the marker and kept within panel bounds.
-Forecast dashes are three times as long as their gaps. The dashed segment,
-marker, and callout use the accent color below 95% of the target, amber at
+Forecast dashes are three times as long as their gaps. The dashed segment and
+marker use the accent color below 95% of the target, amber at
 95% to below 100%, and red at 100% or above. The track remains fixed at 100%:
 over-target forecasts pin the marker to the right edge and show the full amount
 and projected percentage in the callout. The label stays inside the account
 panel on resize, separate from the actual-usage label.
+The estimated amount uses normal theme text; its slightly larger subtitle
+and projected percentage use secondary theme text rather than the accent or
+risk colors. This keeps small text readable while the line and icons carry
+the status colors.
 
 The exact current amount moves with its solid-line endpoint in a larger neutral
 callout above the line, labeled **used**, rather than being repeated in the

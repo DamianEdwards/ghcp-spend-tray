@@ -1051,11 +1051,54 @@ internal static class Program
                 double expectedLeft = Math.Clamp(marker.X1 - callout.ActualWidth / 2, 0,
                     Math.Max(0, track.ActualWidth - callout.ActualWidth));
                 if (projectedLabel.FontSize >= projectedAmount.FontSize ||
+                    projectedLabel.FontSize < 11 ||
+                    projectedAmount.Foreground is not SolidColorBrush mainText ||
+                    mainText.Color != new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Foreground) ||
+                    projectedLabel.Foreground is not SolidColorBrush secondaryText ||
+                    secondaryText.Color != ((SolidColorBrush)Application.Current.Resources["TextFillColorSecondaryBrush"]).Color ||
+                    projectedAmount.Opacity != 1 || projectedLabel.Opacity != 1 ||
                     calloutLabelOrigin.Y < calloutAmountOrigin.Y + projectedAmount.ActualHeight - 1 ||
                     Math.Abs(calloutLabelOrigin.X + projectedLabel.ActualWidth / 2 - (calloutAmountOrigin.X + projectedAmount.ActualWidth / 2)) > 1 ||
                     Math.Abs(Canvas.GetLeft(callout) - expectedLeft) > 1)
                     throw new InvalidOperationException("Forecast subtitle is not centered beneath the amount or aligned with the marker.");
+                if (ForecastTextContrast(projectedAmount) < 4.5 || ForecastTextContrast(projectedLabel) < 4.5)
+                    throw new InvalidOperationException("Forecast text does not meet 4.5:1 contrast against its panel.");
                 return;
+            }
+
+            static double ForecastTextContrast(TextBlock text)
+            {
+                var layers = new List<SolidColorBrush>();
+                for (DependencyObject? parent = VisualTreeHelper.GetParent(text); parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                {
+                    Brush? background = parent switch
+                    {
+                        Border border => border.Background,
+                        Panel panel => panel.Background,
+                        Control control => control.Background,
+                        _ => null
+                    };
+                    if (background is SolidColorBrush layer) layers.Add(layer);
+                }
+                var baseColor = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Background);
+                var surface = (R: baseColor.R / 255d, G: baseColor.G / 255d, B: baseColor.B / 255d);
+                foreach (var layer in layers.AsEnumerable().Reverse()) surface = Composite(layer, surface);
+                var ink = Composite((SolidColorBrush)text.Foreground, surface);
+                double first = Luminance(ink), second = Luminance(surface);
+                return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
+
+                static (double R, double G, double B) Composite(SolidColorBrush brush, (double R, double G, double B) background)
+                {
+                    double alpha = brush.Color.A / 255d * brush.Opacity;
+                    return (brush.Color.R / 255d * alpha + background.R * (1 - alpha),
+                        brush.Color.G / 255d * alpha + background.G * (1 - alpha),
+                        brush.Color.B / 255d * alpha + background.B * (1 - alpha));
+                }
+                static double Luminance((double R, double G, double B) color)
+                {
+                    static double Linear(double value) => value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+                    return 0.2126 * Linear(color.R) + 0.7152 * Linear(color.G) + 0.0722 * Linear(color.B);
+                }
             }
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
                 Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||

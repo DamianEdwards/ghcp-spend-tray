@@ -181,8 +181,7 @@ internal static class UI
                                 ? "Projected over custom budget, not observed usage" : "Projected over limit, not observed usage")
                             .AutomationId(idPrefix + "PeriodEstimateWarning").Grid(column: 0).Margin(0, 0, 6, 0) : null,
                     Copy(EstimateContext(estimate, account.CustomBudgetUsd is not null)).FontSize(12)
-                        .Foreground(estimate.OverAllocationUsd is > 0
-                            ? Theme.Ref("SystemFillColorCautionBrush") : Theme.SecondaryText)
+                        .Foreground(Theme.SecondaryText)
                         .AutomationId(idPrefix + "PeriodEstimateContext").Grid(column: 1))
             ).ToolTip(EstimateDescription + " " + EstimateMethodFor(estimate)).AutomationId(idPrefix + "PeriodEstimate")
             : null;
