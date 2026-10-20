@@ -166,14 +166,14 @@ internal static class UI
             parts.Add($"Resets {boundary.ToUniversalTime().ToString("MMM d, yyyy 'UTC'", CultureInfo.CurrentCulture)}");
         return string.Join(" \u00B7 ", parts);
     }
-    internal static Element? EstimateRow(AccountView account, string idPrefix, bool rightAlignAmount = false) =>
+    internal static Element? EstimateRow(AccountView account, string idPrefix, bool rightAlignAmount = false, bool showAmount = true) =>
         account.PeriodEstimate is { } estimate
             ? VStack(3,
-                Grid([rightAlignAmount ? GridSize.Star() : GridSize.Auto, GridSize.Auto], [GridSize.Auto],
+                showAmount ? Grid([rightAlignAmount ? GridSize.Star() : GridSize.Auto, GridSize.Auto], [GridSize.Auto],
                     Copy("Estimated at reset").FontSize(12).Grid(column: 0).Margin(0, 0, 12, 0)
                         .AutomationId(idPrefix + "PeriodEstimateLabel"),
                     Copy(EstimateAmount(estimate)).FontSize(12).Grid(column: 1).HAlign(HorizontalAlignment.Right)
-                        .AutomationId(idPrefix + "PeriodEstimateAmount").LabeledBy(idPrefix + "PeriodEstimateLabel")),
+                        .AutomationId(idPrefix + "PeriodEstimateAmount").LabeledBy(idPrefix + "PeriodEstimateLabel")) : null,
                 Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
                     estimate.OverAllocationUsd is > 0
                         ? Icon(FontIcon("\uE7BA", "Segoe Fluent Icons", 12))
@@ -186,6 +186,17 @@ internal static class UI
                         .AutomationId(idPrefix + "PeriodEstimateContext").Grid(column: 1))
             ).ToolTip(EstimateDescription + " " + EstimateMethodFor(estimate)).AutomationId(idPrefix + "PeriodEstimate")
             : null;
+
+    internal static Element UsageMeter(AccountView account, string prefix, bool compact = false) => VStack(compact ? 5 : 6,
+        account.Forecast is not null
+            ? new ForecastTrackElement().Set(canvas => ForecastTrack.Apply(canvas, account, prefix))
+                .Height(48).HAlign(HorizontalAlignment.Stretch).AutomationId(prefix + "ForecastTrack")
+            : account.Percent is { } percent
+                ? Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UsagePercentage(account))
+                : null,
+        Copy(account.Percent is not null ? UsagePercentage(account) :
+            account.Details.Unlimited ? "Unlimited" : "Limit percentage not available").FontSize(compact ? 12 : 14),
+        EstimateRow(account, prefix, rightAlignAmount: compact, showAmount: account.Forecast is null));
     internal static Element? EstimateDetails(AccountView account, string idPrefix = "") => account.PeriodEstimate is { } estimate
         ? VStack(12,
             DetailRow("Estimate method", EstimateMethodFor(estimate), idPrefix + "PeriodEstimateMethod"),
@@ -301,11 +312,7 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 VStack(2, TextBlock(account.Name).SemiBold(), UI.Copy(account.Host).FontSize(12)).Grid(column: 1),
                 TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(21).SemiBold()
                     .VAlign(VerticalAlignment.Center).Grid(column: 2)),
-            account.Percent is { } percent
-                ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UI.UsagePercentage(account)),
-                    UI.Copy(UI.UsagePercentage(account)).FontSize(12))
-                : UI.Copy(account.Details.Unlimited ? "Unlimited" : "Limit percentage not available").FontSize(12),
-            UI.EstimateRow(account, account.Key + "_Flyout_", rightAlignAmount: true),
+            UI.UsageMeter(account, account.Key + "_Flyout_", compact: true),
             UI.DailyConsumption(account, compact: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
@@ -727,12 +734,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     private static Element UsageSummary(AccountView account, string idPrefix = "") => Card(VStack(12,
         VStack(2, UI.Copy("This month's usage"),
             TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId(idPrefix + "AccountConsumption")),
-        account.Percent is { } percent
-            ? VStack(6,
-                Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UI.UsagePercentage(account)),
-                UI.Copy(UI.UsagePercentage(account)))
-            : UI.Copy(account.Details.Unlimited ? "Unlimited" : "Limit percentage not available"),
-        UI.EstimateRow(account, idPrefix),
+        UI.UsageMeter(account, idPrefix),
         UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
     )).AutomationId(idPrefix + "AccountSummary");
 

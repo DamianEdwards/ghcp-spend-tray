@@ -12,7 +12,11 @@ public sealed record AccountView(string Key, string Name, string Login, string H
     decimal? Percent,
     decimal? ConsumptionUsd = null, decimal? AllocationUsd = null, string Freshness = "", DateTimeOffset? UpdatedAt = null,
     string? AvatarUrl = null, PeriodEstimate? PeriodEstimate = null, EnterpriseConsumptionView? EnterpriseConsumption = null,
-    decimal? CustomBudgetUsd = null);
+    decimal? CustomBudgetUsd = null)
+{
+    public UsageForecast? Forecast => Percent is null ? null :
+        UsageForecast.Create(ConsumptionUsd, CustomBudgetUsd ?? AllocationUsd, PeriodEstimate);
+}
 public sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
     decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false,
     TrayPresentation? Tray = null, IReadOnlyList<AccountState>? TrayStates = null);

@@ -15,6 +15,19 @@ internal static class PeriodEstimateTests
         session.Initialize();
         await Until(() => session.Initialized && !session.Busy);
         var account = session.Dashboard.Accounts[0];
+        var forecastAccount = account with
+        {
+            ConsumptionUsd = 60, AllocationUsd = 100, Percent = 60,
+            PeriodEstimate = new(EstimatedConsumptionUsd: 95)
+        };
+        Check(forecastAccount.Forecast is { Band: ForecastBand.Near, ForecastFraction: 0.95 },
+            "A finite tracking target enables the projected usage track.");
+        Check((forecastAccount with { CustomBudgetUsd = 90 }).Forecast?.Band == ForecastBand.Over &&
+            (forecastAccount with { CustomBudgetUsd = 200 }).Forecast?.Band == ForecastBand.Under,
+            "Forecast colors are based on the saved custom budget instead of the API limit.");
+        Check((forecastAccount with { Percent = null }).Forecast is null &&
+            (forecastAccount with { PeriodEstimate = null }).Forecast is null,
+            "Unavailable or disabled forecasts keep the existing text-only surfaces.");
         var recent = new PeriodEstimate(EstimatedConsumptionUsd: 100, AverageDailyConsumptionUsd: 2,
             AverageStartDate: "2026-10-08", AverageEndDate: "2026-10-14", ReportedDayCount: 7);
         Check(UI.EstimateContext(recent).Contains("Latest 7 reported days") &&

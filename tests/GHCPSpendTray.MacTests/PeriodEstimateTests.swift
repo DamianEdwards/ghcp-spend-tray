@@ -53,6 +53,16 @@ enum PeriodEstimateTests {
         try check(recent.summary(customBudget: true).contains("About $25 over custom budget") &&
                   recent.summary.contains("About $25 over limit"),
                   "Reported-day forecasts label custom-budget comparisons without changing the forecast amount.")
+        for (value, band) in [(94.99, ForecastBand.under), (95.0, .near), (99.99, .near), (100.0, .over), (150.0, .over)] {
+            let fixture = try account(estimate: ["estimatedConsumptionUsd": value, "isEarly": false])
+            try check(fixture.forecast?.band == band && fixture.forecast?.forecastFraction == min(1, value / 100),
+                      "Native forecast track decodes threshold and clamped endpoint.")
+            let narrow = NSHostingView(rootView: AccountRow(account: fixture).frame(width: 260))
+            narrow.setFrameSize(narrow.fittingSize)
+            narrow.layoutSubtreeIfNeeded()
+            try check(narrow.fittingSize.width == 260 && narrow.fittingSize.height.isFinite,
+                      "Projected callouts fit the compact native account width.")
+        }
 
         let off = try account()
         let unavailable = try account(estimate: [
@@ -95,6 +105,13 @@ enum PeriodEstimateTests {
             var value = estimate
             if value["reportedDayCount"] == nil { value["reportedDayCount"] = 0 }
             fields["periodEstimate"] = value
+            if let amount = estimate["estimatedConsumptionUsd"] as? NSNumber, amount.doubleValue >= 42.75,
+               estimate["unavailableReason"] == nil {
+                fields["forecast"] = [
+                    "actualFraction": 0.4275, "forecastFraction": min(1, amount.doubleValue / 100),
+                    "percent": amount, "band": amount.doubleValue >= 100 ? 2 : amount.doubleValue >= 95 ? 1 : 0
+                ]
+            }
         }
         return try JSONDecoder().decode(AccountData.self, from: JSONSerialization.data(withJSONObject: fields))
     }

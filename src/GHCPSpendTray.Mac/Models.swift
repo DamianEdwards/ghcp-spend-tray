@@ -55,12 +55,24 @@ struct AccountData: Decodable, Identifiable {
     let avatarUrl: String?
     let periodEstimate: PeriodEstimateData?
     let enterpriseConsumption: EnterpriseConsumptionData?
+    let forecast: UsageForecastData?
     var customBudgetUsd: Decimal? = nil
 
     var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
     var allocationSummary: String {
         if let percent {
             return "\(decimalText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
+        }
+
+        struct UsageForecastData: Decodable {
+            let actualFraction: Double
+            let forecastFraction: Double
+            let percent: Decimal
+            let band: ForecastBand
+        }
+
+        enum ForecastBand: Int, Decodable {
+            case under, near, over
         }
         if let customBudgetUsd { return "\(money(customBudgetUsd)) custom budget · Consumption unavailable" }
         return details.unlimited ? "Unlimited API limit" : "API limit unavailable"

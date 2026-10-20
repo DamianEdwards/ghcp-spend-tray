@@ -403,6 +403,11 @@ try
                 JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
                 BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].PeriodEstimate;
             Check(decodedForecast == forecast, "Recent forecast method and date range cross the generated native bridge.");
+            var projected = JsonSerializer.Deserialize(
+                JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
+                BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].Forecast;
+            Check(projected == view.Accounts[0].Forecast && projected is not null,
+                "Forecast thresholds and clamped endpoints cross the source-generated native bridge.");
             var chartBeforeBudget = view.Accounts[0].EnterpriseConsumption!.Bars!;
             await controller.SaveAccountAsync("github.com:1", "", "", customBudgetUsd: 50, updateCustomBudget: true);
             var budgetView = view!.Accounts[0];

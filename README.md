@@ -362,14 +362,22 @@ provide a verified per-day consumption breakdown, so the app does not chart
 daily usage from its locally sampled refreshes.
 
 On either platform, **Settings > Accounts > select an account > Show estimated
-period consumption** enables an optional **Estimated at reset** row in that
+period consumption** enables an optional end-of-period forecast in that
 account's tray flyout/menu-bar popup, Usage summary, and details. It is off by
 default; choose **Save account** on Windows or **Save** on macOS to apply it.
-The whole-dollar amount is right-aligned below the observed limit, with a
-secondary early/reset/projected-excess line. Windows uses a theme-aware caution
-color and warning glyph for projected excess. There is no combined forecast,
-forecast-based alert, or change to the observed limit meter or tray/menu-bar
-icons.
+For a finite custom budget (or API limit), a dashed segment continues the
+solid actual-usage line to the forecast endpoint. An **Est.** callout beneath
+the endpoint shows the approximate whole-dollar amount. The dashed segment,
+marker, and callout use the accent color below 95% of the target, amber at
+95% to below 100%, and red at 100% or above. The track remains fixed at 100%:
+over-target forecasts pin the marker to the right edge and show the full amount
+and projected percentage in the callout. The label stays inside the account
+panel on resize, separate from the actual-usage label.
+
+The early/reset/method context remains below the usage line. Unknown or
+unlimited targets and unavailable forecasts keep the text-only presentation.
+The setting remains opt-in. There is no combined forecast, forecast-based alert,
+or change to actual usage calculations or tray/menu-bar icons.
 
 Accounts rows use the same shaded panels as Usage and show an explicit
 **Manage account** action; clicking anywhere in the card opens that account's

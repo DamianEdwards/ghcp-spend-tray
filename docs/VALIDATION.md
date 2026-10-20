@@ -1,5 +1,30 @@
 # GHCPSpendTray validation and release gates
 
+## Projected usage-line callouts (October 19, 2026)
+
+Enabled, available forecasts with finite tracking targets use the same shared
+threshold model on Windows and macOS: accent below 95%, caution at 95% to below
+100%, and critical at 100% or above. A dashed segment abuts actual usage and
+ends at a marker with an estimated-amount callout. The scale stays fixed at
+100%; over-target estimates retain their full amount/percentage while clamping
+only the visual endpoint. Actual usage, daily-report charts, forecast formulas,
+alert calculations, and tray icons remain independent.
+
+Core tests cover exact boundary fractions, over-target clamping, zero/equal
+actual usage, decimal saturation, missing targets, unavailable forecasts, and
+inconsistent data. Windows tests cover custom-budget selection and text fallback;
+the generated bridge carries the shared forecast fractions and severity.
+Native smoke verifies projected dash/marker/callout accessibility, exact threshold
+colors, abutting coordinates, fixed endpoints, and callout bounds at 220 and 620
+DIPs. Empty/single-account smoke also verifies that the popup remains scroll-free
+with the daily chart and forecast enabled. Swift fixture and rendering checks
+were added for Apple-silicon CI; they were not executed on this Windows host.
+
+Release-tooling checks and all four managed/executed x64 Native AOT harnesses
+passed locally (212 Core tests, 14 platform tests, 1103 Windows assertions, and
+261 shared/bridge assertions). Published populated and empty/single-account
+native smoke both passed with the new projected-track checks enabled.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

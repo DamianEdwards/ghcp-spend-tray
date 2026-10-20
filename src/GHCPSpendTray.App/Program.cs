@@ -833,6 +833,7 @@ internal static class Program
         {
             var window = shell.SettingsWindow!;
             AssertEstimateRow(window, "", amount);
+            AssertForecastThresholds(window, shell.Session.Dashboard.Accounts[0]);
             if (Find(window, "PeriodEstimateWarning") is null ||
                 Find(window, "PeriodEstimateDisclosure") is not null ||
                 Find(window, "AccountConsumption") is not TextBlock { Text: "$26.25" } ||
@@ -942,8 +943,66 @@ internal static class Program
                 throw new InvalidOperationException("Estimate disclosure is not keyboard/screen-reader accessible.");
             expand.Expand();
         }
+        static void AssertForecastThresholds(ReactorWindow window, AccountView source)
+        {
+            if (Find(window, "ForecastTrack") is not Canvas track)
+                throw new InvalidOperationException("Enabled finite-target estimate has no forecast track.");
+            double originalWidth = track.Width;
+            try
+            {
+                foreach (double width in new[] { 220d, 620d })
+                {
+                    track.Width = width;
+                    ((FrameworkElement)window.NativeWindow.Content).UpdateLayout();
+                    foreach (decimal projected in new[] { 94.99m, 95m, 99.99m, 100m, 150m })
+                    {
+                        var fixture = source with
+                        {
+                            ConsumptionUsd = 60, Percent = 60, AllocationUsd = 100, CustomBudgetUsd = 100,
+                            PeriodEstimate = new(EstimatedConsumptionUsd: projected)
+                        };
+                        UI.ForecastTrack.Apply(track, fixture, "");
+                        track.UpdateLayout();
+                        AssertEstimateRow(window, "", UI.UI.EstimateAmount(fixture.PeriodEstimate));
+                        var extension = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastExtension")!;
+                        var marker = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastMarker")!;
+                        var brush = (SolidColorBrush)extension.Stroke;
+                        var expected = projected >= 100
+                            ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCriticalBrush"]
+                            : projected >= 95 ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCautionBrush"]
+                            : new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent));
+                        if (brush.Color != expected.Color || Math.Abs(extension.X1 - (2 + 0.6 * (track.ActualWidth - 4))) > 0.1 ||
+                            Math.Abs(marker.X1 - (2 + (double)Math.Min(1, projected / 100) * (track.ActualWidth - 4))) > 0.1)
+                            throw new InvalidOperationException("Forecast threshold color, abutting extension, or clamped marker is incorrect.");
+                    }
+                }
+            }
+            finally
+            {
+                track.Width = originalWidth;
+                ((FrameworkElement)window.NativeWindow.Content).UpdateLayout();
+                UI.ForecastTrack.Apply(track, source, "");
+                track.UpdateLayout();
+            }
+        }
+
         static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
+            if (Find(window, prefix + "ForecastTrack") is Canvas track)
+            {
+                if (Find(window, prefix + "ForecastExtension") is not Microsoft.UI.Xaml.Shapes.Line { StrokeDashArray.Count: > 0 } dashed ||
+                    Find(window, prefix + "ForecastMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
+                    Find(window, prefix + "ForecastCallout") is not FrameworkElement callout ||
+                    Find(window, prefix + "PeriodEstimateAmount") is not TextBlock projectedAmount || projectedAmount.Text != expected ||
+                    Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Est." } projectedLabel ||
+                    AutomationProperties.GetLabeledBy(projectedAmount) != projectedLabel ||
+                    ToolTipService.GetToolTip(callout) is null ||
+                    dashed.X1 > dashed.X2 || marker.X1 < 0 || marker.X1 > track.ActualWidth ||
+                    Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > track.ActualWidth + 1 ||
+                    Canvas.GetTop(callout) < marker.Y2)
+                    throw new InvalidOperationException("Forecast track, marker, callout, accessibility, or bounds are invalid.");
+                return;
+            }
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
                 Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||
                 Find(window, prefix + "PeriodEstimateAmount") is not TextBlock amount || amount.Text != expected ||

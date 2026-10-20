@@ -23,6 +23,7 @@ internal static partial class Program
             await DomainTests();
             await EnterpriseConsumptionTests();
             await BudgetTests();
+            await UsageForecastTests();
             await PeriodEstimateTests();
             await TrayTests();
             await HttpTests();
