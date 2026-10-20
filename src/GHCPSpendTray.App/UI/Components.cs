@@ -282,15 +282,19 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 UI.Copy("Your Copilot consumption, one glance away. Connect an account to start tracking.")
                     .TextAlignment(TextAlignment.Center)).Padding(8, 36);
         else
-            body = VStack(18,
-                model.Accounts.Count > 1 ? VStack(3,
-                    UI.Copy("This month's usage"),
-                    TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(46).SemiBold().AutomationId("TotalConsumption"),
-                    UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
-                        model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable")
-                ) : null,
+            body = VStack(12,
+                model.Accounts.Count > 1 ? Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                    VStack(3,
+                        UI.Copy("This month's usage"),
+                        UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
+                            model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable")
+                            .FontSize(12)
+                    ).Grid(column: 0).VAlign(VerticalAlignment.Center).Margin(0, 0, 12, 0),
+                    TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(28).SemiBold().AutomationId("TotalConsumption")
+                        .Grid(column: 1).VAlign(VerticalAlignment.Center)
+                ).AutomationId("FlyoutSummary") : null,
                 VStack(10, model.Accounts.Select(AccountCard).ToArray())
-            ).Padding(0, 8);
+            ).Padding(0, 4);
         return Grid([GridSize.Star()], [GridSize.Auto, GridSize.Star(), GridSize.Auto],
             Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Logo(28).Grid(column: 0).Margin(0, 0, 10, 0),
@@ -300,17 +304,18 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
             ).Grid(row: 0).Padding(20, 14),
             ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), UI.UpdateNotice(Session), body))
                 .AutomationId("FlyoutBodyScroll").Grid(row: 1).Padding(20, 0),
-            Border(VStack(10,
-                Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
-                    UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12).Grid(column: 0).VAlign(VerticalAlignment.Center),
-                    UI.Glyph("\uE72C", "Refresh consumption", () => Session.Refresh()).Grid(column: 1)
-                        .IsEnabled(Session.Initialized && !Session.Busy)),
-                UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12)
+            Border(Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                VStack(3,
+                    UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12),
+                    UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12)
+                ).Grid(column: 0).VAlign(VerticalAlignment.Center).Margin(0, 0, 12, 0),
+                UI.Glyph("\uE72C", "Refresh consumption", () => Session.Refresh()).Grid(column: 1)
+                    .IsEnabled(Session.Initialized && !Session.Busy)
             )).Background(Theme.CardBackground).Padding(20, 12).Grid(row: 2)
         ).Background(Theme.SolidBackground).AutomationId("SpendFlyout");
     }
     private Element AccountCard(AccountView account) =>
-        Card(VStack(8,
+        Card(VStack(6,
             Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.AccountPicture(account, 36).Grid(column: 0).Margin(0, 0, 10, 0),
                 VStack(2, TextBlock(account.Name).SemiBold(), UI.Copy(account.Host).FontSize(12)).Grid(column: 1),
@@ -322,7 +327,7 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
                 Button("Details", () => Session.ViewUsage(account.Key)).AutomationName($"Usage details for {account.Login}")
                     .AutomationId(account.Key + "_ViewUsage").Grid(column: 1))
-        )).WithKey(account.Key);
+        )).Padding(12).AutomationId(account.Key + "_FlyoutAccount").WithKey(account.Key);
     private static string LastUpdated(DashboardView model)
     {
         var updates = model.Accounts.Where(a => a.UpdatedAt.HasValue).Select(a => a.UpdatedAt!.Value).ToArray();

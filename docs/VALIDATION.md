@@ -136,6 +136,27 @@ scroll-readiness timeouts on two runs (account-form scroll and Usage
 bring-into-view), so those runs are not counted as passes. Native Swift launch
 verification remains pending on Apple silicon.
 
+## Windows popup first-account fit (October 20, 2026)
+
+The Windows popup uses a horizontal aggregate summary, a compact footer, and
+tighter card spacing without shrinking the 96-DIP daily chart or account amounts.
+With multiple accounts and daily data for the first account, its preferred height
+is 640 DIPs, still clamped to the monitor work area. Visible popups resize and
+remain tray-anchored on dashboard updates without being reactivated. Later
+accounts remain scrollable; work areas too small for the first card still scroll.
+
+Published native checks measure the entire first card, chart, and Details button
+inside the body viewport with estimates off and under/near/over-target forecasts.
+They also exercise automatic recovery from the old 590-DIP size on a dashboard
+update, preserve chart height and total readability, and retain scrolling for
+other accounts. The eight-account sample popup was observed with the full chart,
+legend, freshness, and Details action visible without scrolling.
+
+All 1,107 managed application assertions and the final populated and empty native
+smoke runs passed. An initial populated run passed the new fit checks but later
+hit the existing Usage bring-into-view timing failure; it is not counted as a
+pass. This change is Windows-only and does not alter the macOS popup layout.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

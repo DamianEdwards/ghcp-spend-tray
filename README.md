@@ -280,6 +280,11 @@ unavailable data rather than treating it as zero. See
 On Windows, left-click the tray icon to toggle the flyout immediately. Open
 **Settings > Usage** with the flyout's gear or the right-click **Settings** action.
 There is no double-click shortcut; rapid clicks remain ordinary selections.
+The popup uses a compact total and footer so the first account's usage, daily
+chart, legend, and **Details** action fit together. With multiple accounts and
+daily data for the first account, it allows up to 640 DIPs of height, bounded by
+the monitor work area, and adapts when daily data arrives. Later accounts remain
+scrollable; smaller work areas can still require scrolling.
 Right-click the icon for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,

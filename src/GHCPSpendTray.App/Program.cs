@@ -198,6 +198,11 @@ internal static class Program
                     });
                 }
             }
+            if (!empty)
+            {
+                RecordSmokePhase(directory, "Testing first-account popup fit with daily usage and forecast risk states");
+                await SmokeFirstAccountPopupAsync(shell);
+            }
             await OnUI(shell, () =>
             {
                 if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
@@ -532,6 +537,62 @@ internal static class Program
         }
         await OnUI(shell, () => shell.Session.Navigate(SettingsPage.Notifications));
         await WaitForSettingsUI(shell, "Notifications after popup Usage links");
+    }
+
+    private static async Task SmokeFirstAccountPopupAsync(ReactorShell shell)
+    {
+        var demo = (DemoController)shell.Session.Controller;
+        var account = shell.Session.Dashboard.Accounts[0];
+        var preferences = demo.AccountSettings(account.Key);
+        try
+        {
+            await demo.SaveAccountAsync(account.Key, preferences.DisplayName, preferences.Thresholds,
+                preferences.SpendIncrementUsd, showPeriodEstimate: true);
+            await WaitForUI(shell, "sample forecast for popup fit", () =>
+                shell.Session.Dashboard.Accounts[0].PeriodEstimate?.EstimatedConsumptionUsd is > 0);
+            decimal projected = shell.Session.Dashboard.Accounts[0].PeriodEstimate!.EstimatedConsumptionUsd!.Value;
+            await OnUI(shell, shell.ShowFlyout);
+            await WaitForFlyoutUI(shell, "popup before late daily-data sizing");
+            await OnUI(shell, () =>
+            {
+                var size = shell.Flyout!.AppWindow.Size;
+                shell.Flyout.AppWindow.Resize(new(size.Width, (int)(590 * size.Width / 400d)));
+            });
+            foreach (decimal? fraction in new decimal?[] { null, 0.8m, 0.97m, 1.2m })
+            {
+                await demo.SaveAccountAsync(account.Key, preferences.DisplayName, preferences.Thresholds,
+                    preferences.SpendIncrementUsd, showPeriodEstimate: fraction is not null,
+                    customBudgetUsd: fraction is { } value ? decimal.Round(projected / value, 2) : null,
+                    updateCustomBudget: true);
+                await WaitForFlyoutUI(shell, "first complete account with daily chart");
+                await OnUI(shell, () =>
+                {
+                    var window = shell.Flyout!;
+                    if (Find(window, "FlyoutBodyScroll") is not ScrollView scroll ||
+                        Find(window, account.Key + "_FlyoutAccount") is not FrameworkElement card ||
+                        Find(window, account.Key + "_CompactDailyPlot") is not FrameworkElement plot ||
+                        Find(window, account.Key + "_ViewUsage") is not Button details)
+                        throw new InvalidOperationException("The multi-account popup is missing its daily chart or Details action.");
+                    if (scroll.VerticalOffset > 1 || scroll.ScrollableHeight <= 0)
+                        throw new InvalidOperationException("The multi-account popup must start at the first account and retain scrolling for later accounts.");
+                    foreach (var element in new[] { card, plot, details })
+                    {
+                        double top = element.TransformToVisual(scroll).TransformPoint(default).Y;
+                        if (top < -1 || top + element.ActualHeight > scroll.ViewportHeight + 1)
+                            throw new InvalidOperationException($"First-account popup content is clipped (forecast={fraction}, top={top:F1}, height={element.ActualHeight:F1}, viewport={scroll.ViewportHeight:F1}).");
+                    }
+                    if (plot.ActualHeight < 96 || Find(window, "TotalConsumption") is not TextBlock { FontSize: >= 28 })
+                        throw new InvalidOperationException("The compact popup sacrificed chart height or total readability.");
+                });
+            }
+        }
+        finally
+        {
+            await demo.SaveAccountAsync(account.Key, preferences.DisplayName, preferences.Thresholds,
+                preferences.SpendIncrementUsd, preferences.ShowPeriodEstimate,
+                account.CustomBudgetUsd, updateCustomBudget: true);
+            await OnUI(shell, () => shell.Flyout!.Hide());
+        }
     }
 
     private static async Task SmokeSingleAccountPopupAsync(ReactorShell shell)
