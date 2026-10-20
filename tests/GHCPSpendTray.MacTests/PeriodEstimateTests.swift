@@ -36,8 +36,9 @@ enum PeriodEstimateTests {
                   "Native short usage captions keep the target information in its separate fixed column.")
         var budget = on
         budget.customBudgetUsd = 100
-        try check(budget.trackingTargetLabel == "budget" && budget.allocationSummary.contains("custom budget"),
-                  "Fixed target columns use the short budget label without changing detailed descriptions.")
+        try check(budget.trackingTargetLabel == "budget" && budget.targetLabel == "custom budget" &&
+                  budget.allocationSummary.contains("custom budget"),
+                  "Fixed target columns use the short budget label while tooltips and detailed descriptions identify custom budgets.")
         try check(estimate.estimatedConsumptionUsd == Decimal(string: "132.525") &&
                   estimatedMoney(estimate.estimatedConsumptionUsd) == "~$133",
                   "Shared decimal results retain their cents before display rounding.")

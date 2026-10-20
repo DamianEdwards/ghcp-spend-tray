@@ -72,18 +72,21 @@ internal sealed class ForecastTrack
         var accent = new SolidColorBrush(_colors.GetColorValue(UIColorType.Accent));
         var foreground = new SolidColorBrush(_colors.GetColorValue(UIColorType.Foreground));
         decimal target = (_account.CustomBudgetUsd ?? _account.AllocationUsd)!.Value;
-        string targetName = _account.CustomBudgetUsd is not null ? "budget" : "API limit";
+        string targetName = _account.CustomBudgetUsd is not null ? "custom budget" : "API limit";
         double targetMaxWidth = Math.Min(140, _canvas.ActualWidth * 0.4);
         var targetLabel = new TextBlock
         {
-            Text = targetName, FontSize = 11, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-            TextTrimming = TextTrimming.CharacterEllipsis
+            Text = _account.CustomBudgetUsd is not null ? "budget" : targetName,
+            FontSize = 11, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center
         };
         var targetAmount = new TextBlock
         {
             Text = UI.TrackingTargetAmount(target), FontSize = _compact ? 16 : 18,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = foreground,
-            TextTrimming = TextTrimming.CharacterEllipsis
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center
         };
         AutomationProperties.SetAutomationId(targetAmount, _prefix + "TrackingTargetAmount");
         AutomationProperties.SetAutomationId(targetLabel, _prefix + "TrackingTargetLabel");

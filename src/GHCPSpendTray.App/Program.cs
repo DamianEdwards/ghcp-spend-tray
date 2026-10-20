@@ -1071,13 +1071,19 @@ internal static class Program
                 Canvas.GetLeft(column) < baseline.X2 + 10 ||
                 Canvas.GetLeft(column) + column.ActualWidth > track.ActualWidth + 1 ||
                 Canvas.GetTop(column) + column.ActualHeight > track.ActualHeight + 1 ||
-                ToolTipService.GetToolTip(column) is null ||
+                ToolTipService.GetToolTip(column) is not string tooltip ||
+                !tooltip.EndsWith(label.Text == "budget" ? " custom budget" : " API limit", StringComparison.Ordinal) ||
+                AutomationProperties.GetName(column) != tooltip ||
                 expectedAmount is { } value && amount.Text != UI.UI.TrackingTargetAmount(value) ||
                 expectedLabel is not null && label.Text != expectedLabel)
                 throw new InvalidOperationException("The fixed tracking target is missing, mislabeled, or overlapping the usage track.");
             var origin = amount.TransformToVisual(track).TransformPoint(default);
             if (Math.Abs(origin.Y + amount.ActualHeight / 2 - baseline.Y1) > 1)
                 throw new InvalidOperationException("The fixed target amount is not aligned with the horizontal track.");
+            var labelOrigin = label.TransformToVisual(track).TransformPoint(default);
+            if (Math.Abs(origin.X + amount.ActualWidth / 2 - labelOrigin.X - label.ActualWidth / 2) > 1 ||
+                amount.HorizontalAlignment != HorizontalAlignment.Center || label.HorizontalAlignment != HorizontalAlignment.Center)
+                throw new InvalidOperationException("The fixed target label is not centered beneath its amount.");
             return baseline;
         }
 

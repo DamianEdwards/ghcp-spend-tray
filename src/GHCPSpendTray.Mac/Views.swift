@@ -196,7 +196,7 @@ struct AccountUsageTrack: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(description)
                 }
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .center, spacing: 0) {
                     Text(trackingTargetMoney(account.customBudgetUsd ?? account.allocationUsd))
                         .font(.system(size: 16, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(.primary)
@@ -211,9 +211,9 @@ struct AccountUsageTrack: View {
                 .clipped()
                 .offset(x: plotWidth + 12, y: lineY - 10)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.trackingTargetLabel)")
+                .accessibilityLabel("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
                 .accessibilityIdentifier("TrackingTarget")
-                .help("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.trackingTargetLabel)")
+                .help("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
             }
         }
         .frame(height: 54 + (account.forecast == nil ? 28 : account.forecast?.band == .over ? 65 : 53))

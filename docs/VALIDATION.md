@@ -69,7 +69,8 @@ The medium-size target amount aligns with the line, with `budget` or
 `API limit` below it, and the separate caption says only `% used`. Native
 measurements reserve the column first, scale actual/projected markers against
 the shortened track, and constrain both moving callouts to the track area.
-Native smoke checks target alignment, accessibility associations, panel bounds,
+Native smoke checks target alignment, labels centered beneath amounts, custom-budget
+tooltip descriptions, accessibility associations, panel bounds,
 and separation from the moving callouts at 220/620 DIPs, with small/fractional/
 large targets and budgets versus API limits. Formatting fixtures cover whole
 dollars, fractional dollars, and the short caption without changing the complete

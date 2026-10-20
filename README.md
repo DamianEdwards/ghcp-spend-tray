@@ -389,7 +389,8 @@ bounds; above-target amounts retain their full values while their markers stay
 at 100%. Accounts with no finite target keep their existing amount display.
 
 A fixed column immediately after the line shows the tracking target, with a
-medium-sized amount above **budget** or **API limit**. Whole-dollar
+medium-sized amount above a centered **budget** or **API limit** label. Tooltips
+identify user-set targets as **custom budget**. Whole-dollar
 targets omit redundant cents; fractional targets retain two decimal places.
 The percentage caption is simply **% used** rather than repeating that amount.
 The fixed column has its own space: the solid/dashed track is scaled to the
