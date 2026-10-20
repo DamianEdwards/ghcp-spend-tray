@@ -72,7 +72,7 @@ internal sealed class ForecastTrack
         var accent = new SolidColorBrush(_colors.GetColorValue(UIColorType.Accent));
         var foreground = new SolidColorBrush(_colors.GetColorValue(UIColorType.Foreground));
         decimal target = (_account.CustomBudgetUsd ?? _account.AllocationUsd)!.Value;
-        string targetName = _account.CustomBudgetUsd is not null ? "custom budget" : "API limit";
+        string targetName = _account.CustomBudgetUsd is not null ? "budget" : "API limit";
         double targetMaxWidth = Math.Min(140, _canvas.ActualWidth * 0.4);
         var targetLabel = new TextBlock
         {

@@ -60,6 +60,7 @@ struct AccountData: Decodable, Identifiable {
     var customBudgetUsd: Decimal? = nil
 
     var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
+    var trackingTargetLabel: String { customBudgetUsd == nil ? "API limit" : "budget" }
     var usageCaption: String {
         if actualUsage != nil, let percent { return "\(decimalText(percent))% used" }
         return allocationSummary

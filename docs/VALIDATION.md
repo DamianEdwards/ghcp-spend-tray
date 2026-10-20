@@ -65,7 +65,7 @@ published Windows smoke passed. Layout, callouts, and calculations are unchanged
 the corresponding SwiftUI drawing change still requires Apple-silicon CI.
 
 Finite targets now have a fixed amount/label column after the horizontal track.
-The medium-size target amount aligns with the line, with `custom budget` or
+The medium-size target amount aligns with the line, with `budget` or
 `API limit` below it, and the separate caption says only `% used`. Native
 measurements reserve the column first, scale actual/projected markers against
 the shortened track, and constrain both moving callouts to the track area.

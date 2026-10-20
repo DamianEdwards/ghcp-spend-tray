@@ -966,7 +966,7 @@ internal static class Program
                         AssertEstimateRow(window, "", UI.UI.EstimateAmount(fixture.PeriodEstimate));
                         var extension = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastExtension")!;
                         var marker = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastMarker")!;
-                        var baseline = AssertTrackingTarget(window, "", 100, "custom budget");
+                        var baseline = AssertTrackingTarget(window, "", 100, "budget");
                         var brush = (SolidColorBrush)extension.Stroke;
                         var expected = projected >= 100
                             ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCriticalBrush"]
@@ -1028,7 +1028,7 @@ internal static class Program
                 Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > baseline.X2 + 3)
                 throw new InvalidOperationException("Actual usage callout did not retain its exact large amount above the solid marker.");
             AssertActualMarker(track, marker, usageLine);
-            AssertTrackingTarget(window, prefix, 100, "custom budget");
+            AssertTrackingTarget(window, prefix, 100, "budget");
             double expected = baseline.X1 + (double)Math.Min(1, used / 100) * (baseline.X2 - baseline.X1);
             if (Math.Abs(marker.X1 - expected) > 0.1)
                 throw new InvalidOperationException("Actual usage marker does not match actual percentage.");
@@ -1066,7 +1066,7 @@ internal static class Program
                 Find(window, prefix + "TrackingTarget") is not FrameworkElement column ||
                 Find(window, prefix + "TrackingTargetAmount") is not TextBlock amount ||
                 Find(window, prefix + "TrackingTargetLabel") is not TextBlock label ||
-                AutomationProperties.GetLabeledBy(amount) != label || label.Text is not ("custom budget" or "API limit") ||
+                AutomationProperties.GetLabeledBy(amount) != label || label.Text is not ("budget" or "API limit") ||
                 amount.FontSize < 16 || label.FontSize >= amount.FontSize ||
                 Canvas.GetLeft(column) < baseline.X2 + 10 ||
                 Canvas.GetLeft(column) + column.ActualWidth > track.ActualWidth + 1 ||

@@ -31,9 +31,13 @@ enum PeriodEstimateTests {
             "observedAtUtc": "2026-10-11T00:00:00.0000000+00:00", "isEarly": false
         ])
         let estimate = on.periodEstimate!
-        try check(on.usageCaption == "42.75% used" && on.targetLabel == "API limit" &&
+        try check(on.usageCaption == "42.75% used" && on.trackingTargetLabel == "API limit" &&
                   on.allocationSummary.contains("$100.00"),
                   "Native short usage captions keep the target information in its separate fixed column.")
+        var budget = on
+        budget.customBudgetUsd = 100
+        try check(budget.trackingTargetLabel == "budget" && budget.allocationSummary.contains("custom budget"),
+                  "Fixed target columns use the short budget label without changing detailed descriptions.")
         try check(estimate.estimatedConsumptionUsd == Decimal(string: "132.525") &&
                   estimatedMoney(estimate.estimatedConsumptionUsd) == "~$133",
                   "Shared decimal results retain their cents before display rounding.")
