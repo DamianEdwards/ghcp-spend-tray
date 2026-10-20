@@ -14,6 +14,8 @@ public sealed record AccountView(string Key, string Name, string Login, string H
     string? AvatarUrl = null, PeriodEstimate? PeriodEstimate = null, EnterpriseConsumptionView? EnterpriseConsumption = null,
     decimal? CustomBudgetUsd = null)
 {
+    public UsagePosition? ActualUsage => Percent is null ? null :
+        UsagePosition.Create(ConsumptionUsd, CustomBudgetUsd ?? AllocationUsd);
     public UsageForecast? Forecast => Percent is null ? null :
         UsageForecast.Create(ConsumptionUsd, CustomBudgetUsd ?? AllocationUsd, PeriodEstimate);
 }

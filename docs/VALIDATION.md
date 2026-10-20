@@ -31,6 +31,22 @@ Native smoke additionally checks subtitle position/font size, shared horizontal
 centers, marker-centered placement with edge clamping, vertical callout bounds,
 and the dash/gap ratio. Populated and empty/single-account runs passed.
 
+Current usage also has an independent shared target position/severity. Its exact
+amount is drawn in neutral text above the solid-line marker, with a smaller
+`used` label. Windows retains 36-DIP amounts in Usage and 21-DIP amounts in the
+popup. A caution icon appears for actual usage at 95% to below 100%, and an
+error icon appears at 100% or above, independently of forecast severity.
+Unknown/unlimited targets retain the existing header amount; finite targets
+retain current-usage markers even when forecasting is disabled.
+Native smoke covers actual markers, exact amounts, font prominence, callout bounds
+above the line, and independent warning/error glyphs/colors at 220 and 620 DIPs,
+including cases where the forecast is over-target but actual usage is not.
+The complete Windows managed/executed Native AOT checks and populated plus
+empty/single-account native smoke passed after adding the current-usage callout.
+Shared serialization tests cover the separate actual-usage marker/severity;
+native macOS fixtures include independent actual/forecast risk states and remain
+pending execution on Apple-silicon CI.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

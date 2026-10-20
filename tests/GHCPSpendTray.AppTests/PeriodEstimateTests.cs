@@ -28,6 +28,13 @@ internal static class PeriodEstimateTests
         Check((forecastAccount with { Percent = null }).Forecast is null &&
             (forecastAccount with { PeriodEstimate = null }).Forecast is null,
             "Unavailable or disabled forecasts keep the existing text-only surfaces.");
+        Check(forecastAccount.ActualUsage is { Band: ForecastBand.Under, Fraction: 0.6 } &&
+            forecastAccount.Forecast!.Band == ForecastBand.Near,
+            "Actual usage status is independent of a near-target forecast.");
+        Check((forecastAccount with { PeriodEstimate = null }).ActualUsage is not null &&
+            (forecastAccount with { ConsumptionUsd = 95m, Percent = 95 }).ActualUsage?.Band == ForecastBand.Near &&
+            (forecastAccount with { ConsumptionUsd = 100m, Percent = 100 }).ActualUsage?.Band == ForecastBand.Over,
+            "Current usage markers remain available with estimates off and use exact actual thresholds.");
         var recent = new PeriodEstimate(EstimatedConsumptionUsd: 100, AverageDailyConsumptionUsd: 2,
             AverageStartDate: "2026-10-08", AverageEndDate: "2026-10-14", ReportedDayCount: 7);
         Check(UI.EstimateContext(recent).Contains("Latest 7 reported days") &&

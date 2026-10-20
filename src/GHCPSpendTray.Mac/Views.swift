@@ -31,11 +31,13 @@ struct AccountRow: View {
                     Text("\(account.login) @ \(account.host)").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(money(account.consumptionUsd)).font(.title3).monospacedDigit()
+                if account.actualUsage == nil {
+                    Text(money(account.consumptionUsd)).font(.title3).monospacedDigit()
+                }
             }
             if let percent = account.percent {
-                if let forecast = account.forecast, let estimate = account.periodEstimate {
-                    ForecastUsageTrack(forecast: forecast, estimate: estimate, target: account.targetLabel)
+                if let actual = account.actualUsage {
+                    AccountUsageTrack(account: account, actual: actual)
                 } else {
                     ProgressView(value: min(max(NSDecimalNumber(decimal: percent).doubleValue, 0), 100), total: 100)
                         .tint(percent >= 100 ? .red : .accentColor)
@@ -92,68 +94,106 @@ private struct ForecastCalloutWidth: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-struct ForecastUsageTrack: View {
-    let forecast: UsageForecastData
-    let estimate: PeriodEstimateData
-    let target: String
+private struct ActualCalloutWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+struct AccountUsageTrack: View {
+    let account: AccountData
+    let actual: UsagePositionData
     @State private var calloutWidth: CGFloat = 0
+    @State private var actualWidth: CGFloat = 0
     private var tint: Color {
-        switch forecast.band {
+        switch account.forecast?.band ?? .under {
         case .under: .accentColor
         case .near: .orange
         case .over: .red
         }
     }
     private var description: String {
+        guard let forecast = account.forecast, let estimate = account.periodEstimate else { return account.allocationSummary }
         let status = forecast.band == .under ? "Under target" : forecast.band == .near ? "Near target" : "At or over target"
-        return "Estimated at reset: \(estimatedMoney(estimate.estimatedConsumptionUsd)) (\(decimalText(forecast.percent))% of \(target)). \(status). \(estimate.method)"
+        return "\(account.allocationSummary). Estimated at reset: \(estimatedMoney(estimate.estimatedConsumptionUsd)) (\(decimalText(forecast.percent))% of \(account.targetLabel)). \(status). \(estimate.method)"
     }
     var body: some View {
         GeometryReader { geometry in
             let width = max(0, geometry.size.width - 4)
-            let actualX = 2 + CGFloat(forecast.actualFraction) * width
-            let endX = 2 + CGFloat(forecast.forecastFraction) * width
+            let actualX = 2 + CGFloat(actual.fraction) * width
+            let lineY: CGFloat = 54
             ZStack(alignment: .topLeading) {
                 Path { path in
-                    path.move(to: CGPoint(x: 2, y: 5))
-                    path.addLine(to: CGPoint(x: geometry.size.width - 2, y: 5))
+                    path.move(to: CGPoint(x: 2, y: lineY))
+                    path.addLine(to: CGPoint(x: geometry.size.width - 2, y: lineY))
                 }.stroke(Color.secondary.opacity(0.4), lineWidth: 1)
                 Path { path in
-                    path.move(to: CGPoint(x: 2, y: 5))
-                    path.addLine(to: CGPoint(x: actualX, y: 5))
-                }.stroke(forecast.actualFraction >= 1 ? Color.red : Color.accentColor, lineWidth: 4)
+                    path.move(to: CGPoint(x: 2, y: lineY))
+                    path.addLine(to: CGPoint(x: actualX, y: lineY))
+                }.stroke(actual.fraction >= 1 ? Color.red : Color.accentColor, lineWidth: 4)
                 Path { path in
-                    path.move(to: CGPoint(x: actualX, y: 5))
-                    path.addLine(to: CGPoint(x: endX, y: 5))
-                }.stroke(tint, style: StrokeStyle(lineWidth: 4, dash: [12, 4]))
-                Path { path in
-                    path.move(to: CGPoint(x: endX, y: 0))
-                    path.addLine(to: CGPoint(x: endX, y: 19))
-                }.stroke(tint, lineWidth: 1.5)
+                    path.move(to: CGPoint(x: actualX, y: lineY - 9))
+                    path.addLine(to: CGPoint(x: actualX, y: lineY))
+                }.stroke(Color.secondary, lineWidth: 1.5)
                 VStack(alignment: .center, spacing: 0) {
-                    Text(estimatedMoney(estimate.estimatedConsumptionUsd)).font(.callout).bold().monospacedDigit()
-                    Text("est. total").font(.system(size: 10))
-                    if forecast.band == .over {
-                        Text("(\(decimalText(forecast.percent))%)").font(.system(size: 10))
+                    HStack(spacing: 6) {
+                        if actual.band != .under {
+                            Image(systemName: actual.band == .near ? "exclamationmark.triangle.fill" : "xmark.octagon.fill")
+                                .foregroundStyle(actual.band == .near ? Color.orange : Color.red)
+                                .accessibilityLabel(actual.band == .near ? "Current usage is near the target" : "Current usage is at or over the target")
+                        }
+                        Text(money(account.consumptionUsd)).font(.title2).bold().monospacedDigit()
                     }
+                    Text("used").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
-                .foregroundStyle(tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .fixedSize(horizontal: true, vertical: false)
                 .background(GeometryReader { label in
-                    Color.clear.preference(key: ForecastCalloutWidth.self, value: label.size.width)
+                    Color.clear.preference(key: ActualCalloutWidth.self, value: label.size.width)
                 })
-                .frame(width: min(calloutWidth > 0 ? calloutWidth : 240, geometry.size.width), alignment: .leading)
+                .frame(width: min(actualWidth > 0 ? actualWidth : 240, geometry.size.width), alignment: .leading)
                 .clipped()
-                .offset(x: min(max(0, endX - min(calloutWidth, geometry.size.width) / 2),
-                               max(0, geometry.size.width - calloutWidth)), y: 22)
+                .offset(x: min(max(0, actualX - min(actualWidth, geometry.size.width) / 2),
+                               max(0, geometry.size.width - actualWidth)), y: 3)
+                .accessibilityElement(children: .combine)
+                .help("Current usage: \(money(account.consumptionUsd)). \(account.allocationSummary)")
+                if let forecast = account.forecast, let estimate = account.periodEstimate {
+                    let endX = 2 + CGFloat(forecast.forecastFraction) * width
+                    Path { path in
+                        path.move(to: CGPoint(x: actualX, y: lineY))
+                        path.addLine(to: CGPoint(x: endX, y: lineY))
+                    }.stroke(tint, style: StrokeStyle(lineWidth: 4, dash: [12, 4]))
+                    Path { path in
+                        path.move(to: CGPoint(x: endX, y: lineY - 5))
+                        path.addLine(to: CGPoint(x: endX, y: lineY + 14))
+                    }.stroke(tint, lineWidth: 1.5)
+                    VStack(alignment: .center, spacing: 0) {
+                        Text(estimatedMoney(estimate.estimatedConsumptionUsd)).font(.callout).bold().monospacedDigit()
+                        Text("est. total").font(.system(size: 10))
+                        if forecast.band == .over {
+                            Text("(\(decimalText(forecast.percent))%)").font(.system(size: 10))
+                        }
+                    }
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background(GeometryReader { label in
+                        Color.clear.preference(key: ForecastCalloutWidth.self, value: label.size.width)
+                    })
+                    .frame(width: min(calloutWidth > 0 ? calloutWidth : 240, geometry.size.width), alignment: .leading)
+                    .clipped()
+                    .offset(x: min(max(0, endX - min(calloutWidth, geometry.size.width) / 2),
+                                   max(0, geometry.size.width - calloutWidth)), y: lineY + 17)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(description)
+                }
             }
         }
-        .frame(height: forecast.band == .over ? 68 : 56)
+        .frame(height: 54 + (account.forecast == nil ? 2 : account.forecast?.band == .over ? 63 : 51))
         .onPreferenceChange(ForecastCalloutWidth.self) { calloutWidth = $0 }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(description)
+        .onPreferenceChange(ActualCalloutWidth.self) { actualWidth = $0 }
+        .accessibilityElement(children: .contain)
         .help(description)
         .accessibilityIdentifier("ForecastTrack")
     }

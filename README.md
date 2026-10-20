@@ -376,6 +376,14 @@ over-target forecasts pin the marker to the right edge and show the full amount
 and projected percentage in the callout. The label stays inside the account
 panel on resize, separate from the actual-usage label.
 
+The exact current amount moves with its solid-line endpoint in a larger neutral
+callout above the line, labeled **used**, rather than being repeated in the
+account header. A warning icon marks actual usage at 95% to below 100% of the
+tracking target; an error icon marks 100% or above. These icons reflect actual
+usage, not the forecast. Current and projected labels are clamped within panel
+bounds; above-target amounts retain their full values while their markers stay
+at 100%. Accounts with no finite target keep their existing amount display.
+
 The early/reset/method context remains below the usage line. Unknown or
 unlimited targets and unavailable forecasts keep the text-only presentation.
 The setting remains opt-in. There is no combined forecast, forecast-based alert,

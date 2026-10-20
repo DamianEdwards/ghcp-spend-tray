@@ -975,6 +975,22 @@ internal static class Program
                             Math.Abs(marker.X1 - (2 + (double)Math.Min(1, projected / 100) * (track.ActualWidth - 4))) > 0.1)
                             throw new InvalidOperationException("Forecast threshold color, abutting extension, or clamped marker is incorrect.");
                     }
+                    foreach (decimal used in new[] { 0m, 60m, 94.99m, 95m, 99.99m, 100m, 110m })
+                    {
+                        var fixture = source with
+                        {
+                            ConsumptionUsd = used, Percent = used, AllocationUsd = 100, CustomBudgetUsd = 100,
+                            PeriodEstimate = new(EstimatedConsumptionUsd: 150)
+                        };
+                        UI.ForecastTrack.Apply(track, fixture, "");
+                        track.UpdateLayout();
+                        AssertActualCallout(window, used, "");
+                        UI.ForecastTrack.Apply(track, fixture with { PeriodEstimate = null }, "");
+                        track.UpdateLayout();
+                        AssertActualCallout(window, used, "");
+                        if (Find(window, "ForecastMarker") is not null || Find(window, "PeriodEstimateAmount") is not null)
+                            throw new InvalidOperationException("Disabling the forecast retained projected native drawing.");
+                    }
                 }
             }
             finally
@@ -986,9 +1002,37 @@ internal static class Program
             }
         }
 
+        static void AssertActualCallout(ReactorWindow window, decimal used, string prefix)
+        {
+            if (Find(window, prefix + "ForecastTrack") is not Canvas track ||
+                Find(window, prefix + "AccountConsumption") is not TextBlock amount || amount.Text != UI.UI.Money(used) ||
+                Find(window, prefix + "ActualUsageCallout") is not FrameworkElement callout ||
+                Find(window, prefix + "ActualUsageMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
+                amount.FontSize < 21 || AutomationProperties.GetLabeledBy(amount) is not TextBlock { Text: "used" } ||
+                Canvas.GetTop(callout) + callout.ActualHeight > marker.Y1 + 1 ||
+                Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > track.ActualWidth + 1)
+                throw new InvalidOperationException("Actual usage callout did not retain its exact large amount above the solid marker.");
+            double expected = 2 + (double)Math.Min(1, used / 100) * (track.ActualWidth - 4);
+            if (Math.Abs(marker.X1 - expected) > 0.1)
+                throw new InvalidOperationException("Actual usage marker does not match actual percentage.");
+            var icon = Find(window, prefix + "ActualUsageWarning");
+            if (used < 95 && icon is not null || used >= 95 && icon is not FontIcon)
+                throw new InvalidOperationException("Actual warning icon incorrectly follows the forecast.");
+            if (icon is FontIcon warning)
+            {
+                string expectedGlyph = used >= 100 ? "\uE711" : "\uE7BA";
+                var expectedBrush = (SolidColorBrush)Application.Current.Resources[used >= 100
+                    ? "SystemFillColorCriticalBrush" : "SystemFillColorCautionBrush"];
+                if (warning.Glyph != expectedGlyph || warning.Foreground is not SolidColorBrush brush ||
+                    brush.Color != expectedBrush.Color)
+                    throw new InvalidOperationException("Actual usage warning/error glyph or color is incorrect.");
+            }
+        }
+
         static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
-            if (Find(window, prefix + "ForecastTrack") is Canvas track)
+            if (Find(window, prefix + "ForecastTrack") is Canvas track &&
+                Find(window, prefix + "ForecastExtension") is not null)
             {
                 if (Find(window, prefix + "ForecastExtension") is not Microsoft.UI.Xaml.Shapes.Line { StrokeDashArray.Count: > 0 } dashed ||
                     Find(window, prefix + "ForecastMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||

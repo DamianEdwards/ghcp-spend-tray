@@ -56,6 +56,7 @@ struct AccountData: Decodable, Identifiable {
     let periodEstimate: PeriodEstimateData?
     let enterpriseConsumption: EnterpriseConsumptionData?
     let forecast: UsageForecastData?
+    let actualUsage: UsagePositionData?
     var customBudgetUsd: Decimal? = nil
 
     var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
@@ -67,6 +68,12 @@ struct AccountData: Decodable, Identifiable {
         struct UsageForecastData: Decodable {
             let actualFraction: Double
             let forecastFraction: Double
+            let percent: Decimal
+            let band: ForecastBand
+        }
+
+        struct UsagePositionData: Decodable {
+            let fraction: Double
             let percent: Decimal
             let band: ForecastBand
         }

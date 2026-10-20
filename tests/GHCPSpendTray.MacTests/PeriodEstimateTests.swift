@@ -63,6 +63,17 @@ enum PeriodEstimateTests {
             try check(narrow.fittingSize.width == 260 && narrow.fittingSize.height.isFinite,
                       "Projected callouts fit the compact native account width.")
         }
+        for (used, band) in [(60.0, ForecastBand.under), (95.0, .near), (100.0, .over), (150.0, .over)] {
+            let fixture = try account(estimate: ["estimatedConsumptionUsd": 200, "isEarly": false], used: used)
+            try check(fixture.actualUsage?.band == band && fixture.forecast?.band == .over &&
+                      fixture.actualUsage?.fraction == min(1, used / 100),
+                      "Native current-usage warnings are independent of projected over-target status.")
+            let view = NSHostingView(rootView: AccountRow(account: fixture).frame(width: 260))
+            view.setFrameSize(view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            try check(view.fittingSize.width == 260 && view.fittingSize.height.isFinite,
+                      "Stacked actual and estimated amounts fit a compact native account panel.")
+        }
 
         let off = try account()
         let unavailable = try account(estimate: [
@@ -95,20 +106,22 @@ enum PeriodEstimateTests {
         print("PASS: Mac period-estimate preferences, decimal/UTC display, opt-in and unavailable native account rows.")
     }
 
-    private static func account(estimate: [String: Any]? = nil) throws -> AccountData {
+    private static func account(estimate: [String: Any]? = nil, used: Double = 42.75) throws -> AccountData {
         var fields: [String: Any] = [
             "key": "github.com:1", "name": "Synthetic", "login": "fixture-user", "host": "github.com",
             "details": ["unlimited": false, "isCurrentPeriod": true],
-            "freshness": "Fresh", "consumptionUsd": 42.75, "allocationUsd": 100, "percent": 42.75
+            "freshness": "Fresh", "consumptionUsd": used, "allocationUsd": 100, "percent": used,
+            "actualUsage": ["fraction": min(1, used / 100), "percent": used,
+                            "band": used >= 100 ? 2 : used >= 95 ? 1 : 0]
         ]
         if let estimate {
             var value = estimate
             if value["reportedDayCount"] == nil { value["reportedDayCount"] = 0 }
             fields["periodEstimate"] = value
-            if let amount = estimate["estimatedConsumptionUsd"] as? NSNumber, amount.doubleValue >= 42.75,
+            if let amount = estimate["estimatedConsumptionUsd"] as? NSNumber, amount.doubleValue >= used,
                estimate["unavailableReason"] == nil {
                 fields["forecast"] = [
-                    "actualFraction": 0.4275, "forecastFraction": min(1, amount.doubleValue / 100),
+                    "actualFraction": min(1, used / 100), "forecastFraction": min(1, amount.doubleValue / 100),
                     "percent": amount, "band": amount.doubleValue >= 100 ? 2 : amount.doubleValue >= 95 ? 1 : 0
                 ]
             }

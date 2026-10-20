@@ -188,9 +188,9 @@ internal static class UI
             : null;
 
     internal static Element UsageMeter(AccountView account, string prefix, bool compact = false) => VStack(compact ? 5 : 6,
-        account.Forecast is not null
-            ? new ForecastTrackElement().Set(canvas => ForecastTrack.Apply(canvas, account, prefix))
-                .Height(account.Forecast.Band == ForecastBand.Over ? 68 : 56)
+        account.ActualUsage is not null
+            ? new ForecastTrackElement().Set(canvas => ForecastTrack.Apply(canvas, account, prefix, compact))
+                .Height(ForecastTrack.Height(account, compact))
                 .HAlign(HorizontalAlignment.Stretch).AutomationId(prefix + "ForecastTrack")
             : account.Percent is { } percent
                 ? Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UsagePercentage(account))
@@ -307,12 +307,12 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
         ).Background(Theme.SolidBackground).AutomationId("SpendFlyout");
     }
     private Element AccountCard(AccountView account) =>
-        Card(VStack(10,
+        Card(VStack(8,
             Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.AccountPicture(account, 36).Grid(column: 0).Margin(0, 0, 10, 0),
                 VStack(2, TextBlock(account.Name).SemiBold(), UI.Copy(account.Host).FontSize(12)).Grid(column: 1),
-                TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(21).SemiBold()
-                    .VAlign(VerticalAlignment.Center).Grid(column: 2)),
+                account.ActualUsage is null ? TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(21).SemiBold()
+                    .VAlign(VerticalAlignment.Center).Grid(column: 2) : null),
             UI.UsageMeter(account, account.Key + "_Flyout_", compact: true),
             UI.DailyConsumption(account, compact: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
@@ -734,7 +734,8 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
 
     private static Element UsageSummary(AccountView account, string idPrefix = "") => Card(VStack(12,
         VStack(2, UI.Copy("This month's usage"),
-            TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId(idPrefix + "AccountConsumption")),
+            account.ActualUsage is null ? TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold()
+                .AutomationId(idPrefix + "AccountConsumption") : null),
         UI.UsageMeter(account, idPrefix),
         UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
     )).AutomationId(idPrefix + "AccountSummary");

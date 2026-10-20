@@ -19,6 +19,10 @@ internal static partial class Program
                 Equal(amount, forecast.Percent);
                 Equal((double)(Math.Min(100, amount) / 100), forecast.ForecastFraction);
                 Equal(0d, forecast.ActualFraction);
+                var actual = UsagePosition.Create(amount, 100)!;
+                Equal(band, actual.Band);
+                Equal(forecast.ForecastFraction, actual.Fraction);
+                Equal(amount, actual.Percent);
             });
         await Test("forecast extension abuts actual usage and clamps both markers", () =>
         {
@@ -39,6 +43,10 @@ internal static partial class Program
             Equal(null, UsageForecast.Create(10, 100, null));
             Equal(null, UsageForecast.Create(10, 100, new(EstimatedConsumptionUsd: 9)));
             Equal(null, UsageForecast.Create(10, 100, new(EstimatedConsumptionUsd: 20, UnavailableReason: "stale")));
+            Equal(null, UsagePosition.Create(null, 100));
+            Equal(null, UsagePosition.Create(10, null));
+            Equal(null, UsagePosition.Create(10, 0));
+            Equal(null, UsagePosition.Create(-1, 100));
         });
     }
 }
