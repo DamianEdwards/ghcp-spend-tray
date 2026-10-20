@@ -388,6 +388,13 @@ usage, not the forecast. Current and projected labels are clamped within panel
 bounds; above-target amounts retain their full values while their markers stay
 at 100%. Accounts with no finite target keep their existing amount display.
 
+A fixed column immediately after the line shows the tracking target, with a
+medium-sized amount above **custom budget** or **API limit**. Whole-dollar
+targets omit redundant cents; fractional targets retain two decimal places.
+The percentage caption is simply **% used** rather than repeating that amount.
+The fixed column has its own space: the solid/dashed track is scaled to the
+remaining width, and both moving callouts stay inside that track area.
+
 The early/reset/method context remains below the usage line. Unknown or
 unlimited targets and unavailable forecasts keep the text-only presentation.
 The setting remains opt-in. There is no combined forecast, forecast-based alert,

@@ -60,6 +60,10 @@ struct AccountData: Decodable, Identifiable {
     var customBudgetUsd: Decimal? = nil
 
     var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
+    var usageCaption: String {
+        if actualUsage != nil, let percent { return "\(decimalText(percent))% used" }
+        return allocationSummary
+    }
     var allocationSummary: String {
         if let percent {
             return "\(decimalText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
@@ -335,6 +339,19 @@ func money(_ value: Decimal?) -> String {
     let format = NumberFormatter()
     format.locale = Locale(identifier: "en_US")
     format.numberStyle = .currency
+    return format.string(from: value as NSDecimalNumber) ?? "\(value) USD"
+}
+
+func trackingTargetMoney(_ value: Decimal?) -> String {
+    guard let value else { return "Unavailable" }
+    var input = value
+    var whole = Decimal()
+    NSDecimalRound(&whole, &input, 0, .down)
+    let format = NumberFormatter()
+    format.locale = Locale(identifier: "en_US")
+    format.numberStyle = .currency
+    format.minimumFractionDigits = value == whole ? 0 : 2
+    format.maximumFractionDigits = 2
     return format.string(from: value as NSDecimalNumber) ?? "\(value) USD"
 }
 

@@ -51,7 +51,7 @@ internal sealed class ForecastTrack
     }
 
     internal static double Height(AccountView account, bool compact) =>
-        (compact ? 54 : 72) + (account.Forecast is { } projected ? projected.Band == ForecastBand.Over ? 65 : 53 : 2);
+        (compact ? 54 : 72) + (account.Forecast is { } projected ? projected.Band == ForecastBand.Over ? 65 : 53 : 28);
 
     internal static void Apply(Canvas canvas, AccountView account, string prefix, bool compact = false)
     {
@@ -68,12 +68,39 @@ internal sealed class ForecastTrack
     {
         if (_account?.ActualUsage is not { } actual || _canvas.ActualWidth < 60) return;
         _canvas.Children.Clear();
-        double width = _canvas.ActualWidth;
-        double trackWidth = width - 4, actualX = 2 + actual.Fraction * trackWidth;
         double lineY = _compact ? 54 : 72;
         var accent = new SolidColorBrush(_colors.GetColorValue(UIColorType.Accent));
         var foreground = new SolidColorBrush(_colors.GetColorValue(UIColorType.Foreground));
-        Add(new Line { X1 = 2, X2 = width - 2, Y1 = lineY, Y2 = lineY, Stroke = foreground, StrokeThickness = 1, Opacity = 0.4 });
+        decimal target = (_account.CustomBudgetUsd ?? _account.AllocationUsd)!.Value;
+        string targetName = _account.CustomBudgetUsd is not null ? "custom budget" : "API limit";
+        double targetMaxWidth = Math.Min(140, _canvas.ActualWidth * 0.4);
+        var targetLabel = new TextBlock
+        {
+            Text = targetName, FontSize = 11, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var targetAmount = new TextBlock
+        {
+            Text = UI.TrackingTargetAmount(target), FontSize = _compact ? 16 : 18,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = foreground,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        AutomationProperties.SetAutomationId(targetAmount, _prefix + "TrackingTargetAmount");
+        AutomationProperties.SetAutomationId(targetLabel, _prefix + "TrackingTargetLabel");
+        AutomationProperties.SetLabeledBy(targetAmount, targetLabel);
+        var targetColumn = new StackPanel { MaxWidth = targetMaxWidth };
+        targetColumn.Children.Add(targetAmount);
+        targetColumn.Children.Add(targetLabel);
+        targetColumn.Measure(new Windows.Foundation.Size(targetMaxWidth, double.PositiveInfinity));
+        double width = _canvas.ActualWidth - targetColumn.DesiredSize.Width - 12;
+        double trackWidth = Math.Max(0, width - 4), actualX = 2 + actual.Fraction * trackWidth;
+        Canvas.SetLeft(targetColumn, width + 12);
+        Canvas.SetTop(targetColumn, lineY - targetAmount.DesiredSize.Height / 2);
+        ToolTipService.SetToolTip(targetColumn, UI.Money(target) + " " + targetName);
+        AutomationProperties.SetName(targetColumn, UI.Money(target) + " " + targetName);
+        Add(targetColumn, _prefix + "TrackingTarget");
+        Add(new Line { X1 = 2, X2 = width - 2, Y1 = lineY, Y2 = lineY, Stroke = foreground, StrokeThickness = 1, Opacity = 0.4 },
+            _prefix + "UsageBaseline");
         Add(new Line { X1 = 2, X2 = actualX, Y1 = lineY, Y2 = lineY, Stroke = accent, StrokeThickness = 4 },
             _prefix + "ActualUsageLine");
         var actualMarker = new Line

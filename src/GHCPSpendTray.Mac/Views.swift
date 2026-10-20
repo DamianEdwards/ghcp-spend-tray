@@ -44,7 +44,7 @@ struct AccountRow: View {
                         .accessibilityLabel("\(account.targetLabel) consumed")
                         .accessibilityValue("\(decimalText(percent)) percent")
                 }
-                Text(account.allocationSummary)
+                Text(account.usageCaption)
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text(account.allocationSummary)
@@ -99,11 +99,17 @@ private struct ActualCalloutWidth: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+private struct TrackingTargetWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 struct AccountUsageTrack: View {
     let account: AccountData
     let actual: UsagePositionData
     @State private var calloutWidth: CGFloat = 0
     @State private var actualWidth: CGFloat = 0
+    @State private var targetWidth: CGFloat = 0
     private var tint: Color {
         switch account.forecast?.band ?? .under {
         case .under: .accentColor
@@ -118,13 +124,15 @@ struct AccountUsageTrack: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            let width = max(0, geometry.size.width - 4)
+            let reservedTargetWidth = min(targetWidth > 0 ? targetWidth : 80, min(140, geometry.size.width * 0.4))
+            let plotWidth = max(0, geometry.size.width - reservedTargetWidth - 12)
+            let width = max(0, plotWidth - 4)
             let actualX = 2 + CGFloat(actual.fraction) * width
             let lineY: CGFloat = 54
             ZStack(alignment: .topLeading) {
                 Path { path in
                     path.move(to: CGPoint(x: 2, y: lineY))
-                    path.addLine(to: CGPoint(x: geometry.size.width - 2, y: lineY))
+                    path.addLine(to: CGPoint(x: plotWidth - 2, y: lineY))
                 }.stroke(Color.secondary.opacity(0.4), lineWidth: 1)
                 Path { path in
                     path.move(to: CGPoint(x: 2, y: lineY))
@@ -151,10 +159,10 @@ struct AccountUsageTrack: View {
                 .background(GeometryReader { label in
                     Color.clear.preference(key: ActualCalloutWidth.self, value: label.size.width)
                 })
-                .frame(width: min(actualWidth > 0 ? actualWidth : 240, geometry.size.width), alignment: .leading)
+                .frame(width: min(actualWidth > 0 ? actualWidth : 240, plotWidth), alignment: .leading)
                 .clipped()
-                .offset(x: min(max(0, actualX - min(actualWidth, geometry.size.width) / 2),
-                               max(0, geometry.size.width - actualWidth)), y: 3)
+                .offset(x: min(max(0, actualX - min(actualWidth, plotWidth) / 2),
+                               max(0, plotWidth - actualWidth)), y: 3)
                 .accessibilityElement(children: .combine)
                 .help("Current usage: \(money(account.consumptionUsd)). \(account.allocationSummary)")
                 if let forecast = account.forecast, let estimate = account.periodEstimate {
@@ -181,18 +189,37 @@ struct AccountUsageTrack: View {
                     .background(GeometryReader { label in
                         Color.clear.preference(key: ForecastCalloutWidth.self, value: label.size.width)
                     })
-                    .frame(width: min(calloutWidth > 0 ? calloutWidth : 240, geometry.size.width), alignment: .leading)
+                    .frame(width: min(calloutWidth > 0 ? calloutWidth : 240, plotWidth), alignment: .leading)
                     .clipped()
-                    .offset(x: min(max(0, endX - min(calloutWidth, geometry.size.width) / 2),
-                                   max(0, geometry.size.width - calloutWidth)), y: lineY + 17)
+                    .offset(x: min(max(0, endX - min(calloutWidth, plotWidth) / 2),
+                                   max(0, plotWidth - calloutWidth)), y: lineY + 17)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(description)
                 }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(trackingTargetMoney(account.customBudgetUsd ?? account.allocationUsd))
+                        .font(.system(size: 16, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(.primary)
+                    Text(account.targetLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .background(GeometryReader { column in
+                    Color.clear.preference(key: TrackingTargetWidth.self, value: column.size.width)
+                })
+                .frame(width: reservedTargetWidth, alignment: .leading)
+                .clipped()
+                .offset(x: plotWidth + 12, y: lineY - 10)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
+                .accessibilityIdentifier("TrackingTarget")
+                .help("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
             }
         }
-        .frame(height: 54 + (account.forecast == nil ? 2 : account.forecast?.band == .over ? 65 : 53))
+        .frame(height: 54 + (account.forecast == nil ? 28 : account.forecast?.band == .over ? 65 : 53))
         .onPreferenceChange(ForecastCalloutWidth.self) { calloutWidth = $0 }
         .onPreferenceChange(ActualCalloutWidth.self) { actualWidth = $0 }
+        .onPreferenceChange(TrackingTargetWidth.self) { targetWidth = $0 }
         .accessibilityElement(children: .contain)
         .help(description)
         .accessibilityIdentifier("ForecastTrack")

@@ -12,6 +12,11 @@ enum PeriodEstimateTests {
         try check(estimatedMoney(0) == "~$0", "Observed zero has a numerical estimate.")
         try check(estimatedMoney(Decimal(string: "132.525")) == "~$133", "Forecast display rounds to whole USD.")
         try check(estimatedMoney(Decimal(string: "0.49")) == "<$1", "Small nonzero forecasts do not look like zero.")
+        try check(trackingTargetMoney(1500) == "$1,500" &&
+                  trackingTargetMoney(Decimal(string: "1500.25")) == "$1,500.25" &&
+                  trackingTargetMoney(Decimal(string: "0.01")) == "$0.01" &&
+                  trackingTargetMoney(Decimal(string: "25.5")) == "$25.50",
+                  "Fixed target amounts retain cents and omit redundant decimal zeroes.")
         let preferences = try JSONDecoder().decode(AccountPreferences.self, from: Data("""
         {"displayName":"Synthetic","thresholds":"","showPeriodEstimate":true}
         """.utf8))
@@ -26,6 +31,9 @@ enum PeriodEstimateTests {
             "observedAtUtc": "2026-10-11T00:00:00.0000000+00:00", "isEarly": false
         ])
         let estimate = on.periodEstimate!
+        try check(on.usageCaption == "42.75% used" && on.targetLabel == "API limit" &&
+                  on.allocationSummary.contains("$100.00"),
+                  "Native short usage captions keep the target information in its separate fixed column.")
         try check(estimate.estimatedConsumptionUsd == Decimal(string: "132.525") &&
                   estimatedMoney(estimate.estimatedConsumptionUsd) == "~$133",
                   "Shared decimal results retain their cents before display rounding.")

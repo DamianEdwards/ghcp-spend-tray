@@ -31,6 +31,11 @@ internal static class PeriodEstimateTests
         Check(forecastAccount.ActualUsage is { Band: ForecastBand.Under, Fraction: 0.6 } &&
             forecastAccount.Forecast!.Band == ForecastBand.Near,
             "Actual usage status is independent of a near-target forecast.");
+        Check(UI.TrackingTargetAmount(1500) == "$1,500" && UI.TrackingTargetAmount(1500.25m) == "$1,500.25" &&
+            UI.TrackingTargetAmount(0.01m) == "$0.01" && UI.TrackingTargetAmount(25.5m) == "$25.50",
+            "Fixed target amounts retain meaningful fractional dollars without redundant decimal zeroes.");
+        Check(UI.UsageCaption(forecastAccount) == "60% used" && UI.UsagePercentage(forecastAccount).Contains("$100.00"),
+            "The short usage caption avoids repeating the separately displayed target while accessible descriptions retain it.");
         Check((forecastAccount with { PeriodEstimate = null }).ActualUsage is not null &&
             (forecastAccount with { ConsumptionUsd = 95m, Percent = 95 }).ActualUsage?.Band == ForecastBand.Near &&
             (forecastAccount with { ConsumptionUsd = 100m, Percent = 100 }).ActualUsage?.Band == ForecastBand.Over,

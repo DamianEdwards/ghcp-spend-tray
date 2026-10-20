@@ -22,6 +22,10 @@ internal static class UI
     internal static string UsagePercentage(AccountView account) =>
         $"{account.Percent:0.##}% of {Money(account.AllocationUsd)} " +
         (account.CustomBudgetUsd is not null ? "custom budget" : "limit");
+    internal static string TrackingTargetAmount(decimal amount) =>
+        "$" + amount.ToString(amount == decimal.Truncate(amount) ? "N0" : "N2", CultureInfo.GetCultureInfo("en-US"));
+    internal static string UsageCaption(AccountView account) => account.ActualUsage is not null
+        ? $"{account.Percent:0.##}% used" : UsagePercentage(account);
     internal static TextBlockElement Copy(string text) => TextBlock(text).TextWrapping().Foreground(Theme.SecondaryText);
     internal static Element SettingsInput(AppSession session, SettingsField field, string value, string label,
         string? placeholder = null, double? width = null, bool enabled = true)
@@ -194,7 +198,7 @@ internal static class UI
             : account.Percent is { } percent
                 ? Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UsagePercentage(account))
                 : null,
-        Copy(account.Percent is not null ? UsagePercentage(account) :
+        Copy(account.Percent is not null ? UsageCaption(account) :
             account.Details.Unlimited ? "Unlimited" : "Limit percentage not available").FontSize(compact ? 12 : 14),
         EstimateRow(account, prefix, rightAlignAmount: compact, showAmount: account.Forecast is null));
     internal static Element? EstimateDetails(AccountView account, string idPrefix = "") => account.PeriodEstimate is { } estimate

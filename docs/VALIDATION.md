@@ -64,6 +64,23 @@ disabled and endpoints clamped at 100%. Populated and empty/single-account
 published Windows smoke passed. Layout, callouts, and calculations are unchanged;
 the corresponding SwiftUI drawing change still requires Apple-silicon CI.
 
+Finite targets now have a fixed amount/label column after the horizontal track.
+The medium-size target amount aligns with the line, with `custom budget` or
+`API limit` below it, and the separate caption says only `% used`. Native
+measurements reserve the column first, scale actual/projected markers against
+the shortened track, and constrain both moving callouts to the track area.
+Native smoke checks target alignment, accessibility associations, panel bounds,
+and separation from the moving callouts at 220/620 DIPs, with small/fractional/
+large targets and budgets versus API limits. Formatting fixtures cover whole
+dollars, fractional dollars, and the short caption without changing the complete
+accessible description. SwiftUI uses the same fixed-column arrangement and
+still needs native Apple-silicon verification.
+
+The full Windows managed/executed Native AOT checks and populated plus
+empty/single-account published native smoke passed with the fixed target column
+enabled. The single-account popup remains scroll-free with the chart and
+forecast enabled, despite reserving separate horizontal target space.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

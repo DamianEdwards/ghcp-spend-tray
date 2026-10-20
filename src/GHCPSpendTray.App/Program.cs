@@ -966,13 +966,14 @@ internal static class Program
                         AssertEstimateRow(window, "", UI.UI.EstimateAmount(fixture.PeriodEstimate));
                         var extension = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastExtension")!;
                         var marker = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastMarker")!;
+                        var baseline = AssertTrackingTarget(window, "", 100, "custom budget");
                         var brush = (SolidColorBrush)extension.Stroke;
                         var expected = projected >= 100
                             ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCriticalBrush"]
                             : projected >= 95 ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCautionBrush"]
                             : new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent));
-                        if (brush.Color != expected.Color || Math.Abs(extension.X1 - (2 + 0.6 * (track.ActualWidth - 4))) > 0.1 ||
-                            Math.Abs(marker.X1 - (2 + (double)Math.Min(1, projected / 100) * (track.ActualWidth - 4))) > 0.1)
+                        if (brush.Color != expected.Color || Math.Abs(extension.X1 - (baseline.X1 + 0.6 * (baseline.X2 - baseline.X1))) > 0.1 ||
+                            Math.Abs(marker.X1 - (baseline.X1 + (double)Math.Min(1, projected / 100) * (baseline.X2 - baseline.X1))) > 0.1)
                             throw new InvalidOperationException("Forecast threshold color, abutting extension, or clamped marker is incorrect.");
                     }
                     foreach (decimal used in new[] { 0m, 60m, 94.99m, 95m, 99.99m, 100m, 110m })
@@ -990,6 +991,18 @@ internal static class Program
                         AssertActualCallout(window, used, "");
                         if (Find(window, "ForecastMarker") is not null || Find(window, "PeriodEstimateAmount") is not null)
                             throw new InvalidOperationException("Disabling the forecast retained projected native drawing.");
+                    }
+                    foreach (decimal target in new[] { 0.01m, 1500.25m, 10000m, decimal.MaxValue })
+                    {
+                        var fixture = source with
+                        {
+                            ConsumptionUsd = target * 0.6m, Percent = 60, AllocationUsd = target, CustomBudgetUsd = null,
+                            PeriodEstimate = new(EstimatedConsumptionUsd: target * 0.9m)
+                        };
+                        UI.ForecastTrack.Apply(track, fixture, "");
+                        track.UpdateLayout();
+                        AssertTrackingTarget(window, "", target, "API limit");
+                        AssertEstimateRow(window, "", UI.UI.EstimateAmount(fixture.PeriodEstimate));
                     }
                 }
             }
@@ -1009,12 +1022,14 @@ internal static class Program
                 Find(window, prefix + "ActualUsageCallout") is not FrameworkElement callout ||
                 Find(window, prefix + "ActualUsageMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
                 Find(window, prefix + "ActualUsageLine") is not Microsoft.UI.Xaml.Shapes.Line usageLine ||
+                Find(window, prefix + "UsageBaseline") is not Microsoft.UI.Xaml.Shapes.Line baseline ||
                 amount.FontSize < 21 || AutomationProperties.GetLabeledBy(amount) is not TextBlock { Text: "used" } ||
                 Canvas.GetTop(callout) + callout.ActualHeight > marker.Y1 + 1 ||
-                Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > track.ActualWidth + 1)
+                Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > baseline.X2 + 3)
                 throw new InvalidOperationException("Actual usage callout did not retain its exact large amount above the solid marker.");
             AssertActualMarker(track, marker, usageLine);
-            double expected = 2 + (double)Math.Min(1, used / 100) * (track.ActualWidth - 4);
+            AssertTrackingTarget(window, prefix, 100, "custom budget");
+            double expected = baseline.X1 + (double)Math.Min(1, used / 100) * (baseline.X2 - baseline.X1);
             if (Math.Abs(marker.X1 - expected) > 0.1)
                 throw new InvalidOperationException("Actual usage marker does not match actual percentage.");
             var icon = Find(window, prefix + "ActualUsageWarning");
@@ -1043,6 +1058,29 @@ internal static class Program
                 throw new InvalidOperationException("Actual usage marker lost its theme-aware neutral color.");
         }
 
+        static Microsoft.UI.Xaml.Shapes.Line AssertTrackingTarget(ReactorWindow window, string prefix,
+            decimal? expectedAmount = null, string? expectedLabel = null)
+        {
+            if (Find(window, prefix + "ForecastTrack") is not Canvas track ||
+                Find(window, prefix + "UsageBaseline") is not Microsoft.UI.Xaml.Shapes.Line baseline ||
+                Find(window, prefix + "TrackingTarget") is not FrameworkElement column ||
+                Find(window, prefix + "TrackingTargetAmount") is not TextBlock amount ||
+                Find(window, prefix + "TrackingTargetLabel") is not TextBlock label ||
+                AutomationProperties.GetLabeledBy(amount) != label || label.Text is not ("custom budget" or "API limit") ||
+                amount.FontSize < 16 || label.FontSize >= amount.FontSize ||
+                Canvas.GetLeft(column) < baseline.X2 + 10 ||
+                Canvas.GetLeft(column) + column.ActualWidth > track.ActualWidth + 1 ||
+                Canvas.GetTop(column) + column.ActualHeight > track.ActualHeight + 1 ||
+                ToolTipService.GetToolTip(column) is null ||
+                expectedAmount is { } value && amount.Text != UI.UI.TrackingTargetAmount(value) ||
+                expectedLabel is not null && label.Text != expectedLabel)
+                throw new InvalidOperationException("The fixed tracking target is missing, mislabeled, or overlapping the usage track.");
+            var origin = amount.TransformToVisual(track).TransformPoint(default);
+            if (Math.Abs(origin.Y + amount.ActualHeight / 2 - baseline.Y1) > 1)
+                throw new InvalidOperationException("The fixed target amount is not aligned with the horizontal track.");
+            return baseline;
+        }
+
         static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
             if (Find(window, prefix + "ForecastTrack") is Canvas track &&
@@ -1050,13 +1088,14 @@ internal static class Program
             {
                 if (Find(window, prefix + "ForecastExtension") is not Microsoft.UI.Xaml.Shapes.Line { StrokeDashArray.Count: > 0 } dashed ||
                     Find(window, prefix + "ForecastMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
+                    Find(window, prefix + "UsageBaseline") is not Microsoft.UI.Xaml.Shapes.Line baseline ||
                     Find(window, prefix + "ForecastCallout") is not FrameworkElement callout ||
                     Find(window, prefix + "PeriodEstimateAmount") is not TextBlock projectedAmount || projectedAmount.Text != expected ||
                     Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "est. total" } projectedLabel ||
                     AutomationProperties.GetLabeledBy(projectedAmount) != projectedLabel ||
                     ToolTipService.GetToolTip(callout) is null ||
-                    dashed.X1 > dashed.X2 || marker.X1 < 0 || marker.X1 > track.ActualWidth ||
-                    Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > track.ActualWidth + 1 ||
+                    dashed.X1 > dashed.X2 || marker.X1 < 0 || marker.X1 > baseline.X2 + 1 ||
+                    Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > baseline.X2 + 3 ||
                     Canvas.GetTop(callout) < marker.Y2 || Canvas.GetTop(callout) + callout.ActualHeight > track.ActualHeight + 1 ||
                     dashed.StrokeDashArray.Count != 2 || dashed.StrokeDashArray[0] <= dashed.StrokeDashArray[1])
                     throw new InvalidOperationException("Forecast track, marker, callout, accessibility, or bounds are invalid.");
@@ -1064,10 +1103,11 @@ internal static class Program
                     Find(window, prefix + "ActualUsageLine") is not Microsoft.UI.Xaml.Shapes.Line usageLine)
                     throw new InvalidOperationException("Actual usage marker is missing beside the forecast.");
                 AssertActualMarker(track, actualMarker, usageLine);
+                AssertTrackingTarget(window, prefix);
                 var calloutAmountOrigin = projectedAmount.TransformToVisual(callout).TransformPoint(default);
                 var calloutLabelOrigin = projectedLabel.TransformToVisual(callout).TransformPoint(default);
                 double expectedLeft = Math.Clamp(marker.X1 - callout.ActualWidth / 2, 0,
-                    Math.Max(0, track.ActualWidth - callout.ActualWidth));
+                    Math.Max(0, baseline.X2 + 2 - callout.ActualWidth));
                 if (projectedLabel.FontSize >= projectedAmount.FontSize ||
                     projectedLabel.FontSize < 11 ||
                     projectedAmount.Foreground is not SolidColorBrush mainText ||
