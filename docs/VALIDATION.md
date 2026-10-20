@@ -169,12 +169,15 @@ inside the body viewport with estimates off and under/near/over-target forecasts
 They also exercise automatic recovery from the old 590-DIP size on a dashboard
 update, preserve chart height and total readability, and retain scrolling for
 other accounts. The eight-account sample popup was observed with the full chart,
-legend, freshness, and Details action visible without scrolling.
+freshness, and Details action visible without scrolling. The persistent chart
+legend has been removed from both native frontends, in popup and full-page
+charts; bar tooltips retain reported/estimated/derived source details.
 
 All 1,107 managed application assertions and the final populated and empty native
 smoke runs passed. An initial populated run passed the new fit checks but later
 hit the existing Usage bring-into-view timing failure; it is not counted as a
-pass. This change is Windows-only and does not alter the macOS popup layout.
+pass. The popup sizing changes are Windows-only. Chart-caption removal also
+applies to macOS; native Apple-silicon verification remains pending.
 
 ## Latest-main/custom-budget integration (October 19, 2026)
 

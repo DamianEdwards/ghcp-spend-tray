@@ -734,9 +734,6 @@ struct DailyConsumptionChartView: View {
                         }.frame(height: plotHeight + 18)
                     }
                 }
-                Text(bars.contains(where: { $0.estimated }) ? "Solid: reported. Dashed: estimated." :
-                     bars.contains(where: { $0.derived }) ? "Today's amount is from current usage." : "Reported daily usage.")
-                    .font(.caption).foregroundStyle(.secondary)
                 if !compact, !bars.contains(where: { $0.derived }), let message = view.chartMessage {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }

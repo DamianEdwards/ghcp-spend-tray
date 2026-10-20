@@ -235,9 +235,6 @@ internal static class UI
             new DailyChartElement().Set(canvas => DailyChart.Apply(canvas, bars, compact))
                 .Height(compact ? 96 : 200).HAlign(HorizontalAlignment.Stretch)
                 .AutomationId(account.Key + (compact ? "_CompactDailyPlot" : "_DailyPlot")),
-            Copy(bars.Any(b => b.Estimated) ? "Solid: reported. Dashed: estimated." :
-                bars.Any(b => b.Derived) ? "Today's amount is from current usage." : "Reported daily usage.")
-                .FontSize(12),
             !compact && !bars.Any(b => b.Derived) && view.ChartMessage is { } message ? Copy(message).FontSize(12) : null)
             .AutomationId(account.Key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"));
     }

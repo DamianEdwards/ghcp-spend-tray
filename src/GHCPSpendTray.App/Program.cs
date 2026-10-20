@@ -177,6 +177,29 @@ internal static class Program
                         !rectangles.Any(r => r.Fill is SolidColorBrush fill && fill.Color == accent && Math.Abs(r.Opacity - 0.2) < 0.0001) ||
                         !rectangles.Any(r => r.StrokeDashArray is { Count: > 0 }))
                         throw new InvalidOperationException("The daily chart is missing accent-color columns or dashed translucent estimates.");
+                    foreach (var (window, chartSuffix, plotSuffix) in new[]
+                    {
+                        (shell.SettingsWindow!, "_DailyConsumption", "_DailyPlot"),
+                        (shell.Flyout!, "_CompactDailyConsumption", "_CompactDailyPlot")
+                    })
+                    {
+                        if (Find(window, key + chartSuffix) is not FrameworkElement chart || HasLegend(chart) ||
+                            Find(window, key + plotSuffix) is not Canvas dailyPlot ||
+                            !dailyPlot.Children.OfType<Border>().Any(b => ToolTipService.GetToolTip(b) is string tip &&
+                                tip.EndsWith(" - Reported", StringComparison.Ordinal)) ||
+                            !dailyPlot.Children.OfType<Border>().Any(b => ToolTipService.GetToolTip(b) is string tip &&
+                                tip.EndsWith(" - Estimated", StringComparison.Ordinal)))
+                            throw new InvalidOperationException("Daily charts must omit the legend while retaining reported/estimated bar tooltips.");
+                    }
+
+                    static bool HasLegend(DependencyObject node)
+                    {
+                        if (node is TextBlock { Text: "Solid: reported. Dashed: estimated." or
+                            "Today's amount is from current usage." or "Reported daily usage." }) return true;
+                        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                            if (HasLegend(VisualTreeHelper.GetChild(node, i))) return true;
+                        return false;
+                    }
                 });
                 for (int update = 0; update < 2; update++)
                 {
