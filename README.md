@@ -340,11 +340,14 @@ current-period observations with known, finite positive limits qualify.
 Stale, failed, unsupported, unknown/zero-limit and unlimited accounts are
 excluded from both sides unless a custom budget supplies a finite positive
 target. A budget never makes stale or unavailable consumption eligible.
-`!` marks a partial roll-up; `?` means no percentage is
+A warning badge marks a partial roll-up: an amber triangle on Windows, or `!`
+on macOS. Windows High Contrast uses a system-colored triangle instead of amber.
+The warning identifies incomplete account coverage, not a projected budget
+overrun. `?` means no percentage is
 available, not zero. Fresh unlimited accounts show an infinity sign in either
 icon style, with an **Unlimited** tooltip. A roll-up shows infinity
 when its usable accounts are all unlimited; unavailable accounts still cause a
-partial `!` badge. Mixed finite/unlimited roll-ups retain the finite accounts'
+partial warning badge. Mixed finite/unlimited roll-ups retain the finite accounts'
 weighted percentage and identify unlimited accounts in the details. Stale or
 failed unlimited observations remain unavailable, never infinity.
 On macOS, an unavailable pie stays an empty outline with

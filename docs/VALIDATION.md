@@ -136,6 +136,25 @@ scroll-readiness timeouts on two runs (account-form scroll and Usage
 bring-into-view), so those runs are not counted as passes. Native Swift launch
 verification remains pending on Apple silicon.
 
+## Windows partial-data warning triangle (October 20, 2026)
+
+The Windows partial-roll-up badge is a filled amber warning triangle with a dark
+exclamation mark, replacing the bare `!`. Its meaning is unchanged: incomplete
+account coverage, including excluded unlimited accounts, rather than a projected
+budget overrun. The separate over-allocation `+` remains. Windows High Contrast
+uses the supplied system foreground with a transparent exclamation cutout.
+The shared native renderer supplies both installed icons and Settings previews;
+badge separation is transparent rather than painted with a taskbar background.
+
+Light/dark sample sheets were inspected at native 16- and 20-pixel sizes. Pixel
+fixtures cover both styles at 16/20/24/32/48/64 pixels, partial finite/unlimited
+usage, simultaneous over-allocation and partial warnings, the distinct stem/dot,
+triangle shape, premultiplied alpha, and injected High Contrast colors.
+All 1,635 application assertions passed in managed and executed Native AOT
+harnesses; populated and empty published native smoke also passed, including
+installed-icon/preview pixel parity. The host's High Contrast setting was not
+changed. macOS artwork is unchanged.
+
 ## Windows popup first-account fit (October 20, 2026)
 
 The Windows popup uses a horizontal aggregate summary, a compact footer, and
