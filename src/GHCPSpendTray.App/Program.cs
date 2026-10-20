@@ -1008,10 +1008,12 @@ internal static class Program
                 Find(window, prefix + "AccountConsumption") is not TextBlock amount || amount.Text != UI.UI.Money(used) ||
                 Find(window, prefix + "ActualUsageCallout") is not FrameworkElement callout ||
                 Find(window, prefix + "ActualUsageMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
+                Find(window, prefix + "ActualUsageLine") is not Microsoft.UI.Xaml.Shapes.Line usageLine ||
                 amount.FontSize < 21 || AutomationProperties.GetLabeledBy(amount) is not TextBlock { Text: "used" } ||
                 Canvas.GetTop(callout) + callout.ActualHeight > marker.Y1 + 1 ||
                 Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > track.ActualWidth + 1)
                 throw new InvalidOperationException("Actual usage callout did not retain its exact large amount above the solid marker.");
+            AssertActualMarker(track, marker, usageLine);
             double expected = 2 + (double)Math.Min(1, used / 100) * (track.ActualWidth - 4);
             if (Math.Abs(marker.X1 - expected) > 0.1)
                 throw new InvalidOperationException("Actual usage marker does not match actual percentage.");
@@ -1027,6 +1029,18 @@ internal static class Program
                     brush.Color != expectedBrush.Color)
                     throw new InvalidOperationException("Actual usage warning/error glyph or color is incorrect.");
             }
+        }
+
+        static void AssertActualMarker(Canvas track, Microsoft.UI.Xaml.Shapes.Line marker, Microsoft.UI.Xaml.Shapes.Line usageLine)
+        {
+            if (marker.Y1 >= usageLine.Y1 - usageLine.StrokeThickness / 2 ||
+                marker.Y2 <= usageLine.Y1 + usageLine.StrokeThickness / 2 ||
+                track.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Any(line =>
+                    line != marker && Canvas.GetZIndex(line) >= Canvas.GetZIndex(marker)))
+                throw new InvalidOperationException("Actual usage marker does not cross above the horizontal strokes at a higher drawing priority.");
+            if (marker.Stroke is not SolidColorBrush markerBrush ||
+                markerBrush.Color != new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Foreground))
+                throw new InvalidOperationException("Actual usage marker lost its theme-aware neutral color.");
         }
 
         static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
@@ -1046,6 +1060,10 @@ internal static class Program
                     Canvas.GetTop(callout) < marker.Y2 || Canvas.GetTop(callout) + callout.ActualHeight > track.ActualHeight + 1 ||
                     dashed.StrokeDashArray.Count != 2 || dashed.StrokeDashArray[0] <= dashed.StrokeDashArray[1])
                     throw new InvalidOperationException("Forecast track, marker, callout, accessibility, or bounds are invalid.");
+                if (Find(window, prefix + "ActualUsageMarker") is not Microsoft.UI.Xaml.Shapes.Line actualMarker ||
+                    Find(window, prefix + "ActualUsageLine") is not Microsoft.UI.Xaml.Shapes.Line usageLine)
+                    throw new InvalidOperationException("Actual usage marker is missing beside the forecast.");
+                AssertActualMarker(track, actualMarker, usageLine);
                 var calloutAmountOrigin = projectedAmount.TransformToVisual(callout).TransformPoint(default);
                 var calloutLabelOrigin = projectedLabel.TransformToVisual(callout).TransformPoint(default);
                 double expectedLeft = Math.Clamp(marker.X1 - callout.ActualWidth / 2, 0,

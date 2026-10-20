@@ -76,11 +76,13 @@ internal sealed class ForecastTrack
         Add(new Line { X1 = 2, X2 = width - 2, Y1 = lineY, Y2 = lineY, Stroke = foreground, StrokeThickness = 1, Opacity = 0.4 });
         Add(new Line { X1 = 2, X2 = actualX, Y1 = lineY, Y2 = lineY, Stroke = accent, StrokeThickness = 4 },
             _prefix + "ActualUsageLine");
-        Add(new Line
+        var actualMarker = new Line
         {
-            X1 = actualX, X2 = actualX, Y1 = lineY - 9, Y2 = lineY,
+            X1 = actualX, X2 = actualX, Y1 = lineY - 9, Y2 = lineY + 7,
             Stroke = foreground, StrokeThickness = 1.5
-        }, _prefix + "ActualUsageMarker");
+        };
+        Canvas.SetZIndex(actualMarker, 1);
+        Add(actualMarker, _prefix + "ActualUsageMarker");
 
         var usedLabel = new TextBlock
         {

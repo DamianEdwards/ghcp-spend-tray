@@ -55,6 +55,15 @@ contrast against composited native panel backgrounds in the current theme;
 both populated and empty/single-account runs passed. This is not evidence of
 pixel-level contrast across every custom OS theme or unexecuted macOS renderer.
 
+The neutral `used` marker extends through both sides of the horizontal usage
+stroke and has explicit foreground stacking (native Canvas Z-index / SwiftUI
+zIndex). It stays above solid/dashed track segments and the forecast marker
+when endpoints coincide. Native smoke verifies crossing geometry, stacking
+priority, and neutral color at compact/wide widths, with forecasts enabled and
+disabled and endpoints clamped at 100%. Populated and empty/single-account
+published Windows smoke passed. Layout, callouts, and calculations are unchanged;
+the corresponding SwiftUI drawing change still requires Apple-silicon CI.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

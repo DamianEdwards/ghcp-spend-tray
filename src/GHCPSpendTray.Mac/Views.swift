@@ -132,8 +132,8 @@ struct AccountUsageTrack: View {
                 }.stroke(actual.fraction >= 1 ? Color.red : Color.accentColor, lineWidth: 4)
                 Path { path in
                     path.move(to: CGPoint(x: actualX, y: lineY - 9))
-                    path.addLine(to: CGPoint(x: actualX, y: lineY))
-                }.stroke(Color.secondary, lineWidth: 1.5)
+                    path.addLine(to: CGPoint(x: actualX, y: lineY + 7))
+                }.stroke(Color.secondary, lineWidth: 1.5).zIndex(1)
                 VStack(alignment: .center, spacing: 0) {
                     HStack(spacing: 6) {
                         if actual.band != .under {
