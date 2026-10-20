@@ -366,8 +366,10 @@ period consumption** enables an optional end-of-period forecast in that
 account's tray flyout/menu-bar popup, Usage summary, and details. It is off by
 default; choose **Save account** on Windows or **Save** on macOS to apply it.
 For a finite custom budget (or API limit), a dashed segment continues the
-solid actual-usage line to the forecast endpoint. An **Est.** callout beneath
-the endpoint shows the approximate whole-dollar amount. The dashed segment,
+solid actual-usage line to the forecast endpoint. A callout beneath
+the endpoint stacks the approximate whole-dollar amount above a smaller
+**est. total** subtitle, centered on the marker and kept within panel bounds.
+Forecast dashes are three times as long as their gaps. The dashed segment,
 marker, and callout use the accent color below 95% of the target, amber at
 95% to below 100%, and red at 100% or above. The track remains fixed at 100%:
 over-target forecasts pin the marker to the right edge and show the full amount

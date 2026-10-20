@@ -80,37 +80,42 @@ internal sealed class ForecastTrack
         Add(new Line
         {
             X1 = actualX, X2 = endX, Y1 = 5, Y2 = 5, Stroke = projectedBrush,
-            StrokeThickness = 4, StrokeDashArray = new DoubleCollection { 2, 2 }
+            StrokeThickness = 4, StrokeDashArray = new DoubleCollection { 3, 1 }
         }, _prefix + "ForecastExtension");
         Add(new Line { X1 = endX, X2 = endX, Y1 = 0, Y2 = 19, Stroke = projectedBrush, StrokeThickness = 1.5 },
             _prefix + "ForecastMarker");
 
-        var label = new TextBlock { Text = "Est.", FontSize = 12, Foreground = projectedBrush };
+        var label = new TextBlock
+        {
+            Text = "est. total", FontSize = 10, Foreground = projectedBrush,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
         AutomationProperties.SetAutomationId(label, _prefix + "PeriodEstimateLabel");
         AutomationProperties.SetName(label, "Estimated at reset");
         var amount = new TextBlock
         {
             Text = UI.EstimateAmount(estimate), FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = projectedBrush
+            Foreground = projectedBrush, HorizontalAlignment = HorizontalAlignment.Center
         };
         AutomationProperties.SetAutomationId(amount, _prefix + "PeriodEstimateAmount");
         AutomationProperties.SetLabeledBy(amount, label);
-        var callout = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, MaxWidth = width };
-        callout.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, width, 26) };
-        callout.Children.Add(label);
+        var callout = new StackPanel { Spacing = 0, MaxWidth = width };
+        callout.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, width, 46) };
         callout.Children.Add(amount);
+        callout.Children.Add(label);
         if (forecast.Band == ForecastBand.Over)
             callout.Children.Add(new TextBlock
             {
                 Text = "(" + forecast.Percent.ToString("0.#", CultureInfo.CurrentCulture) + "%)",
-                FontSize = 12, Foreground = projectedBrush, TextTrimming = TextTrimming.CharacterEllipsis
+                FontSize = 10, Foreground = projectedBrush, TextTrimming = TextTrimming.CharacterEllipsis,
+                HorizontalAlignment = HorizontalAlignment.Center
             });
         string status = forecast.Band switch { ForecastBand.Near => "Near target", ForecastBand.Over => "At or over target", _ => "Under target" };
         string tooltip = $"Estimated at reset: {UI.EstimateAmount(estimate)} ({forecast.Percent:0.##}% of " +
             (_account.CustomBudgetUsd is not null ? "custom budget" : "limit") + $"). {status}. " + UI.EstimateMethodFor(estimate);
         ToolTipService.SetToolTip(callout, tooltip);
         AutomationProperties.SetName(callout, tooltip);
-        callout.Measure(new Windows.Foundation.Size(width, 28));
+        callout.Measure(new Windows.Foundation.Size(width, 46));
         Canvas.SetLeft(callout, Math.Clamp(endX - callout.DesiredSize.Width / 2, 0, Math.Max(0, width - callout.DesiredSize.Width)));
         Canvas.SetTop(callout, 22);
         Add(callout, _prefix + "ForecastCallout");

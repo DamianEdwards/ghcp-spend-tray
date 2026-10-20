@@ -125,16 +125,16 @@ struct ForecastUsageTrack: View {
                 Path { path in
                     path.move(to: CGPoint(x: actualX, y: 5))
                     path.addLine(to: CGPoint(x: endX, y: 5))
-                }.stroke(tint, style: StrokeStyle(lineWidth: 4, dash: [8, 8]))
+                }.stroke(tint, style: StrokeStyle(lineWidth: 4, dash: [12, 4]))
                 Path { path in
                     path.move(to: CGPoint(x: endX, y: 0))
                     path.addLine(to: CGPoint(x: endX, y: 19))
                 }.stroke(tint, lineWidth: 1.5)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("Est.").font(.caption)
+                VStack(alignment: .center, spacing: 0) {
                     Text(estimatedMoney(estimate.estimatedConsumptionUsd)).font(.callout).bold().monospacedDigit()
+                    Text("est. total").font(.system(size: 10))
                     if forecast.band == .over {
-                        Text("(\(decimalText(forecast.percent))%)").font(.caption)
+                        Text("(\(decimalText(forecast.percent))%)").font(.system(size: 10))
                     }
                 }
                 .foregroundStyle(tint)
@@ -150,7 +150,7 @@ struct ForecastUsageTrack: View {
                                max(0, geometry.size.width - calloutWidth)), y: 22)
             }
         }
-        .frame(height: 48)
+        .frame(height: forecast.band == .over ? 68 : 56)
         .onPreferenceChange(ForecastCalloutWidth.self) { calloutWidth = $0 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(description)

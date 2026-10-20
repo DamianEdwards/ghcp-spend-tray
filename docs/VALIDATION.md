@@ -25,6 +25,12 @@ passed locally (212 Core tests, 14 platform tests, 1103 Windows assertions, and
 261 shared/bridge assertions). Published populated and empty/single-account
 native smoke both passed with the new projected-track checks enabled.
 
+The callout stacks its amount above a smaller centered `est. total` subtitle;
+over-target percentages remain below it. Forecast dashes use a 3:1 dash/gap ratio.
+Native smoke additionally checks subtitle position/font size, shared horizontal
+centers, marker-centered placement with edge clamping, vertical callout bounds,
+and the dash/gap ratio. Populated and empty/single-account runs passed.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

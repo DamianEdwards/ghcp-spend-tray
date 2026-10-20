@@ -190,7 +190,8 @@ internal static class UI
     internal static Element UsageMeter(AccountView account, string prefix, bool compact = false) => VStack(compact ? 5 : 6,
         account.Forecast is not null
             ? new ForecastTrackElement().Set(canvas => ForecastTrack.Apply(canvas, account, prefix))
-                .Height(48).HAlign(HorizontalAlignment.Stretch).AutomationId(prefix + "ForecastTrack")
+                .Height(account.Forecast.Band == ForecastBand.Over ? 68 : 56)
+                .HAlign(HorizontalAlignment.Stretch).AutomationId(prefix + "ForecastTrack")
             : account.Percent is { } percent
                 ? Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UsagePercentage(account))
                 : null,

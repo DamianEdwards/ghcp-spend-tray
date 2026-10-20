@@ -994,13 +994,23 @@ internal static class Program
                     Find(window, prefix + "ForecastMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
                     Find(window, prefix + "ForecastCallout") is not FrameworkElement callout ||
                     Find(window, prefix + "PeriodEstimateAmount") is not TextBlock projectedAmount || projectedAmount.Text != expected ||
-                    Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Est." } projectedLabel ||
+                    Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "est. total" } projectedLabel ||
                     AutomationProperties.GetLabeledBy(projectedAmount) != projectedLabel ||
                     ToolTipService.GetToolTip(callout) is null ||
                     dashed.X1 > dashed.X2 || marker.X1 < 0 || marker.X1 > track.ActualWidth ||
                     Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > track.ActualWidth + 1 ||
-                    Canvas.GetTop(callout) < marker.Y2)
+                    Canvas.GetTop(callout) < marker.Y2 || Canvas.GetTop(callout) + callout.ActualHeight > track.ActualHeight + 1 ||
+                    dashed.StrokeDashArray.Count != 2 || dashed.StrokeDashArray[0] <= dashed.StrokeDashArray[1])
                     throw new InvalidOperationException("Forecast track, marker, callout, accessibility, or bounds are invalid.");
+                var calloutAmountOrigin = projectedAmount.TransformToVisual(callout).TransformPoint(default);
+                var calloutLabelOrigin = projectedLabel.TransformToVisual(callout).TransformPoint(default);
+                double expectedLeft = Math.Clamp(marker.X1 - callout.ActualWidth / 2, 0,
+                    Math.Max(0, track.ActualWidth - callout.ActualWidth));
+                if (projectedLabel.FontSize >= projectedAmount.FontSize ||
+                    calloutLabelOrigin.Y < calloutAmountOrigin.Y + projectedAmount.ActualHeight - 1 ||
+                    Math.Abs(calloutLabelOrigin.X + projectedLabel.ActualWidth / 2 - (calloutAmountOrigin.X + projectedAmount.ActualWidth / 2)) > 1 ||
+                    Math.Abs(Canvas.GetLeft(callout) - expectedLeft) > 1)
+                    throw new InvalidOperationException("Forecast subtitle is not centered beneath the amount or aligned with the marker.");
                 return;
             }
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
