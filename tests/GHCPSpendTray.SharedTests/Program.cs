@@ -51,6 +51,69 @@ try
             preview.Tray!.RollUp is { IsUnlimited: false, Percent: 25, IsPartial: true },
             "Additional finite examples have unique identities and produce a truthful mixed roll-up.");
     }
+    string usageStatesDirectory = Path.Combine(root, "usage-states-demo");
+    using (var demo = new DemoController(usageStatesDirectory, usageStates: true))
+    {
+        DashboardView? preview = null;
+        demo.Changed += value => preview = value;
+        await demo.InitializeAsync();
+        Check(preview!.Accounts.Count == 8 && preview.Accounts.All(a => a.Name.EndsWith("(sample)", StringComparison.Ordinal)),
+            "Usage showcase has eight explicitly synthetic, labeled accounts.");
+        Check(preview.Accounts.Take(3).Select(a => a.Forecast?.Band)
+                .SequenceEqual(new ForecastBand?[] { ForecastBand.Under, ForecastBand.Near, ForecastBand.Over }) &&
+            preview.Accounts.Take(3).All(a => a.ActualUsage?.Band == ForecastBand.Under),
+            "Usage showcase distinguishes under, near and over forecasts from under-target actual usage.");
+        Check(preview.Accounts[3].ActualUsage?.Band == ForecastBand.Near &&
+            preview.Accounts[4].ActualUsage?.Band == ForecastBand.Over &&
+            preview.Accounts[3].CustomBudgetUsd is null && preview.Accounts[4].CustomBudgetUsd == 100,
+            "Usage showcase includes actual warning/error states and both API limits and custom budgets.");
+        Check(preview.Accounts[5].PeriodEstimate is null && preview.Accounts[5].ActualUsage is not null &&
+            preview.Accounts[6].PeriodEstimate is { EstimatedConsumptionUsd: null, UnavailableReason: not null } &&
+            preview.Accounts[6].Forecast is null && preview.Accounts[7].Details.Unlimited &&
+            preview.Accounts[7].ActualUsage is null && preview.Accounts[7].Forecast is null,
+            "Usage showcase includes estimates off, estimates unavailable, and the unlimited fallback.");
+        Check(preview.Accounts[0].EnterpriseConsumption is { Bars.Length: > 0 } &&
+            preview.Accounts[0].EnterpriseConsumption!.Bars!.Sum(b => b.AmountUsd) == preview.Accounts[0].ConsumptionUsd &&
+            preview.Accounts[1].EnterpriseConsumption is { Connected: true, Bars.Length: 0, ChartMessage: not null },
+            "Usage showcase includes reconciled synthetic daily bars and connected-but-unavailable daily reports.");
+        foreach (var state in preview.TrayStates!)
+            state.Snapshot!.Validate();
+        Check(preview.TrayStates!.All(state => preview.Accounts.Any(a => a.Key == state.Account.Key)) &&
+            preview.Tray!.RollUp.IsPartial, "Showcase snapshots use the displayed account identities and retain unlimited exclusions.");
+        string key = preview.Accounts[0].Key;
+        Check(demo.AccountSettings(key).ShowPeriodEstimate &&
+            !demo.AccountSettings(preview.Accounts[5].Key).ShowPeriodEstimate,
+            "Showcase account preferences match enabled and disabled estimate displays.");
+        await demo.SaveAccountAsync(key, "Changed sample", "", showPeriodEstimate: false);
+        Check(preview!.Accounts[0].PeriodEstimate is null && preview.Accounts[0].CustomBudgetUsd == 100,
+            "Showcase forecasts can be switched off without resetting the sample budget.");
+        await demo.SaveAccountAsync(key, "Changed sample", "", showPeriodEstimate: true,
+            customBudgetUsd: 50, updateCustomBudget: true);
+        Check(preview!.Accounts[0].ConsumptionUsd == 40.25m && preview.Accounts[0].PeriodEstimate is
+            { EstimatedConsumptionUsd: 75, OverAllocationUsd: 25 } &&
+            preview.Accounts[0].Forecast?.Band == ForecastBand.Over,
+            "Showcase custom-budget edits preserve fixed forecast dollars and recalculate risk and excess.");
+        await demo.RefreshAsync();
+        Check(preview!.Accounts.Count == 8 && preview.Accounts[0].Name == "Changed sample" &&
+            preview.Accounts[0].CustomBudgetUsd == 50, "Refresh retains in-memory showcase edits without duplicating accounts.");
+        await demo.AddExampleAccountAsync();
+        Check(preview!.Accounts.Count == 9 && preview.Accounts[^1].Key == "github.com:9" &&
+            preview.TrayStates![^1].Account.Key == "github.com:9", "Extra showcase examples retain unique matching identities.");
+        Check(!Directory.Exists(usageStatesDirectory), "Ordinary showcase data and preferences remain in memory.");
+    }
+    using (var bridge = new BridgeRuntime())
+    {
+        var command = JsonSerializer.Deserialize("""
+            {"id":"usage-states-demo","method":"initialize","demo":true,"usageStates":true}
+            """, BridgeJsonContext.Default.Command)! with { Directory = Path.Combine(root, "usage-states-bridge-demo") };
+        DashboardView? preview = null;
+        Check(bridge.Send(command).Error is null, "Generated bridge command accepts the usage showcase mode.");
+        var initialized = await Complete(bridge, command.Id, e => { if (e.Dashboard is not null) preview = e.Dashboard; });
+        Check(initialized.Error is null && preview?.Accounts.Count == 8 &&
+            preview.Accounts[1].Forecast?.Band == ForecastBand.Near &&
+            preview.Accounts[4].ActualUsage?.Band == ForecastBand.Over,
+            "Native bridge exposes the same synthetic usage and forecast states.");
+    }
     using (var controller = new ApplicationController(root, false, credentials, http, () => Task.FromResult<IStartupRegistration>(startup)))
     {
         DashboardView? dashboard = null;

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace GHCPSpendTray.Shared;
 
 public sealed class DemoController(string directory, bool empty = false, TimeProvider? timeProvider = null,
-    bool unlimited = false, TelemetryConfiguration? telemetry = null) : IApplicationController
+    bool unlimited = false, TelemetryConfiguration? telemetry = null, bool usageStates = false) : IApplicationController
 {
     private readonly AppTelemetry? _telemetry = telemetry is null ? null :
         new(telemetry with { TrackedAllowed = telemetry.TrackedAllowed && telemetry.SyntheticVerification },
@@ -15,7 +15,8 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     private Task? _verificationInitialization;
     private AppSettings _verificationSettings = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private readonly List<AccountView> _examples = [];
+    private readonly List<AccountView> _examples = usageStates
+        ? UsageStateExamples((timeProvider ?? TimeProvider.System).GetUtcNow()) : [];
     private readonly Dictionary<string, (string DisplayName, string Thresholds, decimal? SpendIncrementUsd,
         bool ShowPeriodEstimate)> _preferences = [];
     private readonly Dictionary<string, decimal?> _budgets = [];
@@ -39,7 +40,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         }
         Settings = Settings with { TrackedTelemetryEnabled = _verificationSettings.TrackedTelemetryEnabled };
         _telemetry?.Configure(Settings.TrackedTelemetryEnabled, _verificationSettings.TelemetryId.Value);
-        _telemetry?.Started(empty ? 0 : unlimited ? 1 : 2, "unknown");
+        _telemetry?.Started(usageStates ? _examples.Count : empty ? 0 : unlimited ? 1 : 2, "unknown");
     }
     public async Task RefreshAsync(string? accountKey = null)
     {
@@ -54,11 +55,11 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
             return;
         }
         List<AccountView> views = [];
-        if (!empty && unlimited)
+        if (!empty && !usageStates && unlimited)
             views.Add(new("github.com:1", "Unlimited (demo)", "demo-unlimited", "github.com",
                 new(2625m, 26.25m, null, null, true, now, null, now.AddHours(1), "synthetic", true, null),
                 null, 26.25m, null, "Fresh", now));
-        else if (!empty) views.AddRange([
+        else if (!empty && !usageStates) views.AddRange([
             new("github.com:1", "Personal (demo)", "demo-user", "github.com",
                 new(2625m, 26.25m, 25m, 105m, false, now, null, now.AddHours(1), "synthetic", true, null), 105m,
                 26.25m, 25m, "Fresh", now),
@@ -85,8 +86,9 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         {
             Host = a.Host, UserId = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
             Login = a.Login, DisplayName = a.Name,
-            ShowPeriodEstimate = _preferences.GetValueOrDefault(a.Key).ShowPeriodEstimate,
-            CustomBudgetUsd = _budgets.GetValueOrDefault(a.Key),
+            ShowPeriodEstimate = _preferences.TryGetValue(a.Key, out var preferences)
+                ? preferences.ShowPeriodEstimate : usageStates && a.PeriodEstimate is not null,
+            CustomBudgetUsd = _budgets.TryGetValue(a.Key, out var budget) ? budget : a.CustomBudgetUsd,
             ExcludeFromTray = Settings.ExcludedTrayAccounts?.Contains(a.Key, StringComparer.Ordinal) == true
         }).ToArray();
         var states = accounts.Select((a, i) => new AccountState
@@ -105,8 +107,15 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         {
             Accounts = dashboard.Accounts.Select((account, i) => account with
             {
-                PeriodEstimate = PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes)),
-                EnterpriseConsumption = i == 0 ? DemoConsumption(now) : i == 1
+                PeriodEstimate = usageStates && accounts[i].ShowPeriodEstimate && account.PeriodEstimate is { } example
+                    ? example with
+                    {
+                        OverAllocationUsd = example.EstimatedConsumptionUsd is { } projected &&
+                            (accounts[i].CustomBudgetUsd ?? account.AllocationUsd) is { } target
+                            ? Math.Max(0, projected - target) : null
+                    }
+                    : PeriodEstimates.Create(states[i], now, TimeSpan.FromMinutes(Settings.PollMinutes)),
+                EnterpriseConsumption = i == 0 ? DemoConsumption(now, account.ConsumptionUsd!.Value) : i == 1
                     ? new(true, "Daily usage connected", Connected: true, Bars: [],
                         ChartMessage: "Daily usage is connected, but no daily reports are available for this account yet.",
                         State: EnterpriseSetupState.Connected) : null,
@@ -126,14 +135,44 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public Task AddExampleAccountAsync()
     {
         var now = _time.GetUtcNow();
-        string id = (_examples.Count + (empty ? 1 : unlimited ? 2 : 3)).ToString(CultureInfo.InvariantCulture);
+        string id = (_examples.Count + (empty || usageStates ? 1 : unlimited ? 2 : 3)).ToString(CultureInfo.InvariantCulture);
         _examples.Add(new($"github.com:{id}", $"Example {id} (demo)", $"demo-example-{id}", "github.com",
             new(1250m, 12.5m, 50m, 25m, false, now, null, now.AddHours(1), "synthetic", true, null),
             25m, 12.5m, 50m, "Fresh", now));
         return RefreshAsync();
     }
     public Task RefreshAccountAsync(string accountKey) => RefreshAsync(accountKey);
-    private static EnterpriseConsumptionView DemoConsumption(DateTimeOffset now)
+    private static List<AccountView> UsageStateExamples(DateTimeOffset now)
+    {
+        var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var reset = start.AddMonths(1);
+        (string Name, decimal Used, decimal? Projected, bool CustomBudget, bool Unlimited, bool Unavailable)[] examples =
+        [
+            ("Under budget", 40.25m, 75, true, false, false),
+            ("Forecast near budget", 65.50m, 97, true, false, false),
+            ("Forecast over budget", 70, 125, true, false, false),
+            ("Usage near limit", 96, 130, false, false, false),
+            ("Usage over budget", 110.50m, 160, true, false, false),
+            ("Estimate off", 35, null, false, false, false),
+            ("Estimate unavailable", 20, null, true, false, true),
+            ("Unlimited", 12.50m, null, false, true, false)
+        ];
+        return examples.Select((example, index) =>
+        {
+            string id = (index + 1).ToString(CultureInfo.InvariantCulture);
+            decimal? target = example.Unlimited ? null : 100m;
+            decimal? percent = target is { } limit ? example.Used / limit * 100 : null;
+            PeriodEstimate? estimate = example.Projected is { } projected
+                ? new(EstimatedConsumptionUsd: projected, PeriodStartUtc: start, ResetAtUtc: reset, ObservedAtUtc: now)
+                : example.Unavailable ? new(UnavailableReason: "Billing period differs from a UTC calendar month.") : null;
+            return new AccountView($"github.com:{id}", example.Name + " (sample)", $"demo-state-{id}", "github.com",
+                new(example.Used * 100, example.Used, target, percent, example.Unlimited, now, reset,
+                    now.AddHours(1), BillingPeriods.Resolve(now, null), true, null),
+                percent, example.Used, target, "Fresh", now, PeriodEstimate: estimate,
+                CustomBudgetUsd: example.CustomBudget ? 100 : null);
+        }).ToList();
+    }
+    private static EnterpriseConsumptionView DemoConsumption(DateTimeOffset now, decimal consumption = 26.25m)
     {
         var start = new DateOnly(now.Year, now.Month, 1);
         int days = Math.Min(now.Day, 17);
@@ -141,7 +180,7 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
         decimal total = weights.Sum();
         var bars = Enumerable.Range(0, days).Select(i => new DailySpend(
             start.AddDays(i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            i == days - 1 ? 26.25m - weights.Take(i).Sum(w => 26.25m * w / total) : 26.25m * weights[i] / total,
+            i == days - 1 ? consumption - weights.Take(i).Sum(w => consumption * w / total) : consumption * weights[i] / total,
             days > 3 && i >= days - 3)).ToArray();
         return new(true, "Daily consumption connected", Connected: true, Bars: bars,
             State: EnterpriseSetupState.Connected, ConnectedUsername: "work@example.invalid",
@@ -176,11 +215,11 @@ public sealed class DemoController(string directory, bool empty = false, TimePro
     public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key)
     {
         if (_preferences.TryGetValue(key, out var preferences)) return preferences;
-        if (key is "github.com:1" && !empty) return (unlimited ? "Unlimited (demo)" : "Personal (demo)", "", null, false);
-        if (key is "example.ghe.com:2" && !empty && !unlimited) return ("Work (demo)", "", null, false);
+        if (key is "github.com:1" && !empty && !usageStates) return (unlimited ? "Unlimited (demo)" : "Personal (demo)", "", null, false);
+        if (key is "example.ghe.com:2" && !empty && !unlimited && !usageStates) return ("Work (demo)", "", null, false);
         var example = _examples.SingleOrDefault(account => account.Key == key)
             ?? throw new AppOperationException("That account is no longer configured.");
-        return (example.Name, "", null, false);
+        return (example.Name, "", null, usageStates && example.PeriodEstimate is not null);
     }
     public Task RemoveAsync(string key) => throw new AppOperationException("Synthetic accounts cannot be removed in demonstration mode.");
     public Task AddAsync(string host, bool offlineAccess, string? reconnectKey,

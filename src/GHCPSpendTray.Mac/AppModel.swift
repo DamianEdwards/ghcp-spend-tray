@@ -98,13 +98,13 @@ final class AppModel: ObservableObject {
         self.updates = updates
     }
 
-    func start(empty: Bool, unlimited: Bool = false) {
+    func start(empty: Bool, unlimited: Bool = false, usageStates: Bool = false) {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
         perform("initialize", fields: ["directory": directory.path, "demo": demo, "empty": empty,
-                                       "unlimited": unlimited,
+                                       "unlimited": unlimited, "usageStates": usageStates,
                                        "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
                                        "osVersion": "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
                                        "releaseChannel": Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development"]) { [weak self] event in

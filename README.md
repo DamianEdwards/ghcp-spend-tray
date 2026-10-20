@@ -214,6 +214,19 @@ development build with an isolated data directory:
 This starts one synthetic unlimited account, disables authentication and
 notifications, and keeps sample settings in memory.
 
+To review usage-track states together, use `--demo-usage-states` instead:
+
+```powershell
+.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-usage-states --portable --data-dir C:\Temp\ghcp-usage-states-preview
+```
+
+Eight labeled sample accounts show under/near/over-budget forecasts, near/over
+actual usage, an estimate switched off, an unavailable estimate, and unlimited
+allocation. They include custom budgets, API limits, daily charts, and connected
+daily usage without reports. Forecast amounts are fixed synthetic examples for
+visual review, not live projections. Refresh and preference changes remain
+isolated and in memory; the ordinary two-account demo is unchanged.
+
 ## Connect an account
 
 1. Open the tray flyout and choose the connect button, or open
@@ -529,7 +542,8 @@ only in sample mode, both before and after adding examples. Each click adds
 one account; examples last only for that process and are not saved. Use
 `--demo` instead of `--demo-empty` to start with the existing sample accounts,
 or `--demo-unlimited` for one synthetic account with unlimited allocation and
-an infinity menu-bar indicator.
+an infinity menu-bar indicator. `--demo-usage-states` starts the eight-account
+usage and forecast showcase described above.
 All demo modes require a separate data directory and disable authentication,
 notifications, and launch-at-login changes; they do not access saved accounts
 or credentials.

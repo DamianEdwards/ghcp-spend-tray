@@ -82,6 +82,17 @@ empty/single-account published native smoke passed with the fixed target column
 enabled. The single-account popup remains scroll-free with the chart and
 forecast enabled, despite reserving separate horizontal target space.
 
+The opt-in `--demo-usage-states` showcase supplies eight in-memory synthetic
+accounts covering forecast risk bands, actual warning/error states, estimates
+off/unavailable, unlimited usage, custom budgets/API limits, and daily charts
+versus connected accounts without reports. Managed and executed Native AOT
+fixtures verify these states, budget edits, refresh, and generated bridge
+initialization; the published Windows popup was observed with all eight accounts
+loaded. Empty native smoke passed. The ordinary populated smoke hit intermittent
+scroll-readiness timeouts on two runs (account-form scroll and Usage
+bring-into-view), so those runs are not counted as passes. Native Swift launch
+verification remains pending on Apple silicon.
+
 ## Latest-main/custom-budget integration (October 19, 2026)
 
 The enterprise daily-usage branch merges main through `b63a499`, including

@@ -26,10 +26,11 @@ internal static class Program
         bool smoke = packageSmoke || args.Contains("--smoke-test", StringComparer.Ordinal);
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
         bool unlimitedDemo = args.Contains("--demo-unlimited", StringComparer.Ordinal);
-        bool demo = smoke || emptyDemo || unlimitedDemo || args.Contains("--demo", StringComparer.Ordinal);
+        bool usageStatesDemo = args.Contains("--demo-usage-states", StringComparer.Ordinal);
+        bool demo = smoke || emptyDemo || unlimitedDemo || usageStatesDemo || args.Contains("--demo", StringComparer.Ordinal);
         bool verifyTelemetry = args.Contains("--verify-telemetry", StringComparer.Ordinal);
         string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and
-            not "--demo" and not "--demo-empty" and not "--demo-unlimited" and not "--verify-telemetry").ToArray();
+            not "--demo" and not "--demo-empty" and not "--demo-unlimited" and not "--demo-usage-states" and not "--verify-telemetry").ToArray();
         try
         {
             if (verifyTelemetry && (!demo || smoke || !bootstrapArgs.Contains("--portable", StringComparer.Ordinal)))
@@ -54,7 +55,8 @@ internal static class Program
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
             var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
             using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo,
-                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: verifyTelemetry, SyntheticVerification: verifyTelemetry)) :
+                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: verifyTelemetry, SyntheticVerification: verifyTelemetry),
+                usageStates: usageStatesDemo) :
                 new ApplicationController(runtime.DataDirectory, runtime.IsPortable,
                     telemetry: new(UI.UI.Version, PackageContext.InstallationSource));
             int smokeExit = 0;
