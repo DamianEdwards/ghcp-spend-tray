@@ -119,7 +119,7 @@ enum PeriodEstimateTests {
         print("PASS: Mac period-estimate preferences, decimal/UTC display, opt-in and unavailable native account rows.")
     }
 
-    private static func account(estimate: [String: Any]? = nil, used: Double = 42.75) throws -> AccountData {
+    static func account(estimate: [String: Any]? = nil, used: Double = 42.75) throws -> AccountData {
         var fields: [String: Any] = [
             "key": "github.com:1", "name": "Synthetic", "login": "fixture-user", "host": "github.com",
             "details": ["unlimited": false, "isCurrentPeriod": true],

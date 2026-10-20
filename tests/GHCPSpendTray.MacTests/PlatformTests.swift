@@ -63,5 +63,6 @@ enum PlatformTests {
             throw error
         }
         print("PASS: macOS formatting, date parsing and synthetic Keychain create/read/update/delete/isolation.")
+        try await UsageTrackTests.run()
     }
 }

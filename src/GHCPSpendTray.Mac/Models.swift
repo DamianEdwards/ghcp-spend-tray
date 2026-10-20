@@ -62,33 +62,34 @@ struct AccountData: Decodable, Identifiable {
     var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
     var trackingTargetLabel: String { customBudgetUsd == nil ? "API limit" : "budget" }
     var usageCaption: String {
-        if actualUsage != nil, let percent { return "\(decimalText(percent))% used" }
+        if actualUsage != nil, let percent { return "\(percentageText(percent))% used" }
         return allocationSummary
     }
     var allocationSummary: String {
         if let percent {
-            return "\(decimalText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
+            return "\(percentageText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
         }
 
-        struct UsageForecastData: Decodable {
-            let actualFraction: Double
-            let forecastFraction: Double
-            let percent: Decimal
-            let band: ForecastBand
-        }
-
-        struct UsagePositionData: Decodable {
-            let fraction: Double
-            let percent: Decimal
-            let band: ForecastBand
-        }
-
-        enum ForecastBand: Int, Decodable {
-            case under, near, over
-        }
         if let customBudgetUsd { return "\(money(customBudgetUsd)) custom budget · Consumption unavailable" }
         return details.unlimited ? "Unlimited API limit" : "API limit unavailable"
     }
+}
+
+struct UsageForecastData: Decodable {
+    let actualFraction: Double
+    let forecastFraction: Double
+    let percent: Decimal
+    let band: ForecastBand
+}
+
+struct UsagePositionData: Decodable {
+    let fraction: Double
+    let percent: Decimal
+    let band: ForecastBand
+}
+
+enum ForecastBand: Int, Decodable {
+    case under, near, over
 }
 
 struct EnterpriseConsumptionData: Decodable {
@@ -376,6 +377,16 @@ func estimatedMoney(_ value: Decimal?) -> String {
 
 func decimalText(_ value: Decimal?) -> String {
     value.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
+}
+
+func percentageText(_ value: Decimal, fractionDigits: Int = 2) -> String {
+    let formatter = NumberFormatter()
+    formatter.locale = .current
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = false
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = fractionDigits
+    return formatter.string(from: value as NSDecimalNumber) ?? decimalText(value)
 }
 
 func parseAmount(_ text: String) throws -> Decimal? {

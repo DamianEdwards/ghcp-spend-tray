@@ -89,27 +89,58 @@ struct PeriodEstimateRow: View {
     }
 }
 
-private struct ForecastCalloutWidth: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+private enum TrackingTargetCenter: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat { context[VerticalAlignment.center] }
 }
 
-private struct ActualCalloutWidth: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+private extension VerticalAlignment {
+    static let trackingTargetCenter = VerticalAlignment(TrackingTargetCenter.self)
 }
 
-private struct TrackingTargetWidth: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+private struct UsageTrackLayout: Layout {
+    let actualFraction: Double
+    let forecastFraction: Double?
+
+    private func sizes(width: CGFloat, subviews: Subviews) -> (target: CGSize, actual: CGSize, forecast: CGSize, plot: CGFloat, lineY: CGFloat) {
+        func fitted(_ index: Int, maximum: CGFloat) -> CGSize {
+            let ideal = subviews[index].sizeThatFits(.unspecified)
+            return subviews[index].sizeThatFits(ProposedViewSize(width: min(ideal.width, maximum), height: nil))
+        }
+        let target = fitted(3, maximum: min(140, width * 0.4))
+        let plot = max(0, width - target.width - 12)
+        let actual = fitted(1, maximum: plot)
+        let forecast = fitted(2, maximum: plot)
+        return (target, actual, forecast, plot, max(54, actual.height + 11))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 352
+        let size = sizes(width: width, subviews: subviews)
+        return CGSize(width: width, height: size.lineY + max(28, forecastFraction == nil ? 0 : size.forecast.height + 21))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // Subviews are the drawing, current amount, optional forecast, and fixed target.
+        let size = sizes(width: bounds.width, subviews: subviews)
+        func place(_ index: Int, x: CGFloat, y: CGFloat, size: CGSize) {
+            subviews[index].place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y),
+                                 anchor: .topLeading, proposal: ProposedViewSize(size))
+        }
+        func left(_ fraction: Double, width: CGFloat) -> CGFloat {
+            let marker = 2 + CGFloat(fraction) * max(0, size.plot - 4)
+            return min(max(0, marker - width / 2), max(0, size.plot - width))
+        }
+        place(0, x: 0, y: size.lineY - 9, size: CGSize(width: size.plot, height: 23))
+        place(1, x: left(actualFraction, width: size.actual.width), y: size.lineY - 11 - size.actual.height, size: size.actual)
+        place(2, x: left(forecastFraction ?? 0, width: size.forecast.width), y: size.lineY + 17, size: size.forecast)
+        let targetCenter = subviews[3].dimensions(in: ProposedViewSize(size.target))[VerticalAlignment.trackingTargetCenter]
+        place(3, x: size.plot + 12, y: size.lineY - targetCenter, size: size.target)
+    }
 }
 
 struct AccountUsageTrack: View {
     let account: AccountData
     let actual: UsagePositionData
-    @State private var calloutWidth: CGFloat = 0
-    @State private var actualWidth: CGFloat = 0
-    @State private var targetWidth: CGFloat = 0
     private var tint: Color {
         switch account.forecast?.band ?? .under {
         case .under: .accentColor
@@ -120,109 +151,98 @@ struct AccountUsageTrack: View {
     private var description: String {
         guard let forecast = account.forecast, let estimate = account.periodEstimate else { return account.allocationSummary }
         let status = forecast.band == .under ? "Under target" : forecast.band == .near ? "Near target" : "At or over target"
-        return "\(account.allocationSummary). Estimated at reset: \(estimatedMoney(estimate.estimatedConsumptionUsd)) (\(decimalText(forecast.percent))% of \(account.targetLabel)). \(status). \(estimate.method)"
+        return "\(account.allocationSummary). Estimated at reset: \(estimatedMoney(estimate.estimatedConsumptionUsd)) (\(percentageText(forecast.percent))% of \(account.targetLabel)). \(status). \(estimate.method)"
     }
     var body: some View {
-        GeometryReader { geometry in
-            let reservedTargetWidth = min(targetWidth > 0 ? targetWidth : 80, min(140, geometry.size.width * 0.4))
-            let plotWidth = max(0, geometry.size.width - reservedTargetWidth - 12)
-            let width = max(0, plotWidth - 4)
-            let actualX = 2 + CGFloat(actual.fraction) * width
-            let lineY: CGFloat = 54
-            ZStack(alignment: .topLeading) {
-                Path { path in
-                    path.move(to: CGPoint(x: 2, y: lineY))
-                    path.addLine(to: CGPoint(x: plotWidth - 2, y: lineY))
-                }.stroke(Color.secondary.opacity(0.4), lineWidth: 1)
-                Path { path in
-                    path.move(to: CGPoint(x: 2, y: lineY))
-                    path.addLine(to: CGPoint(x: actualX, y: lineY))
-                }.stroke(actual.fraction >= 1 ? Color.red : Color.accentColor, lineWidth: 4)
-                Path { path in
-                    path.move(to: CGPoint(x: actualX, y: lineY - 9))
-                    path.addLine(to: CGPoint(x: actualX, y: lineY + 7))
-                }.stroke(Color.secondary, lineWidth: 1.5).zIndex(1)
-                VStack(alignment: .center, spacing: 0) {
-                    HStack(spacing: 6) {
-                        if actual.band != .under {
-                            Image(systemName: actual.band == .near ? "exclamationmark.triangle.fill" : "xmark.octagon.fill")
-                                .foregroundStyle(actual.band == .near ? Color.orange : Color.red)
-                                .accessibilityLabel(actual.band == .near ? "Current usage is near the target" : "Current usage is at or over the target")
-                        }
-                        Text(money(account.consumptionUsd)).font(.title2).bold().monospacedDigit()
+        UsageTrackLayout(actualFraction: actual.fraction, forecastFraction: account.forecast?.forecastFraction) {
+            Canvas { context, size in
+                let width = max(0, size.width - 4)
+                let actualX = 2 + CGFloat(actual.fraction) * width
+                func line(_ from: CGPoint, _ to: CGPoint, color: Color, style: StrokeStyle) {
+                    var path = Path()
+                    path.move(to: from)
+                    path.addLine(to: to)
+                    context.stroke(path, with: .color(color), style: style)
+                }
+                line(CGPoint(x: 2, y: 9), CGPoint(x: size.width - 2, y: 9),
+                     color: .secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1))
+                line(CGPoint(x: 2, y: 9), CGPoint(x: actualX, y: 9),
+                     color: .accentColor, style: StrokeStyle(lineWidth: 4))
+                if let forecast = account.forecast {
+                    let endX = 2 + CGFloat(forecast.forecastFraction) * width
+                    line(CGPoint(x: actualX, y: 9), CGPoint(x: endX, y: 9),
+                         color: tint, style: StrokeStyle(lineWidth: 4, dash: [12, 4]))
+                    line(CGPoint(x: endX, y: 4), CGPoint(x: endX, y: 23),
+                         color: tint, style: StrokeStyle(lineWidth: 1.5))
+                }
+                line(CGPoint(x: actualX, y: 0), CGPoint(x: actualX, y: 16),
+                     color: .secondary, style: StrokeStyle(lineWidth: 1.5))
+            }
+            .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["UsageDrawing": $0] }
+            .accessibilityHidden(true)
+            VStack(alignment: .center, spacing: 0) {
+                HStack(spacing: 6) {
+                    if actual.band != .under {
+                        Image(systemName: actual.band == .near ? "exclamationmark.triangle.fill" : "xmark.octagon.fill")
+                            .foregroundStyle(actual.band == .near ? Color.orange : Color.red)
+                            .accessibilityLabel(actual.band == .near ? "Current usage is near the target" : "Current usage is at or over the target")
+                            .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["ActualUsageWarning": $0] }
                     }
-                    Text("used").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(money(account.consumptionUsd)).font(.title2).bold().monospacedDigit()
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                }
+                .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["ActualUsageContent"] = $1 }
+                Text("used").font(.system(size: 10)).foregroundStyle(.secondary)
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["ActualUsageLabel": $0] }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["ActualUsageCallout"] = $1 }
+            .accessibilityElement(children: .combine)
+            .help("Current usage: \(money(account.consumptionUsd)). \(account.allocationSummary)")
+            if let forecast = account.forecast, let estimate = account.periodEstimate {
+                VStack(alignment: .center, spacing: 0) {
+                    Text(estimatedMoney(estimate.estimatedConsumptionUsd)).font(.callout).bold().monospacedDigit()
+                        .foregroundStyle(.primary)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["ForecastAmount": $0] }
+                    Text("est. total").font(.system(size: 11)).foregroundStyle(.secondary)
+                        .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["ForecastLabel": $0] }
+                    if forecast.band == .over {
+                        Text("(\(percentageText(forecast.percent, fractionDigits: 1))%)").font(.system(size: 10)).foregroundStyle(.secondary)
+                            .frame(minWidth: 0, maxWidth: .infinity)
+                    }
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(GeometryReader { label in
-                    Color.clear.preference(key: ActualCalloutWidth.self, value: label.size.width)
-                })
-                .frame(width: min(actualWidth > 0 ? actualWidth : 240, plotWidth), alignment: .leading)
-                .clipped()
-                .offset(x: min(max(0, actualX - min(actualWidth, plotWidth) / 2),
-                               max(0, plotWidth - actualWidth)), y: 3)
-                .accessibilityElement(children: .combine)
-                .help("Current usage: \(money(account.consumptionUsd)). \(account.allocationSummary)")
-                if let forecast = account.forecast, let estimate = account.periodEstimate {
-                    let endX = 2 + CGFloat(forecast.forecastFraction) * width
-                    Path { path in
-                        path.move(to: CGPoint(x: actualX, y: lineY))
-                        path.addLine(to: CGPoint(x: endX, y: lineY))
-                    }.stroke(tint, style: StrokeStyle(lineWidth: 4, dash: [12, 4]))
-                    Path { path in
-                        path.move(to: CGPoint(x: endX, y: lineY - 5))
-                        path.addLine(to: CGPoint(x: endX, y: lineY + 14))
-                    }.stroke(tint, lineWidth: 1.5)
-                    VStack(alignment: .center, spacing: 0) {
-                        Text(estimatedMoney(estimate.estimatedConsumptionUsd)).font(.callout).bold().monospacedDigit()
-                            .foregroundStyle(.primary)
-                        Text("est. total").font(.system(size: 11)).foregroundStyle(.secondary)
-                        if forecast.band == .over {
-                            Text("(\(decimalText(forecast.percent))%)").font(.system(size: 10)).foregroundStyle(.secondary)
-                        }
-                    }
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .background(GeometryReader { label in
-                        Color.clear.preference(key: ForecastCalloutWidth.self, value: label.size.width)
-                    })
-                    .frame(width: min(calloutWidth > 0 ? calloutWidth : 240, plotWidth), alignment: .leading)
-                    .clipped()
-                    .offset(x: min(max(0, endX - min(calloutWidth, plotWidth) / 2),
-                                   max(0, plotWidth - calloutWidth)), y: lineY + 17)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(description)
-                }
-                VStack(alignment: .center, spacing: 0) {
-                    Text(trackingTargetMoney(account.customBudgetUsd ?? account.allocationUsd))
-                        .font(.system(size: 16, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(.primary)
-                    Text(account.trackingTargetLabel).font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(GeometryReader { column in
-                    Color.clear.preference(key: TrackingTargetWidth.self, value: column.size.width)
-                })
-                .frame(width: reservedTargetWidth, alignment: .leading)
-                .clipped()
-                .offset(x: plotWidth + 12, y: lineY - 10)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
-                .accessibilityIdentifier("TrackingTarget")
-                .help("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
+                .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["ForecastCallout"] = $1 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(description)
+            } else {
+                Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
             }
+            VStack(alignment: .center, spacing: 0) {
+                Text(trackingTargetMoney(account.customBudgetUsd ?? account.allocationUsd))
+                    .font(.system(size: 16, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["TargetAmount": $0] }
+                    .alignmentGuide(.trackingTargetCenter) { $0[VerticalAlignment.center] }
+                Text(account.trackingTargetLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["TargetLabel": $0] }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["TrackingTarget"] = $1 }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
+            .accessibilityIdentifier("TrackingTarget")
+            .help("\(money(account.customBudgetUsd ?? account.allocationUsd)) \(account.targetLabel)")
         }
-        .frame(height: 54 + (account.forecast == nil ? 28 : account.forecast?.band == .over ? 65 : 53))
-        .onPreferenceChange(ForecastCalloutWidth.self) { calloutWidth = $0 }
-        .onPreferenceChange(ActualCalloutWidth.self) { actualWidth = $0 }
-        .onPreferenceChange(TrackingTargetWidth.self) { targetWidth = $0 }
         .accessibilityElement(children: .contain)
         .help(description)
         .accessibilityIdentifier("ForecastTrack")
+        .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["ForecastTrack"] = $1 }
     }
 }
 
@@ -320,8 +340,10 @@ struct FlyoutView: View {
                             Divider()
                         }
                     }
+                    .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["FlyoutAccountsContent"] = $1 }
                 }
-                .frame(maxHeight: 330)
+                .frame(maxHeight: model.dashboard?.accounts.count == 1 ? 430 : 330)
+                .transformAnchorPreference(key: PreferenceBounds.self, value: .bounds) { $0["FlyoutAccountsViewport"] = $1 }
                 ExampleAccountButton(model: model)
             }
             HStack {

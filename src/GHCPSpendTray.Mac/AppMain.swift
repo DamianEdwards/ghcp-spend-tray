@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var activationObserver: NSObjectProtocol?
     private var smoke = false
     private var empty = false
+    private var usageStates = false
     private var poweringOff = false
     private var powerObserver: NSObjectProtocol?
     private var unsavedAlert: NSAlert?
@@ -33,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             smoke = arguments.contains("--smoke-test")
             empty = arguments.contains("--demo-empty")
             let unlimited = arguments.contains("--demo-unlimited")
-            let usageStates = arguments.contains("--demo-usage-states")
+            usageStates = arguments.contains("--demo-usage-states")
             var demo = smoke || empty || unlimited || usageStates || arguments.contains("--demo")
             let allowed = ["--smoke-test", "--demo", "--demo-empty", "--demo-unlimited", "--demo-usage-states", "--data-dir"]
             var dataPath: String?
@@ -320,9 +321,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                       !model.saving, !model.pendingNavigation, model.formMessage == nil else {
                     throw AppError.message("Native Quit did not finish saving the protected preferences draft.")
                 }
-                try "PASS: native menu bar, settings bridge, protected close and save-before-Quit.\n"
+                let result = usageStates ? "PASS: native eight-state usage showcase, menu bar and settings.\n" :
+                    "PASS: native menu bar, settings bridge, protected close and save-before-Quit.\n"
+                try result
                     .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
-                print("PASS: macOS arm64 \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
+                print("PASS: macOS arm64 \(usageStates ? "usage-state" : empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
             } catch {
                 fputs("FAIL: macOS synthetic termination smoke: \(error.localizedDescription)\n", stderr)
                 model.shutdown()
@@ -387,6 +390,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             progress("reading native notification settings")
             _ = await NativeNotifications().status()
             print("PASS: native notification settings callback.")
+            if usageStates {
+                guard model.error == nil, let accounts = model.dashboard?.accounts, accounts.count == 8,
+                      accounts.prefix(3).map({ $0.forecast?.band }) == [.under, .near, .over],
+                      accounts[3].actualUsage?.band == .near, accounts[4].actualUsage?.band == .over,
+                      accounts[5].periodEstimate == nil, accounts[6].periodEstimate?.unavailableReason != nil,
+                      accounts[7].details.unlimited, model.settings?.startup == false,
+                      let button = statusItems["rollup"]?.button else {
+                    throw AppError.message("The native usage showcase did not initialize its eight isolated states.")
+                }
+                try await waitForPopupAnchor(button, phase: "usage-state menu-bar placement", presented: false)
+                togglePopover(button)
+                try await waitForPopupAnchor(button, phase: "usage-state popup")
+                try savePopupSnapshot("FlyoutStates")
+                popover.performClose(nil)
+                for (index, account) in accounts.enumerated() {
+                    progress("rendering usage state \(index)")
+                    model.viewUsage(account.key)
+                    try await waitUntil { !model.busy && model.usageAccount == account.key && model.page == .usage }
+                    try await Task.sleep(for: .milliseconds(250))
+                    try saveSettingsSnapshot("UsageState\(index)")
+                }
+                guard model.dashboard?.accounts.count == 8, var settings = model.settings else {
+                    throw AppError.message("Refreshing the native usage showcase lost its states.")
+                }
+                settings.pollMinutes = 20
+                settings.trackedTelemetryEnabled = true
+                model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
+                try await waitUntil { !model.busy }
+                NSApplication.shared.terminate(nil)
+                return
+            }
             guard model.error == nil, let dashboard = model.dashboard,
                   dashboard.accounts.count == (empty ? 0 : 2),
                   dashboard.consumptionUsd == (empty ? nil : Decimal(string: "42.75")),

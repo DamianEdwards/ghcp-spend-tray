@@ -1,5 +1,48 @@
 # GHCPSpendTray validation and release gates
 
+## macOS usage, budget and forecast verification (October 19, 2026)
+
+Native verification found that the new forecast model declarations were scoped
+inside `allocationSummary`, preventing Swift compilation. They are now normal
+module-level bridge models.
+
+Rendered fixtures also reproduced current/estimated callouts drifting beyond
+their markers, overlapping the fixed target, and clipping at narrow widths.
+The native track now uses intrinsic SwiftUI layout measurements instead of
+width preferences and fallback-sized offset containers. Both moving callouts
+are centered on their markers with edge clamping. The fixed budget/API-limit
+amount aligns with the line through a measured alignment guide, including when
+large amounts scale down. Actual usage stays accent-colored; forecast severity
+colors and actual-only warning/error icons remain independent. The neutral used
+marker is drawn last, including when current and estimated endpoints coincide.
+Visible percentages use bounded regional formatting rather than decimal tails.
+
+The single-account popup previously put 391 points of account/forecast/chart
+content in a 330-point scrolling viewport. It now allows up to 430 points for
+one account, while retaining the existing multi-account scrolling bound.
+Native tests compare the actual content and viewport after fractional, smaller
+and minimal custom-budget edits.
+
+The Swift harness initializes the real Native AOT bridge with the eight-state
+synthetic showcase, then measures native callout/label/target bounds at
+260/352/650 points in light and dark appearances. Assertions cover marker
+anchoring, centered subtitles, target alignment, independent risk icons,
+large amounts, zero/equal endpoints, estimate-off/unavailable and unlimited
+fallbacks. Synthetic contact sheets are retained under
+`artifacts/macos-test-diagnostics/usage-ui` for visual inspection.
+The real-app smoke launcher also exercises `--demo-usage-states`, its menu-bar
+popup, refresh, and navigation through all eight Usage panels, in addition to
+the existing populated/empty budget-draft and protected-Quit scenarios.
+No real account data, token, production endpoint, updater installation or
+external telemetry is used by this verification.
+
+Local `bash tools/macos/verify.sh` passed on macOS 26 / Apple silicon:
+212 Core tests and 279 shared/bridge assertions in both managed and executed
+Native AOT modes, native platform/rendering tests, arm64 packaging/signatures,
+and populated, empty and eight-state real-app smoke. Light/dark contact sheets
+were visually inspected at compact and wide sizes. macOS 15 runtime execution
+remains the separate CI artifact gate.
+
 ## Projected usage-line callouts (October 19, 2026)
 
 Enabled, available forecasts with finite tracking targets use the same shared
