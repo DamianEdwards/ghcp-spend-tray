@@ -1,19 +1,5 @@
 # GHCPSpendTray validation and release gates
 
-## Windows build storage
-
-Windows verification, release and Store jobs use `setup-windows-storage` before
-SDK setup to place `TEMP`/`TMP` and NuGet caches under `RUNNER_TEMP\build-caches`
-(D: on `windows-2025`). Verification caches the relocated `NUGET_PACKAGES` path.
-No disk formatting or Defender changes are required.
-
-[Paired benchmark run 39523839294](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/39523839294)
-passed eight jobs/32 workload passes, balancing C:/D: execution order on each
-runner. Warm-cache savings averaged 7.1 seconds (2.8%) for managed/Native AOT
-tests and 10.7 seconds (5.0%) for combined packaging. These small-sample workload
-measurements exclude Actions cache transfers and do not establish full workflow
-wall-clock savings; cold-cache gains were larger but strongly order-sensitive.
-
 ## Native macOS telemetry verification (October 16, 2026)
 
 `bash tools/macos/verify.sh` passed on Apple silicon/macOS 26.7.1 with the pinned
