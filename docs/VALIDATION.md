@@ -23,7 +23,39 @@ include VHD overhead and potentially different Defender treatment, not just a
 filesystem comparison. Compare matched image/hardware samples and include setup
 cost before adopting a change; two samples establish feasibility, not statistical
 significance. Hosted storage layouts are observed at runtime, not assumed from
-the runner label. No performance improvement is claimed before hosted results.
+the runner label.
+
+### Hosted results (October 20, 2026)
+
+[Run 39522015265](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/39522015265)
+completed all six jobs successfully on image `20261007.264.1`. All original C:
+and D: volumes were NTFS; the workspace was already on D:, while default NuGet
+and ordinary temp paths were on C:. The experimental R: volumes were confirmed
+as trusted ReFS Dev Drives. Defender real-time protection was disabled in all
+six samples, and C:/D: were already excluded, so the usual Dev Drive deferred
+antivirus scanning benefit was not available in this run.
+
+| Layout (two samples each) | Native tests, mean | Self-contained packaging, mean | Store packaging, mean | Total measured phases, mean |
+|---|---:|---:|---:|---:|
+| Default | 323.7 s | 129.6 s | 107.0 s | 568.0 s |
+| D: NTFS, relocated caches/temp | 302.0 s | 134.5 s | 117.0 s | 561.3 s |
+| D:-backed ReFS Dev Drive | 302.0 s | 132.1 s | 119.4 s | 567.4 s |
+
+Totals include storage setup, identical local source copying, all three
+workloads, and the post-Store rebuild; they exclude runner queueing, common
+checkout/SDK setup, diagnostic collection, and artifact upload. The Dev Drive
+added about 4.7 seconds of provisioning. These means show no substantial
+end-to-end win (NTFS relocation about 1.2%, Dev Drive about 0.1%).
+
+Hardware allocation prevents treating those averages as a controlled comparison:
+one default sample had an Intel Xeon 8573C with local NVMe and finished in
+527.3 seconds; the other five used AMD EPYC 7763/SAS-backed storage. The AMD
+default sample took 608.7 seconds, versus 554.6/568.1 seconds for NTFS relocation
+and 572.4/562.3 seconds for Dev Drive. That is a possible 7-8% relocation benefit
+on that hardware, but only one comparable baseline, with network/host variance
+uncontrolled. ReFS did not outperform relocated NTFS on the matched hardware
+class. Leave production storage unchanged; a same-runner, order-balanced,
+warm-cache comparison is needed before claiming a reliable workflow saving.
 
 ## Native macOS telemetry verification (October 16, 2026)
 
