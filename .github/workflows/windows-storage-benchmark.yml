@@ -18,16 +18,18 @@ concurrency:
 
 jobs:
   benchmark:
-    name: Storage ${{ matrix.layout }} / sample ${{ matrix.sample }}
+    name: ${{ matrix.workload }} / ${{ matrix.order }} / sample ${{ matrix.sample }}
     runs-on: windows-2025
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        layout: [default, ntfs, devdrive]
+        workload: [Tests, Packaging]
+        order: [baseline-first, relocated-first]
         sample: [1, 2]
     env:
-      STORAGE_LAYOUT: ${{ matrix.layout }}
+      STORAGE_WORKLOAD: ${{ matrix.workload }}
+      STORAGE_ORDER: ${{ matrix.order }}
       STORAGE_SAMPLE: ${{ matrix.sample }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -36,18 +38,15 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Prepare isolated storage and record actual runner layout
-        shell: pwsh
-        run: .\tools\windows-storage-benchmark.ps1 -Phase Setup -Layout $env:STORAGE_LAYOUT
-      - name: Measure native tests and both packaging modes
+      - name: Compare cold and warm caches on the same runner
         shell: pwsh
         run: |
-          & "$env:BENCHMARK_ROOT\tools\windows-storage-benchmark.ps1" -Phase Run -Layout $env:STORAGE_LAYOUT
+          .\tools\windows-storage-benchmark.ps1 -Phase Compare -Workload $env:STORAGE_WORKLOAD -Order $env:STORAGE_ORDER
       - name: Retain timings and storage diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: storage-${{ matrix.layout }}-${{ matrix.sample }}
+          name: storage-${{ matrix.workload }}-${{ matrix.order }}-${{ matrix.sample }}
           path: ${{ runner.temp }}/storage-benchmark/
           if-no-files-found: error
           retention-days: 14

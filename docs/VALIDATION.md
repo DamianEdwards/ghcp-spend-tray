@@ -2,30 +2,36 @@
 
 ## Opt-in Windows storage benchmark
 
-The `Windows storage benchmark` workflow compares the standard `windows-2025`
-layout with workspace, NuGet caches, and temporary files on D: NTFS or a 64 GiB
-dynamic ReFS Dev Drive VHD backed by D:. It runs two independent hosted samples
-per layout, recording image/CPU/disk/volume details, Defender state and exclusions,
-resolved NuGet locations, setup overhead, and per-phase timings as artifacts and
-job summaries. It never reformats an existing volume or changes Defender settings.
-Source copying is identical in all layouts; the default preserves ordinary cache
-and temp locations. Production verification and release workflows are unchanged.
+The `Windows storage benchmark` workflow now isolates relocating `TEMP`/`TMP`
+and NuGet caches from C: NTFS to D: NTFS on `windows-2025`. Both layouts execute
+on each runner, with two samples in each starting order, independently for
+native tests and packaging (eight jobs). Image/CPU/disk/volume details, Defender
+state and exclusions, resolved NuGet locations, setup overhead, per-phase timings,
+and within-runner savings are retained as artifacts and job summaries.
+No volumes are formatted and Defender settings are never changed. Production
+verification and release workflows are unchanged.
 
 Run it manually after merging, or push a branch changing its workflow or
-`tools/windows-storage-benchmark.ps1`. Workloads execute all managed/Native AOT
-test harnesses followed by self-contained and Store packaging for both Windows
-architectures and a self-contained rebuild after Store publishing. No signing,
-submission, real accounts, or interactive UI smoke is involved.
+`tools/windows-storage-benchmark.ps1`. The tests workload executes all managed/
+Native AOT harnesses; packaging executes self-contained and Store packaging for
+both Windows architectures plus a self-contained rebuild after Store publishing.
+No signing, submission, real accounts, or interactive UI smoke is involved.
 
-These are cold Actions-cache trials, not a warm-cache production estimate:
-later phases reuse earlier restore/build outputs in every layout. ReFS results
-include VHD overhead and potentially different Defender treatment, not just a
-filesystem comparison. Compare matched image/hardware samples and include setup
-cost before adopting a change; two samples establish feasibility, not statistical
-significance. Hosted storage layouts are observed at runtime, not assumed from
-the runner label.
+Baseline and relocated caches use fresh, equal-length `C:\storage-experiment`
+and `D:\storage-experiment` paths, avoiding preinstalled package-cache contents.
+Only those six temp/NuGet environment variables change; source and build outputs
+stay on D:. Each pass gets a clean source checkout, including warm-cache passes:
+"warm" means packages/HTTP caches from that layout's cold pass, not reused build
+outputs. Baseline-first jobs use C: cold, D: cold, D: warm, C: warm; the opposite
+order runs on equally many jobs. Child processes isolate environment and runtime
+state. There is no Actions cache download/upload, so timings do not estimate the
+cache service's transfer/extraction cost. Source copying and directory setup are
+reported separately from workload-process times. Within packaging, later phases
+reuse earlier outputs equally in both layouts. Hosted storage layouts are observed
+at runtime; balanced paired samples reduce, but cannot eliminate, host/network
+noise. No benefit is claimed from these new trials before their results.
 
-### Hosted results (October 20, 2026)
+### Initial exploratory results (October 20, 2026)
 
 [Run 39522015265](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/39522015265)
 completed all six jobs successfully on image `20261007.264.1`. All original C:

@@ -15,7 +15,8 @@ class StorageBenchmarkWorkflowTests(unittest.TestCase):
     def test_experiment_is_isolated_and_replicated(self):
         workflow = (ROOT / ".github/workflows/windows-storage-benchmark.yml").read_text()
         self.assertIn("runs-on: windows-2025", workflow)
-        self.assertIn("layout: [default, ntfs, devdrive]", workflow)
+        self.assertIn("workload: [Tests, Packaging]", workflow)
+        self.assertIn("order: [baseline-first, relocated-first]", workflow)
         self.assertIn("sample: [1, 2]", workflow)
         self.assertIn("fail-fast: false", workflow)
         self.assertIn("branches-ignore: [main]", workflow)
@@ -24,15 +25,16 @@ class StorageBenchmarkWorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/cache@", workflow)
         self.assertNotIn("secrets.", workflow)
 
-    def test_only_new_vhd_is_formatted_and_default_caches_are_preserved(self):
+    def test_only_temp_and_caches_move_and_processes_are_isolated(self):
         script = SCRIPT.read_text()
-        self.assertIn("Get-DiskImage -ImagePath $vhd | Get-Disk", script)
-        self.assertIn("$disk.IsBoot -or $disk.IsSystem -or $disk.PartitionStyle -ne 'RAW'", script)
-        self.assertIn("$script:storageRoot = 'R:\\storage-experiment'", script)
-        self.assertIn("if ($Layout -ne 'default')", script)
-        self.assertIn("NUGET_PACKAGES = 'nuget\\packages'", script)
-        self.assertIn("TEMP = 'temp'", script)
+        self.assertIn("'C:\\storage-experiment'", script)
+        self.assertIn("'D:\\storage-experiment'", script)
+        self.assertIn('NUGET_PACKAGES = "$cacheRoot\\nuget\\packages"', script)
+        self.assertIn('TEMP = "$cacheRoot\\temp"', script)
+        self.assertIn("$start.Environment[$entry.Key] = $entry.Value", script)
+        self.assertIn('"storage-benchmark-source-$Layout-$CacheState"', script)
         self.assertNotIn("Remove-Item", script)
+        self.assertNotIn("Format-Volume", script)
         self.assertNotIn("Set-MpPreference", script)
         self.assertIn("Measure-Phase 'native-tests'", script)
         self.assertIn("Measure-Phase 'self-contained-package'", script)
@@ -49,7 +51,7 @@ $errors = $null
 if ($errors.Count) { throw ($errors | Out-String) }
 $env:RUNNER_ENVIRONMENT = 'self-hosted'
 try {
-    & $env:BENCHMARK_SCRIPT -Phase Setup -Layout default
+    & $env:BENCHMARK_SCRIPT -Phase Compare
     throw 'Guard did not reject execution.'
 }
 catch {
@@ -74,6 +76,7 @@ $function = $ast.Find({ param($node)
 }, $true)
 . ([scriptblock]::Create($function.Extent.Text))
 $Layout = 'synthetic'
+$CacheState = 'cold'
 $timings = [Collections.Generic.List[object]]::new()
 $timingPath = Join-Path $env:BENCHMARK_TEST_DIRECTORY 'timings.json'
 $env:GITHUB_STEP_SUMMARY = Join-Path $env:BENCHMARK_TEST_DIRECTORY 'summary.md'
@@ -95,6 +98,57 @@ Get-Content -LiteralPath $timingPath -Raw
         self.assertEqual([(item["phase"], item["success"]) for item in timings],
                          [("success", True), ("failure", False)])
         self.assertTrue(all(item["seconds"] >= 0 for item in timings))
+
+    def test_paired_statistics_and_order_balancing(self):
+        command = r"""
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($env:BENCHMARK_SCRIPT, [ref]$tokens, [ref]$errors)
+foreach ($name in @('Get-PairedResults', 'Get-ComparisonPasses')) {
+    $function = $ast.Find({ param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true)
+    . ([scriptblock]::Create($function.Extent.Text))
+}
+$runs = @(
+    [pscustomobject]@{ layout = 'baseline'; cache = 'cold'; seconds = 200; success = $true }
+    [pscustomobject]@{ layout = 'relocated'; cache = 'cold'; seconds = 180; success = $true }
+    [pscustomobject]@{ layout = 'baseline'; cache = 'warm'; seconds = 100; success = $true }
+    [pscustomobject]@{ layout = 'relocated'; cache = 'warm'; seconds = 110; success = $true }
+)
+$invalid = @(
+    ,@($runs[0], $runs[1], $runs[2])
+    ,@($runs[0], $runs[1], $runs[2], $runs[3], $runs[3])
+    ,@($runs[0], $runs[1], $runs[2], [pscustomobject]@{layout='relocated'; cache='warm'; seconds=0; success=$true})
+    ,@($runs[0], $runs[1], $runs[2], [pscustomobject]@{layout='relocated'; cache='warm'; seconds=110; success=$false})
+)
+$rejected = foreach ($case in $invalid) {
+    $caught = $false
+    try { Get-PairedResults $case | Out-Null } catch { $caught = $true }
+    $caught
+}
+@{
+    pairs = @(Get-PairedResults $runs)
+    baselineFirst = @(Get-ComparisonPasses baseline)
+    relocatedFirst = @(Get-ComparisonPasses relocated)
+    rejected = @($rejected)
+} | ConvertTo-Json -Depth 6 -Compress
+"""
+        result = subprocess.run(
+            ["pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
+            env={**os.environ, "BENCHMARK_SCRIPT": str(SCRIPT)},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual([(pair["savedSeconds"], pair["savedPercent"]) for pair in data["pairs"]],
+                         [(20, 10), (-10, -10)])
+        self.assertEqual(data["rejected"], [True] * 4)
+        for key, first, other in (("baselineFirst", "baseline", "relocated"),
+                                  ("relocatedFirst", "relocated", "baseline")):
+            self.assertEqual([(item["layout"], item["cache"]) for item in data[key]],
+                             [(first, "cold"), (other, "cold"), (other, "warm"), (first, "warm")])
 
 
 if __name__ == "__main__":

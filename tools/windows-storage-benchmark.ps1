@@ -1,10 +1,15 @@
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Setup', 'Run')]
+    [ValidateSet('Compare', 'Run')]
     [string] $Phase,
-    [Parameter(Mandatory)]
-    [ValidateSet('default', 'ntfs', 'devdrive')]
-    [string] $Layout
+    [ValidateSet('Tests', 'Packaging')]
+    [string] $Workload = 'Tests',
+    [ValidateSet('baseline-first', 'relocated-first')]
+    [string] $Order = 'baseline-first',
+    [ValidateSet('baseline', 'relocated')]
+    [string] $Layout = 'baseline',
+    [ValidateSet('cold', 'warm')]
+    [string] $CacheState = 'cold'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -12,15 +17,18 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
     throw 'This experiment runs only on disposable GitHub-hosted Windows runners.'
 }
 
-$reportDirectory = Join-Path $env:RUNNER_TEMP 'storage-benchmark'
+$reportDirectory = if ($Phase -eq 'Compare') {
+    Join-Path $env:RUNNER_TEMP 'storage-benchmark'
+} else {
+    if (-not $env:BENCHMARK_REPORT_DIRECTORY -or -not $env:BENCHMARK_ROOT -or
+        (Split-Path $PSScriptRoot -Parent) -ne $env:BENCHMARK_ROOT) {
+        throw 'Run the workload only through Compare in an isolated checkout.'
+    }
+    $env:BENCHMARK_REPORT_DIRECTORY
+}
 New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
 $timingPath = Join-Path $reportDirectory 'timings.json'
 $timings = [Collections.Generic.List[object]]::new()
-if (Test-Path -LiteralPath $timingPath) {
-    foreach ($timing in (Get-Content -LiteralPath $timingPath -Raw | ConvertFrom-Json)) {
-        $timings.Add($timing)
-    }
-}
 
 function Measure-Phase([string] $Name, [scriptblock] $Action) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -32,15 +40,46 @@ function Measure-Phase([string] $Name, [scriptblock] $Action) {
     finally {
         $watch.Stop()
         $timings.Add([pscustomobject]@{
+            layout = $Layout
+            cache = $CacheState
             phase = $Name
             seconds = [Math]::Round($watch.Elapsed.TotalSeconds, 3)
             success = $success
         })
         ConvertTo-Json -InputObject @($timings.ToArray()) -Depth 5 |
             Set-Content -LiteralPath $timingPath -Encoding utf8NoBOM
-        "| $Layout | $env:STORAGE_SAMPLE | $Name | $($watch.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)) | $success |" |
+        "| $Layout | $CacheState | $Name | $($watch.Elapsed.TotalSeconds.ToString('F3', [Globalization.CultureInfo]::InvariantCulture)) | $success |" |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
     }
+}
+
+function Get-PairedResults([object[]] $Runs) {
+    foreach ($cache in @('cold', 'warm')) {
+        $baseline = @($Runs | Where-Object { $_.layout -eq 'baseline' -and $_.cache -eq $cache })
+        $relocated = @($Runs | Where-Object { $_.layout -eq 'relocated' -and $_.cache -eq $cache })
+        if ($baseline.Count -ne 1 -or $relocated.Count -ne 1 -or
+            $baseline[0].seconds -le 0 -or $relocated[0].seconds -le 0 -or
+            -not $baseline[0].success -or -not $relocated[0].success) {
+            throw "Incomplete or failed paired measurements: $cache"
+        }
+        [pscustomobject]@{
+            cache = $cache
+            baselineSeconds = $baseline[0].seconds
+            relocatedSeconds = $relocated[0].seconds
+            savedSeconds = [Math]::Round($baseline[0].seconds - $relocated[0].seconds, 3)
+            savedPercent = [Math]::Round(100 * (1 - $relocated[0].seconds / $baseline[0].seconds), 3)
+        }
+    }
+}
+
+function Get-ComparisonPasses([string] $FirstLayout) {
+    $other = if ($FirstLayout -eq 'baseline') { 'relocated' } else { 'baseline' }
+    @(
+        @{ layout = $FirstLayout; cache = 'cold' }
+        @{ layout = $other; cache = 'cold' }
+        @{ layout = $other; cache = 'warm' }
+        @{ layout = $FirstLayout; cache = 'warm' }
+    )
 }
 
 function Get-StorageSnapshot {
@@ -68,98 +107,119 @@ function Get-StorageSnapshot {
     }
 }
 
-if ($Phase -eq 'Setup') {
-    if ($env:BENCHMARK_ROOT) { throw 'Benchmark storage is already configured.' }
-    Get-StorageSnapshot | ConvertTo-Json -Depth 7 |
-        Set-Content -LiteralPath (Join-Path $reportDirectory 'storage-before.json') -Encoding utf8NoBOM
+Get-StorageSnapshot | ConvertTo-Json -Depth 7 |
+    Set-Content -LiteralPath (Join-Path $reportDirectory 'storage.json') -Encoding utf8NoBOM
+
+if ($Phase -eq 'Compare') {
+    if ([IO.Path]::GetPathRoot($env:GITHUB_WORKSPACE) -ne 'D:\' -or
+        [IO.Path]::GetPathRoot($env:TEMP) -ne 'C:\') {
+        throw 'Expected a D: workspace and C: default temp; inspect storage.json before adapting this experiment.'
+    }
+    foreach ($drive in @('C', 'D')) {
+        if ((Get-Volume -DriveLetter $drive).FileSystem -ne 'NTFS') { throw "$drive`: is not NTFS." }
+        if (Test-Path -LiteralPath "$drive`:\storage-experiment") {
+            throw "Experiment directory already exists on $drive`:"
+        }
+    }
     @(
-        "## Windows storage benchmark: $Layout / sample $env:STORAGE_SAMPLE"
+        "## Paired temp/NuGet benchmark: $Workload / $Order / sample $env:STORAGE_SAMPLE"
         ''
-        "Image: $env:ImageVersion. All variants start without an Actions NuGet cache."
-        'Workloads run sequentially; later phases reuse earlier packages and build outputs.'
-        'Dev Drive uses a dynamic VHD on D:, not a reformatted physical disk.'
-        'Defender settings are observed, never changed; drive exclusions may differ.'
+        "Image: $env:ImageVersion. Both layouts execute on this same runner."
+        'Only TEMP/TMP and NuGet cache locations change: isolated C: versus D: directories.'
+        'Every pass uses a clean source checkout on D:. Warm means NuGet caches, not build outputs.'
+        'Cold layouts run in the chosen order; warm layouts run in reverse order.'
+        'No Actions cache, disk formatting, Defender changes, signing, submission, or UI smoke.'
         ''
-        '| Layout | Sample | Phase | Seconds | Success |'
+        '| Layout | Cache | Phase | Seconds | Success |'
         '|---|---|---|---:|---|'
     ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
-
-    $storageRoot = Join-Path ([IO.Path]::GetPathRoot($env:GITHUB_WORKSPACE)) 'storage-experiment'
-    Measure-Phase 'storage-setup' {
-        if ($Layout -ne 'default' -and [IO.Path]::GetPathRoot($storageRoot) -ne 'D:\') {
-            throw 'The relocated layouts require the expected D: workspace disk; inspect storage-before.json.'
-        }
-        if (Test-Path -LiteralPath $storageRoot) { throw "Experiment directory already exists: $storageRoot" }
-        if ($Layout -eq 'devdrive') {
-            if (Get-Volume | Where-Object DriveLetter -eq 'R') { throw 'R: is already in use.' }
-            if ((Get-Volume -DriveLetter D).SizeRemaining -lt 70GB) { throw 'D: needs at least 70 GiB free for the experiment.' }
-            New-Item -ItemType Directory -Path $storageRoot | Out-Null
-            $vhd = Join-Path $storageRoot 'devdrive.vhdx'
-            $commands = Join-Path $reportDirectory 'create-vhd.txt'
-            @(
-                "create vdisk file=`"$vhd`" maximum=65536 type=expandable"
-                "select vdisk file=`"$vhd`""
-                'attach vdisk'
-            ) | Set-Content -LiteralPath $commands -Encoding ascii
-            & diskpart /s $commands
-            if ($LASTEXITCODE -ne 0) { throw 'Could not create and attach the experiment VHD.' }
-            $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
-            if ($disk.IsBoot -or $disk.IsSystem -or $disk.PartitionStyle -ne 'RAW') {
-                throw 'Refusing to format anything except the new raw experiment VHD.'
+    $first = if ($Order -eq 'baseline-first') { 'baseline' } else { 'relocated' }
+    $passes = Get-ComparisonPasses $first
+    foreach ($pass in $passes) {
+        $Layout = $pass.layout
+        $CacheState = $pass.cache
+        $cacheRoot = if ($Layout -eq 'baseline') { 'C:\storage-experiment' } else { 'D:\storage-experiment' }
+        Measure-Phase 'cache-directories' {
+            if ($CacheState -eq 'cold' -and (Test-Path -LiteralPath $cacheRoot)) {
+                throw "Cold cache already exists: $cacheRoot"
             }
-            $disk | Initialize-Disk -PartitionStyle GPT -PassThru |
-                New-Partition -DriveLetter R -UseMaximumSize |
-                Format-Volume -DevDrive -FileSystem ReFS -NewFileSystemLabel StorageBenchmark -Confirm:$false -Force |
-                Out-Null
-            & fsutil devdrv query R:
-            if ($LASTEXITCODE -ne 0) { throw 'The experiment volume is not a Dev Drive.' }
-            $script:storageRoot = 'R:\storage-experiment'
+            if ($CacheState -eq 'warm' -and -not (Test-Path -LiteralPath "$cacheRoot\nuget\packages")) {
+                throw "Warm cache does not exist: $cacheRoot"
+            }
+            foreach ($directory in @('temp', 'nuget\packages', 'nuget\http-cache', 'nuget\scratch', 'nuget\plugins-cache')) {
+                New-Item -ItemType Directory -Path (Join-Path $cacheRoot $directory) -Force | Out-Null
+            }
         }
-        New-Item -ItemType Directory -Path $storageRoot -Force | Out-Null
-    }
-    $benchmarkRoot = Join-Path $storageRoot 'source'
-    Measure-Phase 'workspace-copy' {
-        & git clone --quiet --local --no-hardlinks $env:GITHUB_WORKSPACE $benchmarkRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Could not clone the pinned experiment source.' }
-        $sourceCommit = & git -C $benchmarkRoot rev-parse HEAD
-        if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $env:GITHUB_SHA) {
-            throw 'Experiment source does not match the workflow commit.'
+        $benchmarkRoot = Join-Path $env:RUNNER_TEMP "storage-benchmark-source-$Layout-$CacheState"
+        Measure-Phase 'workspace-copy' {
+            & git clone --quiet --local --no-hardlinks $env:GITHUB_WORKSPACE $benchmarkRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Could not clone the pinned experiment source.' }
+            $sourceCommit = & git -C $benchmarkRoot rev-parse HEAD
+            if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $env:GITHUB_SHA) {
+                throw 'Experiment source does not match the workflow commit.'
+            }
         }
-    }
-    "BENCHMARK_ROOT=$benchmarkRoot" | Add-Content -LiteralPath $env:GITHUB_ENV
-    if ($Layout -ne 'default') {
+        $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+        $start.UseShellExecute = $false
+        $start.WorkingDirectory = $benchmarkRoot
+        foreach ($argument in @('-NoProfile', '-NonInteractive', '-File',
+            "$benchmarkRoot\tools\windows-storage-benchmark.ps1", '-Phase', 'Run',
+            '-Workload', $Workload, '-Layout', $Layout, '-CacheState', $CacheState)) {
+            $start.ArgumentList.Add($argument)
+        }
         foreach ($entry in @{
-            TEMP = 'temp'
-            TMP = 'temp'
-            NUGET_PACKAGES = 'nuget\packages'
-            NUGET_HTTP_CACHE_PATH = 'nuget\http-cache'
-            NUGET_SCRATCH = 'nuget\scratch'
-            NUGET_PLUGINS_CACHE_PATH = 'nuget\plugins-cache'
+            TEMP = "$cacheRoot\temp"
+            TMP = "$cacheRoot\temp"
+            NUGET_PACKAGES = "$cacheRoot\nuget\packages"
+            NUGET_HTTP_CACHE_PATH = "$cacheRoot\nuget\http-cache"
+            NUGET_SCRATCH = "$cacheRoot\nuget\scratch"
+            NUGET_PLUGINS_CACHE_PATH = "$cacheRoot\nuget\plugins-cache"
+            BENCHMARK_ROOT = $benchmarkRoot
+            BENCHMARK_REPORT_DIRECTORY = (Join-Path $reportDirectory "$Layout-$CacheState")
         }.GetEnumerator()) {
-            $path = Join-Path $storageRoot $entry.Value
-            New-Item -ItemType Directory -Path $path -Force | Out-Null
-            "$($entry.Key)=$path" | Add-Content -LiteralPath $env:GITHUB_ENV
+            $start.Environment[$entry.Key] = $entry.Value
         }
+        Measure-Phase 'workload-process' {
+            $process = [Diagnostics.Process]::Start($start)
+            try {
+                $process.WaitForExit()
+                if ($process.ExitCode -ne 0) { throw "Workload failed: $Layout / $CacheState ($($process.ExitCode))" }
+            }
+            finally { $process.Dispose() }
+        }
+    }
+    $pairs = @(Get-PairedResults @($timings | Where-Object phase -eq 'workload-process'))
+    [ordered]@{
+        workload = $Workload
+        order = $Order
+        sample = $env:STORAGE_SAMPLE
+        pairs = $pairs
+    } | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath (Join-Path $reportDirectory 'comparison.json') -Encoding utf8NoBOM
+    @('', '### Within-runner savings (positive is faster on D:)', '',
+        '| NuGet cache | C: seconds | D: seconds | Saved seconds | Saved percent |',
+        '|---|---:|---:|---:|---:|') | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+    foreach ($pair in $pairs) {
+        "| $($pair.cache) | $($pair.baselineSeconds) | $($pair.relocatedSeconds) | $($pair.savedSeconds) | $($pair.savedPercent)% |" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
     }
     exit 0
 }
 
-if (-not $env:BENCHMARK_ROOT -or (Split-Path $PSScriptRoot -Parent) -ne $env:BENCHMARK_ROOT) {
-    throw 'Run the workload from the isolated benchmark checkout after Setup.'
-}
-Get-StorageSnapshot | ConvertTo-Json -Depth 7 |
-    Set-Content -LiteralPath (Join-Path $reportDirectory 'storage-workload.json') -Encoding utf8NoBOM
 & dotnet nuget locals all --list |
     Set-Content -LiteralPath (Join-Path $reportDirectory 'nuget-locations.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Could not identify NuGet cache paths.' }
 Push-Location $env:BENCHMARK_ROOT
 try {
-    Measure-Phase 'native-tests' { & "$PSScriptRoot\verify.ps1" -NativeTests }
-    Measure-Phase 'self-contained-package' { & "$PSScriptRoot\package.ps1" }
-    Measure-Phase 'store-package' { & "$PSScriptRoot\package.ps1" -Store }
-    Measure-Phase 'self-contained-after-store' {
-        & dotnet build src\GHCPSpendTray.App\GHCPSpendTray.App.csproj -c Release -r win-x64 --nologo -v:q
-        if ($LASTEXITCODE -ne 0) { throw 'Self-contained build after Store packaging failed.' }
+    if ($Workload -eq 'Tests') {
+        Measure-Phase 'native-tests' { & "$PSScriptRoot\verify.ps1" -NativeTests }
+    } else {
+        Measure-Phase 'self-contained-package' { & "$PSScriptRoot\package.ps1" }
+        Measure-Phase 'store-package' { & "$PSScriptRoot\package.ps1" -Store }
+        Measure-Phase 'self-contained-after-store' {
+            & dotnet build src\GHCPSpendTray.App\GHCPSpendTray.App.csproj -c Release -r win-x64 --nologo -v:q
+            if ($LASTEXITCODE -ne 0) { throw 'Self-contained build after Store packaging failed.' }
+        }
     }
 }
 finally { Pop-Location }
