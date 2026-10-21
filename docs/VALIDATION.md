@@ -1185,6 +1185,10 @@ unchanged. ARM64 was cross-published, not executed.
   selection, neutral fallback, partial/unavailable observations, time-based expiry,
   failed saves and successful preview-to-tray parity. Draft-only changes produce
   no Shell calls and leave the persisted configuration and installed icons unchanged.
+  The preview fixture explicitly queues and drains dashboard callbacks instead of
+  running UI actions on publisher threads. It holds a dashboard update across
+  initial icon installation and unsaved edits, then delivers it and checks that
+  neither the installed icon nor the draft changes.
 - Native tests create real HICONs at 16, 20, 24, 32, 48 and 64 pixels; check
   partial/unavailable geometry, transparent corners, fractional antialias
   coverage and correctly premultiplied foreground colors without ClearType
