@@ -32,7 +32,8 @@ def classify(paths):
             result["macos"] = True
         elif path.startswith(("src/GHCPSpendTray.App/", "tests/GHCPSpendTray.AppTests/", "tests/GHCPSpendTray.PlatformTests/")) or (
             path.startswith("tools/") and path.endswith(".ps1")
-        ) or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
+        ) or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml",
+                       ".github/workflows/windows-storage-benchmark.yml", "GHCPSpendTray.slnx"):
             result["windows"] = True
         else:
             # Shared sources, tests, SDK, CI routing, or an unfamiliar path run both.

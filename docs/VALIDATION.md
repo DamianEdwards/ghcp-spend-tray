@@ -1,5 +1,30 @@
 # GHCPSpendTray validation and release gates
 
+## Opt-in Windows storage benchmark
+
+The `Windows storage benchmark` workflow compares the standard `windows-2025`
+layout with workspace, NuGet caches, and temporary files on D: NTFS or a 64 GiB
+dynamic ReFS Dev Drive VHD backed by D:. It runs two independent hosted samples
+per layout, recording image/CPU/disk/volume details, Defender state and exclusions,
+resolved NuGet locations, setup overhead, and per-phase timings as artifacts and
+job summaries. It never reformats an existing volume or changes Defender settings.
+Source copying is identical in all layouts; the default preserves ordinary cache
+and temp locations. Production verification and release workflows are unchanged.
+
+Run it manually after merging, or push a branch changing its workflow or
+`tools/windows-storage-benchmark.ps1`. Workloads execute all managed/Native AOT
+test harnesses followed by self-contained and Store packaging for both Windows
+architectures and a self-contained rebuild after Store publishing. No signing,
+submission, real accounts, or interactive UI smoke is involved.
+
+These are cold Actions-cache trials, not a warm-cache production estimate:
+later phases reuse earlier restore/build outputs in every layout. ReFS results
+include VHD overhead and potentially different Defender treatment, not just a
+filesystem comparison. Compare matched image/hardware samples and include setup
+cost before adopting a change; two samples establish feasibility, not statistical
+significance. Hosted storage layouts are observed at runtime, not assumed from
+the runner label. No performance improvement is claimed before hosted results.
+
 ## Native macOS telemetry verification (October 16, 2026)
 
 `bash tools/macos/verify.sh` passed on Apple silicon/macOS 26.7.1 with the pinned
