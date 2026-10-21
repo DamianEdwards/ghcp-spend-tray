@@ -1,5 +1,21 @@
 # GHCPSpendTray validation and release gates
 
+## macOS account-list and Usage navigation parity (October 21, 2026)
+
+The Accounts list now shows identity and management actions only: avatar,
+display name, login and host. It no longer reuses the usage row. Individual
+management forms retain their usage/configuration details, matching Windows.
+Every Usage account header has a Manage account action that selects that
+account through the existing draft-protected navigation path.
+
+Native regression coverage compares the complete rendered Accounts card for
+identical identities with different amounts, percentages, budgets and forecasts;
+the pixels must be identical. Native clicks exercise the full card and its
+management action, both Usage accounts' management buttons, and the existing
+popup-to-Usage navigation. The macOS app verification passed, including
+protected budget drafts, light/dark usage layouts and populated/empty/eight-state
+Native AOT app smoke. Synthetic Accounts and Usage snapshots were inspected.
+
 ## macOS usage, budget and forecast verification (October 19, 2026)
 
 Native verification found that the new forecast model declarations were scoped

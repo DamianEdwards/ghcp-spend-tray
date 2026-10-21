@@ -20,19 +20,39 @@ struct AccountAvatar: View {
     }
 }
 
+struct AccountIdentityView: View {
+    let account: AccountData
+    var body: some View {
+        HStack {
+            AccountAvatar(account: account)
+            VStack(alignment: .leading) {
+                Text(account.name).font(.headline)
+                Text("\(account.login) @ \(account.host)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct AccountRow: View {
     let account: AccountData
+    var manage: (() -> Void)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                AccountAvatar(account: account)
-                VStack(alignment: .leading) {
-                    Text(account.name).font(.headline)
-                    Text("\(account.login) @ \(account.host)").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if account.actualUsage == nil {
-                    Text(money(account.consumptionUsd)).font(.title3).monospacedDigit()
+                AccountIdentityView(account: account)
+                VStack(alignment: .trailing, spacing: 6) {
+                    if account.actualUsage == nil {
+                        Text(money(account.consumptionUsd)).font(.title3).monospacedDigit()
+                    }
+                    if let manage {
+                        Button("Manage account", action: manage)
+                            .accessibilityLabel("Manage account \(account.name) on \(account.host)")
+                            .accessibilityIdentifier(account.key + "_UsageManageAccount")
+                            .anchorPreference(key: PreferenceBounds.self, value: .bounds) {
+                                [account.key + "_UsageManageAccount": $0]
+                            }
+                    }
                 }
             }
             if let percent = account.percent {
@@ -425,7 +445,7 @@ struct UsageView: View {
                     ForEach(model.dashboard?.accounts ?? []) { account in
                         GroupBox {
                             VStack(alignment: .leading, spacing: 12) {
-                                AccountRow(account: account)
+                                AccountRow(account: account) { model.selectAccount(account.key) }
                                 DailyConsumptionChartView(account: account)
                                 AccountDiagnosticsView(account: account)
                             }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
@@ -545,7 +565,7 @@ struct AccountManagementRow: View {
         Button(action: manage) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    AccountRow(account: account)
+                    AccountIdentityView(account: account)
                     HStack(spacing: 4) {
                         Spacer()
                         Text("Manage account")
