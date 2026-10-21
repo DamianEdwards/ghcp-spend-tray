@@ -1,111 +1,18 @@
 # GHCPSpendTray validation and release gates
 
-## Opt-in Windows storage benchmark
+## Windows build storage
 
-The `Windows storage benchmark` workflow now isolates relocating `TEMP`/`TMP`
-and NuGet caches from C: NTFS to D: NTFS on `windows-2025`. Both layouts execute
-on each runner, with two samples in each starting order, independently for
-native tests and packaging (eight jobs). Image/CPU/disk/volume details, Defender
-state and exclusions, resolved NuGet locations, setup overhead, per-phase timings,
-and within-runner savings are retained as artifacts and job summaries.
-No volumes are formatted and Defender settings are never changed. Production
-verification and release workflows are unchanged.
+Windows verification, release and Store jobs use `setup-windows-storage` before
+SDK setup to place `TEMP`/`TMP` and NuGet caches under `RUNNER_TEMP\build-caches`
+(D: on `windows-2025`). Verification caches the relocated `NUGET_PACKAGES` path.
+No disk formatting or Defender changes are required.
 
-Run it manually after merging, or push a branch changing its workflow or
-`tools/windows-storage-benchmark.ps1`. The tests workload executes all managed/
-Native AOT harnesses; packaging executes self-contained and Store packaging for
-both Windows architectures plus a self-contained rebuild after Store publishing.
-No signing, submission, real accounts, or interactive UI smoke is involved.
-
-Baseline and relocated caches use fresh, equal-length `C:\storage-experiment`
-and `D:\storage-experiment` paths, avoiding preinstalled package-cache contents.
-Only those six temp/NuGet environment variables change; source and build outputs
-stay on D:. Each pass gets a clean source checkout, including warm-cache passes:
-"warm" means packages/HTTP caches from that layout's cold pass, not reused build
-outputs. Baseline-first jobs use C: cold, D: cold, D: warm, C: warm; the opposite
-order runs on equally many jobs. Child processes isolate environment and runtime
-state. There is no Actions cache download/upload, so timings do not estimate the
-cache service's transfer/extraction cost. Source copying and directory setup are
-reported separately from workload-process times. Within packaging, later phases
-reuse earlier outputs equally in both layouts. Hosted storage layouts are observed
-at runtime; balanced paired samples reduce, but cannot eliminate, host/network
-noise. Interpret the measured results below with those limitations.
-
-### Paired C: versus D: cache results (October 20, 2026)
-
-[Run 39523839294](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/39523839294)
-passed all eight jobs and 32 workload passes (64 individual phase measurements).
-Each comparison used the same runner, image, CPU, physical disks and source
-commit; all 32 snapshots confirmed temp/NuGet on the intended C: or D: paths,
-with source and build outputs remaining on D:. Four runners exercised tests and
-four exercised packaging, with each starting order used twice. Images
-`20261007.264.1` and `20261018.275.1`, Intel/AMD processors, and SAS/NVMe D:
-storage were represented, but hardware never changed within a paired comparison.
-
-| Workload | NuGet cache | C: mean | D: mean | Mean time saved | Saving versus C: mean |
-|---|---|---:|---:|---:|---:|
-| Managed/Native AOT tests | Cold | 321.7 s | 272.0 s | 49.8 s | 15.5% |
-| Managed/Native AOT tests | Warm | 247.7 s | 240.6 s | 7.1 s | 2.8% |
-| Both packaging modes and post-Store rebuild | Cold | 277.3 s | 227.9 s | 49.4 s | 17.8% |
-| Both packaging modes and post-Store rebuild | Warm | 213.1 s | 202.4 s | 10.7 s | 5.0% |
-
-These are arithmetic means across four within-runner pairs per row. D: was
-faster in all 16 cold/warm pairs. Warm-cache per-runner gains ranged from
-0.6-5.0% for tests and 1.1-12.9% for packaging. Directory creation was
-sub-second, and no disk provisioning was needed.
-
-Use the warm results as the more relevant indication for existing NuGet-cached
-verification jobs, not the larger cold headline. Cold results were strongly
-order-sensitive: test savings were 25.6-27.5% when C: ran first but 2.8-4.0%
-when D: ran first; packaging savings were 21.9-33.1% versus 4.7-12.6%.
-Balancing order controls a systematic advantage for either layout, but four
-pairs are still a small sample and do not fully isolate machine/network warm-up.
-
-Warm packaging phase means were 110.4 to 102.0 seconds for self-contained
-publishing/packaging, 90.4 to 90.4 seconds for the subsequent Store package,
-and 5.6 to 5.5 seconds for the post-Store rebuild. Do not claim a material Store
-packaging improvement from this run. Store runs second and reuses earlier build
-outputs, unlike its independent production verification lane.
-
-Workload-process timings include child startup and diagnostics but exclude
-source copying, directory creation, Actions cache restore/save and runner
-queue/setup/upload. They are not a measurement of full Verify wall-clock time:
-production test shards/package modes run in parallel. The combined temp plus
-NuGet relocation shows a repeatable modest warm-cache saving in these samples;
-this experiment does not separate temp from NuGet contributions or guarantee
-the same percentage on future hosts. Production cache paths remain unchanged.
-
-### Initial exploratory results (October 20, 2026)
-
-[Run 39522015265](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/39522015265)
-completed all six jobs successfully on image `20261007.264.1`. All original C:
-and D: volumes were NTFS; the workspace was already on D:, while default NuGet
-and ordinary temp paths were on C:. The experimental R: volumes were confirmed
-as trusted ReFS Dev Drives. Defender real-time protection was disabled in all
-six samples, and C:/D: were already excluded, so the usual Dev Drive deferred
-antivirus scanning benefit was not available in this run.
-
-| Layout (two samples each) | Native tests, mean | Self-contained packaging, mean | Store packaging, mean | Total measured phases, mean |
-|---|---:|---:|---:|---:|
-| Default | 323.7 s | 129.6 s | 107.0 s | 568.0 s |
-| D: NTFS, relocated caches/temp | 302.0 s | 134.5 s | 117.0 s | 561.3 s |
-| D:-backed ReFS Dev Drive | 302.0 s | 132.1 s | 119.4 s | 567.4 s |
-
-Totals include storage setup, identical local source copying, all three
-workloads, and the post-Store rebuild; they exclude runner queueing, common
-checkout/SDK setup, diagnostic collection, and artifact upload. The Dev Drive
-added about 4.7 seconds of provisioning. These means show no substantial
-end-to-end win (NTFS relocation about 1.2%, Dev Drive about 0.1%).
-
-Hardware allocation prevents treating those averages as a controlled comparison:
-one default sample had an Intel Xeon 8573C with local NVMe and finished in
-527.3 seconds; the other five used AMD EPYC 7763/SAS-backed storage. The AMD
-default sample took 608.7 seconds, versus 554.6/568.1 seconds for NTFS relocation
-and 572.4/562.3 seconds for Dev Drive. That is a possible 7-8% relocation benefit
-on that hardware, but only one comparable baseline, with network/host variance
-uncontrolled. ReFS did not outperform relocated NTFS on the matched hardware
-class. Leave production storage unchanged; a same-runner, order-balanced,
-warm-cache comparison is needed before claiming a reliable workflow saving.
+[Paired benchmark run 39523839294](https://github.com/DamianEdwards/ghcp-spend-tray/actions/runs/39523839294)
+passed eight jobs/32 workload passes, balancing C:/D: execution order on each
+runner. Warm-cache savings averaged 7.1 seconds (2.8%) for managed/Native AOT
+tests and 10.7 seconds (5.0%) for combined packaging. These small-sample workload
+measurements exclude Actions cache transfers and do not establish full workflow
+wall-clock savings; cold-cache gains were larger but strongly order-sensitive.
 
 ## Native macOS telemetry verification (October 16, 2026)
 

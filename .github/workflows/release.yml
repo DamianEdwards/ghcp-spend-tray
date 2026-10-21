@@ -98,6 +98,8 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
+      - uses: ./.github/actions/setup-windows-storage
+
       - name: Validate source, version, identity and signing configuration
         shell: pwsh
         env:
