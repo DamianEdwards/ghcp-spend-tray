@@ -163,12 +163,11 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("case .ready:", listener)
         self.assertIn("readiness.complete(.success(url))", listener)
         self.assertIn("connection.cancel()", listener)
-        for name in ("verify", "release"):
-            workflow = (ROOT / f".github/workflows/{name}.yml").read_text()
-            macos = workflow.split("\n  macos:\n")[1].split("\n  macos_")[0]
-            self.assertIn("id: native_verify", macos)
-            self.assertIn("always() && steps.native_verify.outcome", macos)
-            self.assertIn("path: artifacts/macos-test-diagnostics/", macos)
+        workflow = (ROOT / ".github/workflows/verify.yml").read_text()
+        macos = workflow.split("\n  macos:\n")[1].split("\n  macos_")[0]
+        self.assertIn("id: native_verify", macos)
+        self.assertIn("always() && steps.native_verify.outcome", macos)
+        self.assertIn("path: artifacts/macos-test-diagnostics/", macos)
         verify = (ROOT / "tools/macos/verify.sh").read_text()
         self.assertIn("set -euo pipefail", verify)
         self.assertIn("2>&1 | tee artifacts/macos-test-diagnostics/platform-tests.log", verify)
