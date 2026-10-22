@@ -587,7 +587,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             try await waitUntil { model.formLoaded && !model.busy }
             model.accountDraft.useCustomBudget = true
             model.accountDraft.budget = "50.00"
-            guard model.budgetPreview?.contains("of $50.00 custom budget") == true else {
+            guard model.budgetPreview?.contains("of $50 custom budget") == true else {
                 throw AppError.message("Native budget draft did not use the shared preview.")
             }
             let budgetDraft = model.accountDraft

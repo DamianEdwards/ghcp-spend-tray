@@ -31,7 +31,7 @@ enum PeriodEstimateTests {
             "observedAtUtc": "2026-10-11T00:00:00.0000000+00:00", "isEarly": false
         ])
         let estimate = on.periodEstimate!
-        try check(on.usageCaption == "42.75% used" && on.trackingTargetLabel == "API limit" &&
+        try check(on.usageCaption == "43% used" && on.trackingTargetLabel == "API limit" &&
                   on.allocationSummary.contains("$100.00"),
                   "Native short usage captions keep the target information in its separate fixed column.")
         var budget = on

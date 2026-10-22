@@ -58,9 +58,8 @@ enum UsageTrackTests {
             try measure(edited, width: 260, scheme: .light)
             try measurePopup(model)
             if budget == 125.50 {
-                let expected = Decimal(string: "32.07")!.formatted(.number.grouping(.never))
-                try check(edited.usageCaption == "\(expected)% used",
-                          "Repeating budget percentages round to two regional decimal places instead of displaying decimal tails.")
+                try check(edited.usageCaption == "32% used",
+                          "Repeating budget percentages round to whole numbers instead of displaying decimal tails.")
             }
         }
         let large = try JSONDecoder().decode(AccountData.self, from: Data("""

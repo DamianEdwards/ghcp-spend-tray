@@ -171,7 +171,7 @@ struct AccountUsageTrack: View {
     private var description: String {
         guard let forecast = account.forecast, let estimate = account.periodEstimate else { return account.allocationSummary }
         let status = forecast.band == .under ? "Under target" : forecast.band == .near ? "Near target" : "At or over target"
-        return "\(account.allocationSummary). Estimated at reset: \(estimatedMoney(estimate.estimatedConsumptionUsd)) (\(percentageText(forecast.percent))% of \(account.targetLabel)). \(status). \(estimate.method)"
+        return "\(account.allocationSummary). Estimated at reset: \(estimatedMoney(estimate.estimatedConsumptionUsd)) (\(percentageText(forecast.percent)) of \(account.targetLabel)). \(status). \(estimate.method)"
     }
     var body: some View {
         UsageTrackLayout(actualFraction: actual.fraction, forecastFraction: account.forecast?.forecastFraction) {
@@ -229,7 +229,7 @@ struct AccountUsageTrack: View {
                     Text("est. total").font(.system(size: 11)).foregroundStyle(.secondary)
                         .anchorPreference(key: PreferenceBounds.self, value: .bounds) { ["ForecastLabel": $0] }
                     if forecast.band == .over {
-                        Text("(\(percentageText(forecast.percent, fractionDigits: 1))%)").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Text("(\(percentageText(forecast.percent)))").font(.system(size: 10)).foregroundStyle(.secondary)
                             .frame(minWidth: 0, maxWidth: .infinity)
                     }
                 }
@@ -499,8 +499,8 @@ struct AccountDiagnosticsView: View {
                 row("Credits used (observed)", decimalText(account.details.creditsUsed).isEmpty ? "Unavailable" : decimalText(account.details.creditsUsed))
                 row("Consumption (observed)", money(account.details.observedConsumptionUsd))
                 row("Limit (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
-                if let budget = account.customBudgetUsd { row("Custom tracking budget", money(budget)) }
-                row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ??
+                if let budget = account.customBudgetUsd { row("Custom tracking budget", trackingTargetMoney(budget)) }
+                row("Percent (observed)", account.details.observedPercentConsumed.map { percentageText($0) } ??
                     (account.details.unlimited ? "Not applicable (unlimited)" : "Unavailable"))
                 row("Current billing period", account.details.isCurrentPeriod ? "Yes" : "No")
                 row("Last fetched", dateText(account.updatedAt))

@@ -303,6 +303,8 @@ places). **Save account** (**Save** on macOS) applies it to that account's usage
 icon, estimated excess, and percentage alerts. The draft shows a preview before
 saving. Budgets follow the API billing period (or the calendar-month fallback);
 they are tracking targets, not spending caps or changes to your GitHub quota.
+Displayed usage percentages round to whole numbers. Custom budgets omit `.00`
+but retain nonzero cents; observed consumption amounts keep their cents.
 The API limit remains available in **Advanced details**. Select **Use API
 limit** and save to remove the override. Accounts without overrides behave
 as before. Changing the budget rearms
@@ -362,9 +364,10 @@ unit is shown in the tooltip and preview label instead of a tiny extra glyph.
 Both styles are antialiased at the taskbar's pixel size on a transparent canvas.
 The settings preview places them on a taskbar-colored swatch so they remain
 readable when the app and taskbar themes differ.
-Pies fill to 100%; a `+` on either style marks over-limit usage. Tooltips retain the
-unsaturated percentage (up to two decimals, with `<0.01%` for smaller nonzero
-values) and label over-limit usage. Eligibility is reevaluated at least every
+Pies fill to 100%; a `+` on either style marks over-limit usage. Tooltips show the
+uncapped percentage rounded to a whole number and label over-limit usage.
+Rounding affects display only, not usage calculations or alert thresholds.
+Eligibility is reevaluated at least every
 minute and on refresh/resume, including billing rollover. Windows controls
 notification-area overflow and icon visibility; the app cannot force icons to
 remain unhidden.

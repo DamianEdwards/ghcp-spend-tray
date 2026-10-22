@@ -21,12 +21,12 @@ internal static class UI
     internal static string Money(decimal? amount) => amount is { } value ?
         "$" + value.ToString("N2", CultureInfo.GetCultureInfo("en-US")) : "Unavailable";
     internal static string UsagePercentage(AccountView account) =>
-        $"{account.Percent:0.##}% of {Money(account.AllocationUsd)} " +
+        $"{(account.Percent is { } percent ? UsageFormatting.Percentage(percent) : "Unavailable")} of " +
+        $"{(account.CustomBudgetUsd is { } budget ? UsageFormatting.BudgetMoney(budget) : Money(account.AllocationUsd))} " +
         (account.CustomBudgetUsd is not null ? "custom budget" : "limit");
-    internal static string TrackingTargetAmount(decimal amount) =>
-        "$" + amount.ToString(amount == decimal.Truncate(amount) ? "N0" : "N2", CultureInfo.GetCultureInfo("en-US"));
+    internal static string TrackingTargetAmount(decimal amount) => UsageFormatting.BudgetMoney(amount);
     internal static string UsageCaption(AccountView account) => account.ActualUsage is not null
-        ? $"{account.Percent:0.##}% used" : UsagePercentage(account);
+        ? $"{(account.Percent is { } percent ? UsageFormatting.Percentage(percent) : "Unavailable")} used" : UsagePercentage(account);
     internal static TextBlockElement Copy(string text) => TextBlock(text).TextWrapping().Foreground(Theme.SecondaryText);
     internal static Element SettingsInput(AppSession session, SettingsField field, string value, string label,
         string? placeholder = null, double? width = null, bool enabled = true)
@@ -778,7 +778,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             budget <= 0 || decimal.Round(budget, 2) != budget)
             return "Enter a positive USD amount with up to two decimal places.";
         return account.ConsumptionUsd is { } used
-            ? $"Preview: {UI.Money(used)} consumed = {UsageBudget.Percentage(used, budget):0.##}% of {UI.Money(budget)} custom budget"
+            ? $"Preview: {UI.Money(used)} consumed = {UsageFormatting.Percentage(UsageBudget.Percentage(used, budget))} of {UsageFormatting.BudgetMoney(budget)} custom budget"
             : "Preview unavailable until current-period consumption is available.";
     }
 
@@ -826,7 +826,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.DetailRow("Recorded limit", account.Details.Unlimited ? "Unlimited" :
             UI.Money(account.Details.ObservedAllocationUsd), idPrefix + "DetailRecordedAllocation"),
         UI.DetailRow("Limit consumed", account.Details.ObservedPercentConsumed is { } percent ?
-            $"{percent:0.####}%" : account.Details.Unlimited ? "Not applicable (unlimited)" :
+            UsageFormatting.Percentage(percent) : account.Details.Unlimited ? "Not applicable (unlimited)" :
             "Not available", idPrefix + "DetailRecordedPercent"),
         UI.DetailRow("Last fetched", UI.Timestamp(account.UpdatedAt), idPrefix + "DetailFetched"),
         UI.DetailRow("Source timestamp", UI.Timestamp(account.Details.SourceTimestampUtc, "Not supplied"), idPrefix + "DetailSource"),

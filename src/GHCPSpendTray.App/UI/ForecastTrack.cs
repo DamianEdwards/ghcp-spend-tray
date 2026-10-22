@@ -1,4 +1,3 @@
-using System.Globalization;
 using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor.Core.V1Protocol;
 using Microsoft.UI.Reactor.Core.V1Protocol.Descriptor;
@@ -196,13 +195,13 @@ internal sealed class ForecastTrack
         if (forecast.Band == ForecastBand.Over)
             callout.Children.Add(new TextBlock
             {
-                Text = "(" + forecast.Percent.ToString("0.#", CultureInfo.CurrentCulture) + "%)",
+                Text = "(" + UsageFormatting.Percentage(forecast.Percent) + ")",
                 FontSize = 10, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 HorizontalAlignment = HorizontalAlignment.Center
             });
         string status = forecast.Band switch { ForecastBand.Near => "Near target", ForecastBand.Over => "At or over target", _ => "Under target" };
-        string tooltip = $"Estimated at reset: {UI.EstimateAmount(estimate)} ({forecast.Percent:0.##}% of " +
+        string tooltip = $"Estimated at reset: {UI.EstimateAmount(estimate)} ({UsageFormatting.Percentage(forecast.Percent)} of " +
             (_account.CustomBudgetUsd is not null ? "custom budget" : "limit") + $"). {status}. " + UI.EstimateMethodFor(estimate);
         ToolTipService.SetToolTip(callout, tooltip);
         AutomationProperties.SetName(callout, tooltip);

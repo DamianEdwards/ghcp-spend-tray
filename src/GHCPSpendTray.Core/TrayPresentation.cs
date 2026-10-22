@@ -23,12 +23,7 @@ public sealed record TrayIndicator(string? AccountKey, string Name, double? Perc
         { } value => Math.Round(value, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture)
     };
 
-    public static string FormatPercent(double value) => value switch
-    {
-        > 0 and < .01 => "<0.01%",
-        >= 1e12 => value.ToString("G17", CultureInfo.InvariantCulture) + "%",
-        _ => value.ToString("0.##", CultureInfo.InvariantCulture) + "%"
-    };
+    public static string FormatPercent(double value) => UsageFormatting.Percentage(value);
 }
 
 public sealed record TrayPresentation(TrayIconStyle Style, TrayIndicator RollUp,

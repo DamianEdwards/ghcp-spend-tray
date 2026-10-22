@@ -62,15 +62,16 @@ struct AccountData: Decodable, Identifiable {
     var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
     var trackingTargetLabel: String { customBudgetUsd == nil ? "API limit" : "budget" }
     var usageCaption: String {
-        if actualUsage != nil, let percent { return "\(percentageText(percent))% used" }
+        if actualUsage != nil, let percent { return "\(percentageText(percent)) used" }
         return allocationSummary
     }
     var allocationSummary: String {
         if let percent {
-            return "\(percentageText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
+            let target = customBudgetUsd.map { trackingTargetMoney($0) } ?? money(allocationUsd)
+            return "\(percentageText(percent)) of \(target) \(targetLabel)"
         }
 
-        if let customBudgetUsd { return "\(money(customBudgetUsd)) custom budget · Consumption unavailable" }
+        if let customBudgetUsd { return "\(trackingTargetMoney(customBudgetUsd)) custom budget · Consumption unavailable" }
         return details.unlimited ? "Unlimited API limit" : "API limit unavailable"
     }
 }
@@ -344,6 +345,13 @@ func money(_ value: Decimal?) -> String {
     return format.string(from: value as NSDecimalNumber) ?? "\(value) USD"
 }
 
+func percentageText(_ value: Decimal) -> String {
+    var input = value
+    var rounded = Decimal()
+    NSDecimalRound(&rounded, &input, 0, .plain)
+    return "\(decimalText(rounded))%"
+}
+
 func trackingTargetMoney(_ value: Decimal?) -> String {
     guard let value else { return "Unavailable" }
     var input = value
@@ -377,16 +385,6 @@ func estimatedMoney(_ value: Decimal?) -> String {
 
 func decimalText(_ value: Decimal?) -> String {
     value.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
-}
-
-func percentageText(_ value: Decimal, fractionDigits: Int = 2) -> String {
-    let formatter = NumberFormatter()
-    formatter.locale = .current
-    formatter.numberStyle = .decimal
-    formatter.usesGroupingSeparator = false
-    formatter.minimumFractionDigits = 0
-    formatter.maximumFractionDigits = fractionDigits
-    return formatter.string(from: value as NSDecimalNumber) ?? decimalText(value)
 }
 
 func parseAmount(_ text: String) throws -> Decimal? {
