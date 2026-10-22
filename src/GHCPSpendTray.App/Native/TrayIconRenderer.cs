@@ -7,7 +7,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace GHCPSpendTray.App.Native;
 
-internal readonly record struct TrayPalette(uint Background, uint Foreground);
+internal readonly record struct TrayPalette(uint Background, uint Foreground, uint? Warning = 0xFFFFB900);
 
 internal sealed class TrayImage : SafeHandleZeroOrMinusOneIsInvalid
 {
@@ -23,7 +23,7 @@ internal static class TrayIconRenderer
     internal static TrayPalette SystemPalette()
     {
         if (Win32.IsHighContrast())
-            return new(Argb(Win32.GetSysColor(5)), Argb(Win32.GetSysColor(8)));
+            return new(Argb(Win32.GetSysColor(5)), Argb(Win32.GetSysColor(8)), Warning: null);
         return TrayAppearance.IsLightTheme() ? new(0xFFF3F3F3, 0xFF161616) : new(0xFF202020, 0xFFF5F5F5);
     }
     private static uint Argb(uint colorRef) =>
@@ -111,7 +111,6 @@ internal static class TrayIconRenderer
             else if (indicator.IsUnlimited)
             {
                 Text(indicator.NumericText, indicator.IsPartial ? 10 : 16, indicator.IsPartial ? 13 : 18);
-                if (indicator.IsPartial) Badge(11, true);
             }
             else if (indicator.Percent is null) Text("?", 16, 18);
             else
@@ -134,8 +133,7 @@ internal static class TrayIconRenderer
                                 coverage[y * resolution + x] = 0xFFFFFF;
                         }
                 }
-                if (indicator.IsOverAllocation) Badge(1, false);
-                if (indicator.IsPartial) Badge(11, true);
+                if (indicator.IsOverAllocation) Badge(1);
             }
 
             // Grayscale coverage, not ClearType, works on any Explorer surface.
@@ -155,6 +153,8 @@ internal static class TrayIconRenderer
                         (((foreground >> 8 & 255) * alpha + 127) / 255) << 8 |
                         ((foreground & 255) * alpha + 127) / 255;
                 }
+            if (text is null && indicator.IsPartial && (indicator.IsUnlimited || indicator.Percent is not null))
+                WarningTriangle(pixels);
             return pixels;
         }
         finally
@@ -202,19 +202,55 @@ internal static class TrayIconRenderer
             }
         }
 
-        void Badge(int x, bool partial)
+        void Badge(int x)
         {
             Rect(x - 1, 10, 7, 6, 0);
-            if (partial)
-            {
-                Rect(x + 2, 10.5, 1.2, 3.1, 0xFFFFFF);
-                Rect(x + 2, 14.4, 1.2, 1.2, 0xFFFFFF);
-            }
-            else
-            {
-                Rect(x + 2, 11, 1.2, 4.5, 0xFFFFFF);
-                Rect(x + .3, 12.7, 4.6, 1.2, 0xFFFFFF);
-            }
+            Rect(x + 2, 11, 1.2, 4.5, 0xFFFFFF);
+            Rect(x + .3, 12.7, 4.6, 1.2, 0xFFFFFF);
+        }
+        void WarningTriangle(uint[] pixels)
+        {
+            var coverage = new Span<uint>((void*)bits, resolution * resolution);
+            const uint count = samples * samples, divisor = count * 255;
+            // Resample the badge and its transparent halo on the same grid as the usage artwork.
+            for (int y = (int)(7 * size / 16d); y < size; y++)
+                for (int x = (int)(6 * size / 16d); x < size; x++)
+                {
+                    uint alpha = 0, red = 0, green = 0, blue = 0;
+                    bool changed = false;
+                    for (int sy = 0; sy < samples; sy++)
+                        for (int sx = 0; sx < samples; sx++)
+                        {
+                            double px = (x * samples + sx + .5) / scale;
+                            double py = (y * samples + sy + .5) / scale;
+                            uint opacity = coverage[(y * samples + sy) * resolution + x * samples + sx] & 255;
+                            uint color = palette.Foreground;
+                            if (Triangle(px, py, 7, 16, 5))
+                            {
+                                changed = true;
+                                opacity = Triangle(px, py, 8.2, 15, 3.9) ? 255u : 0;
+                                color = palette.Warning ?? palette.Foreground;
+                                if (px is >= 11.05 and < 11.95 &&
+                                    (py is >= 10.8 and < 12.9 or >= 13.8 and < 14.8))
+                                {
+                                    if (palette.Warning is null) opacity = 0;
+                                    else color = 0xFF161616;
+                                }
+                            }
+                            alpha += opacity;
+                            red += (color >> 16 & 255) * opacity;
+                            green += (color >> 8 & 255) * opacity;
+                            blue += (color & 255) * opacity;
+                        }
+                    if (changed)
+                        pixels[y * size + x] = ((alpha + count / 2) / count) << 24 |
+                            ((red + divisor / 2) / divisor) << 16 |
+                            ((green + divisor / 2) / divisor) << 8 |
+                            (blue + divisor / 2) / divisor;
+                }
+
+            static bool Triangle(double x, double y, double top, double bottom, double halfWidth) =>
+                y >= top && y < bottom && Math.Abs(x - 11.5) < halfWidth * (y - top) / (bottom - top);
         }
         void Rect(double x, double y, double width, double height, uint color)
         {

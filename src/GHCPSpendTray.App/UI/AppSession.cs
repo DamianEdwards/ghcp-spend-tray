@@ -26,6 +26,8 @@ internal sealed class AppSession : IDisposable
     internal StoreUpdateSession? StoreUpdates { get; }
     internal DashboardView Dashboard { get; private set; } = new("Loading", "Loading accounts...", "GHCPSpendTray | Loading", []);
     internal SettingsPage Page { get; private set; } = SettingsPage.Usage;
+    internal string? UsageAccountKey { get; private set; }
+    internal int UsageNavigationRevision { get; private set; }
     internal event Action? Changed;
     internal event Action? DashboardChanged;
     internal event Action? UnsavedChangesRequested;
@@ -256,8 +258,25 @@ internal sealed class AppSession : IDisposable
         if (page != Page && !CanLeaveForm(() => Navigate(page))) return;
         _fieldErrors.Clear();
         if (SigningIn) CancelSignIn();
+        if (page != SettingsPage.Usage) UsageAccountKey = null;
         Page = page; Error = null; Notice = null; ConfirmRemove = false;
         if (page == SettingsPage.About) StoreUpdates?.Check();
+        Notify();
+    }
+    internal void ViewUsage(string key)
+    {
+        if (!CanLeaveForm(() => ViewUsage(key))) return;
+        if (!Dashboard.Accounts.Any(a => a.Key == key))
+        {
+            SetError("That account is no longer configured.");
+            return;
+        }
+        Navigate(SettingsPage.Usage);
+        SelectedAccount = null;
+        ShowAddForm = false;
+        UsageAccountKey = key;
+        UsageNavigationRevision++;
+        OpenSettings?.Invoke(SettingsPage.Usage);
         Notify();
     }
     internal void AddAccount()
@@ -389,6 +408,8 @@ internal sealed class AppSession : IDisposable
         Run(() => Controller.SaveAccountAsync(key, name, thresholds, amount, showPeriodEstimate, budget, updateCustomBudget: true),
             () => { _savedAccount = saved; Notice = "Account settings saved."; continuation?.Invoke(); }, saving: true);
     }
+    internal void ConnectConsumption(string key, bool confirm = false) =>
+        Run(() => Controller.ConnectConsumptionAsync(key, confirm));
     private static decimal? ParseAmount(string text) => string.IsNullOrWhiteSpace(text) ? null :
         decimal.Parse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
 

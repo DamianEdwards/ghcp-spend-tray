@@ -21,7 +21,9 @@ internal static partial class Program
         try
         {
             await DomainTests();
+            await EnterpriseConsumptionTests();
             await BudgetTests();
+            await UsageForecastTests();
             await PeriodEstimateTests();
             await TrayTests();
             await HttpTests();
@@ -205,10 +207,10 @@ internal static partial class Program
                             True(icon.IsUnlimited && !icon.IsPartial && !icon.IsOverAllocation);
                             Equal<double?>(null, icon.Percent);
                             Equal("\u221e", icon.NumericText);
-                            Equal("Unlimited allocation", icon.ValueText);
+                            Equal("Unlimited", icon.ValueText);
                             Equal(1, icon.IncludedAccounts);
-                            True(icon.Tooltip.Contains("Unlimited allocation") && !icon.Tooltip.Contains("Unavailable"));
-                            True(icon.Details.Contains("Unlimited allocation") && !icon.Details.Contains("Unavailable"));
+                            True(icon.Tooltip.Contains("Unlimited") && !icon.Tooltip.Contains("Unavailable"));
+                            True(icon.Details.Contains("Unlimited") && !icon.Details.Contains("Unavailable"));
                         }
                         True(result.Accounts.Single().IsUnlimited);
                         Equal(50m, UsageAggregation.Total([state], Now, TimeSpan.FromMinutes(10)).ConsumptionUsd);
@@ -224,7 +226,7 @@ internal static partial class Program
             result = TrayUsage.Create(settings, [unlimited, unlimited2 with { Status = AccountStatus.NetworkError }], Now);
             True(result.RollUp.IsUnlimited && result.RollUp.IsPartial);
             Equal(1, result.RollUp.IncludedAccounts);
-            True(result.RollUp.Tooltip.StartsWith("Partial ! | Unlimited allocation") &&
+            True(result.RollUp.Tooltip.StartsWith("Partial ! | Unlimited") &&
                 result.RollUp.Tooltip.Contains("refresh failed"));
             result = TrayUsage.Create(settings with { TrayMode = TrayDisplayMode.PerAccount }, [first, unlimited2], Now);
             Equal<double?>(50, result.RollUp.Percent);

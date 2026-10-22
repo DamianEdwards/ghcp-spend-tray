@@ -36,7 +36,7 @@ enum SettingsFormTests {
         {"key":"github.com:3","name":"Synthetic","login":"fixture","host":"github.com",
          "details":{"unlimited":true,"isCurrentPeriod":true},"freshness":"Fresh","consumptionUsd":16.5}
         """.utf8))
-        try check(unlimited.allocationSummary == "Unlimited API allocation",
+        try check(unlimited.allocationSummary == "Unlimited API limit",
                   "Unlimited API allocation without a custom target must not look like zero percent.")
         let unavailable = try JSONDecoder().decode(AccountData.self, from: Data("""
         {"key":"github.com:4","name":"Synthetic","login":"fixture","host":"github.com",

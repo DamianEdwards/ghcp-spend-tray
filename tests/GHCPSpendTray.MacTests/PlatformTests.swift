@@ -15,6 +15,7 @@ enum PlatformTests {
     @MainActor private static func run() async throws {
         try ModelTests.run()
         try PeriodEstimateTests.run()
+        try DailyConsumptionTests.run()
         try NavigationInteractionTests.run()
         try SettingsFormTests.run()
         try TrayIconRendererTests.run()
@@ -62,5 +63,6 @@ enum PlatformTests {
             throw error
         }
         print("PASS: macOS formatting, date parsing and synthetic Keychain create/read/update/delete/isolation.")
+        try await UsageTrackTests.run()
     }
 }

@@ -102,6 +102,11 @@ $demo = Join-Path ([IO.Path]::GetTempPath()) ("GHCPSpendTray-demo-" + [guid]::Ne
 .\artifacts\publish\win-x64\GHCPSpendTray.exe --demo --portable --data-dir $demo
 ```
 
+Use `--demo-usage-states` instead of `--demo` for labeled examples of forecast
+risk bands, current-usage warnings, estimates off/unavailable, unlimited usage,
+custom budgets, and daily reports. The showcase uses fixed synthetic forecasts
+for visual review, not live projections.
+
 Use a separate absolute data directory for each verification profile. Exit the
 demo before deleting its directory. Demo data is synthetic; this mode does not
 establish live authentication or provider behavior.
@@ -176,6 +181,11 @@ Inspect retained phase/result files and redacted diagnostics rather than relaxin
 assertions, adding retry-until-green behavior, or changing user preferences.
 Shell acceptance of a notification is not proof that the user saw it.
 
+Responsive-window probes synchronize against the bounds accepted by Windows,
+not the requested outer size: monitor/DPI tracking limits can clamp oversized
+requests. They must still assert both wide and narrow component layouts and
+retain native/XAML sizes and rasterization scale in failure diagnostics.
+
 ## Known limitations and manual acceptance
 
 ### Windows desktop integration
@@ -195,6 +205,8 @@ Check these interactively with synthetic data on the relevant installed build:
   navigation overlays open so Back does not navigate behind them.
 - Keyboard navigation, screen-reader labels, constrained layouts, and notification
   suppression/click routing under real Windows focus and notification policies.
+- Partial-data warning triangles, the separate over-limit badge, and complete
+  first-account chart/details visibility in the work-area-bounded popup.
 
 The tray menu follows the taskbar's `SystemUsesLightTheme` setting, not necessarily
 the app color mode. Its native UxTheme menu APIs are undocumented ordinals; missing
@@ -218,11 +230,22 @@ removal with approved test accounts on the intended hosts.
 change. Enterprise-host behavior and portal comparisons require separate
 acceptance; unsupported or stale consumption must be unavailable, not zero.
 
+Optional enterprise daily reports additionally require the build-configured API,
+supported enterprise membership, Azure CLI authentication, and corporate
+consumption-read authorization. Fixtures do not establish live identity consent,
+cross-enterprise coverage, ingestion completeness, or reporting lag. Missing
+daily reports remain unavailable, not zero. Access tokens and reports stay in
+memory; Azure CLI owns refresh credentials.
+
 Period estimates assume UTC calendar months and a continuing average pace,
 not a verified provider billing contract or an invoice. A supplied reset must
 agree with the next month boundary. Estimates are unavailable before 24 elapsed
-hours and qualified as early before 72 hours. Timestamp, freshness, rollover,
-and unknown/unlimited-allocation fixtures do not establish forecast accuracy.
+hours and qualified as early before 72 hours. Qualified daily data uses up to
+seven recent complete reported UTC days; otherwise the period-to-date pace
+remains the fallback. Estimated/derived bars do not enter that recent average.
+Custom budgets change targets and projected excess, not observed or projected
+usage amounts. Timestamp, freshness, rollover, and unknown/unlimited-allocation
+fixtures do not establish forecast accuracy.
 
 If Windows credential writes fail with error 8 (`ERROR_NOT_ENOUGH_MEMORY`),
 Credential Manager may be at capacity even when RAM and disk are available.

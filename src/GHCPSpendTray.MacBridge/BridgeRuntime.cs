@@ -125,7 +125,8 @@ public sealed class BridgeRuntime : IDisposable
                             !command.Demo && command.ReleaseChannel is "Stable" or "Preview", command.OsVersion)
                         : null;
                     _controller = command.Demo
-                        ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited, telemetry: telemetry) :
+                        ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited, telemetry: telemetry,
+                            usageStates: command.UsageStates) :
                         new ApplicationController(_directory, false, _platform,
                             createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic,
                             telemetry: telemetry);
@@ -139,6 +140,9 @@ public sealed class BridgeRuntime : IDisposable
                     break;
                 case "account.refresh":
                     await Controller.RefreshAccountAsync(Required(command.Key));
+                    break;
+                case "consumption.connect":
+                    await Controller.ConnectConsumptionAsync(Required(command.Key), command.Confirm);
                     break;
                 case "resume":
                     await Controller.ResumeAsync();

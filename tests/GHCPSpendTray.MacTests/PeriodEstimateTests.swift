@@ -12,6 +12,11 @@ enum PeriodEstimateTests {
         try check(estimatedMoney(0) == "~$0", "Observed zero has a numerical estimate.")
         try check(estimatedMoney(Decimal(string: "132.525")) == "~$133", "Forecast display rounds to whole USD.")
         try check(estimatedMoney(Decimal(string: "0.49")) == "<$1", "Small nonzero forecasts do not look like zero.")
+        try check(trackingTargetMoney(1500) == "$1,500" &&
+                  trackingTargetMoney(Decimal(string: "1500.25")) == "$1,500.25" &&
+                  trackingTargetMoney(Decimal(string: "0.01")) == "$0.01" &&
+                  trackingTargetMoney(Decimal(string: "25.5")) == "$25.50",
+                  "Fixed target amounts retain cents and omit redundant decimal zeroes.")
         let preferences = try JSONDecoder().decode(AccountPreferences.self, from: Data("""
         {"displayName":"Synthetic","thresholds":"","showPeriodEstimate":true}
         """.utf8))
@@ -26,10 +31,18 @@ enum PeriodEstimateTests {
             "observedAtUtc": "2026-10-11T00:00:00.0000000+00:00", "isEarly": false
         ])
         let estimate = on.periodEstimate!
+        try check(on.usageCaption == "42.75% used" && on.trackingTargetLabel == "API limit" &&
+                  on.allocationSummary.contains("$100.00"),
+                  "Native short usage captions keep the target information in its separate fixed column.")
+        var budget = on
+        budget.customBudgetUsd = 100
+        try check(budget.trackingTargetLabel == "budget" && budget.targetLabel == "custom budget" &&
+                  budget.allocationSummary.contains("custom budget"),
+                  "Fixed target columns use the short budget label while tooltips and detailed descriptions identify custom budgets.")
         try check(estimate.estimatedConsumptionUsd == Decimal(string: "132.525") &&
                   estimatedMoney(estimate.estimatedConsumptionUsd) == "~$133",
                   "Shared decimal results retain their cents before display rounding.")
-        try check(estimate.summary.contains("About $33 over allocation") && estimate.summary.hasSuffix("UTC"),
+        try check(estimate.summary.contains("About $33 over limit") && estimate.summary.hasSuffix("UTC"),
                   "Projected exceedance and UTC reset are labeled.")
         try check(utcDateText(estimate.resetAtUtc).contains("2026") &&
                   utcTimestampText(estimate.periodStartUtc).hasSuffix("UTC"),
@@ -38,8 +51,42 @@ enum PeriodEstimateTests {
             "estimatedConsumptionUsd": 15, "overAllocationUsd": NSDecimalNumber(string: "0.2"),
             "isEarly": true, "resetAtUtc": "2026-11-01T00:00:00Z"
         ]).periodEstimate!
-        try check(early.summary.contains("Early estimate") && early.summary.contains("Less than $1 over allocation"),
+        try check(early.summary.contains("Early estimate") && early.summary.contains("Less than $1 over limit"),
                   "Early projections and fractional projected exceedances are truthful.")
+        let recent = try account(estimate: [
+            "estimatedConsumptionUsd": 125, "averageDailyConsumptionUsd": 5, "overAllocationUsd": 25,
+            "reportedDayCount": 7, "averageStartDate": "2026-10-04", "averageEndDate": "2026-10-10",
+            "isEarly": false
+        ]).periodEstimate!
+        try check(recent.reportedDayCount == 7 && recent.summary.contains("Latest 7 reported days") &&
+                  recent.method.contains("time remaining") && recent.averageStartDate == "2026-10-04" &&
+                  recent.averageEndDate == "2026-10-10" && estimate.reportedDayCount == 0 &&
+                  estimate.method.contains("Period-to-date"),
+                  "Native forecasts distinguish rolling reported-day averages from the period-to-date fallback.")
+        try check(recent.summary(customBudget: true).contains("About $25 over custom budget") &&
+                  recent.summary.contains("About $25 over limit"),
+                  "Reported-day forecasts label custom-budget comparisons without changing the forecast amount.")
+        for (value, band) in [(94.99, ForecastBand.under), (95.0, .near), (99.99, .near), (100.0, .over), (150.0, .over)] {
+            let fixture = try account(estimate: ["estimatedConsumptionUsd": value, "isEarly": false])
+            try check(fixture.forecast?.band == band && fixture.forecast?.forecastFraction == min(1, value / 100),
+                      "Native forecast track decodes threshold and clamped endpoint.")
+            let narrow = NSHostingView(rootView: AccountRow(account: fixture).frame(width: 260))
+            narrow.setFrameSize(narrow.fittingSize)
+            narrow.layoutSubtreeIfNeeded()
+            try check(narrow.fittingSize.width == 260 && narrow.fittingSize.height.isFinite,
+                      "Projected callouts fit the compact native account width.")
+        }
+        for (used, band) in [(60.0, ForecastBand.under), (95.0, .near), (100.0, .over), (150.0, .over)] {
+            let fixture = try account(estimate: ["estimatedConsumptionUsd": 200, "isEarly": false], used: used)
+            try check(fixture.actualUsage?.band == band && fixture.forecast?.band == .over &&
+                      fixture.actualUsage?.fraction == min(1, used / 100),
+                      "Native current-usage warnings are independent of projected over-target status.")
+            let view = NSHostingView(rootView: AccountRow(account: fixture).frame(width: 260))
+            view.setFrameSize(view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            try check(view.fittingSize.width == 260 && view.fittingSize.height.isFinite,
+                      "Stacked actual and estimated amounts fit a compact native account panel.")
+        }
 
         let off = try account()
         let unavailable = try account(estimate: [
@@ -72,13 +119,26 @@ enum PeriodEstimateTests {
         print("PASS: Mac period-estimate preferences, decimal/UTC display, opt-in and unavailable native account rows.")
     }
 
-    private static func account(estimate: [String: Any]? = nil) throws -> AccountData {
+    static func account(estimate: [String: Any]? = nil, used: Double = 42.75) throws -> AccountData {
         var fields: [String: Any] = [
             "key": "github.com:1", "name": "Synthetic", "login": "fixture-user", "host": "github.com",
             "details": ["unlimited": false, "isCurrentPeriod": true],
-            "freshness": "Fresh", "consumptionUsd": 42.75, "allocationUsd": 100, "percent": 42.75
+            "freshness": "Fresh", "consumptionUsd": used, "allocationUsd": 100, "percent": used,
+            "actualUsage": ["fraction": min(1, used / 100), "percent": used,
+                            "band": used >= 100 ? 2 : used >= 95 ? 1 : 0]
         ]
-        if let estimate { fields["periodEstimate"] = estimate }
+        if let estimate {
+            var value = estimate
+            if value["reportedDayCount"] == nil { value["reportedDayCount"] = 0 }
+            fields["periodEstimate"] = value
+            if let amount = estimate["estimatedConsumptionUsd"] as? NSNumber, amount.doubleValue >= used,
+               estimate["unavailableReason"] == nil {
+                fields["forecast"] = [
+                    "actualFraction": min(1, used / 100), "forecastFraction": min(1, amount.doubleValue / 100),
+                    "percent": amount, "band": amount.doubleValue >= 100 ? 2 : amount.doubleValue >= 95 ? 1 : 0
+                ]
+            }
+        }
         return try JSONDecoder().decode(AccountData.self, from: JSONSerialization.data(withJSONObject: fields))
     }
 }

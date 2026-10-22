@@ -13,7 +13,7 @@ public sealed record TrayIndicator(string? AccountKey, string Name, double? Perc
 {
     public bool IsPartial => IncludedAccounts > 0 && IncludedAccounts < SelectedAccounts;
     public bool IsOverAllocation => Percent > 100;
-    public string ValueText => IsUnlimited ? "Unlimited allocation" :
+    public string ValueText => IsUnlimited ? "Unlimited" :
         Percent is { } value ? FormatPercent(value) : "Unavailable";
     public string NumericText => IsUnlimited ? "\u221e" : Percent switch
     {
@@ -102,7 +102,7 @@ public static class TrayUsage
     }
 
     private static string AccountValue(TrayAccountUsage account) => account.IsUnlimited
-        ? "Unlimited allocation" : account.Exclusion ??
+        ? "Unlimited" : account.Exclusion ??
             TrayIndicator.FormatPercent(account.Percent!.Value) + (account.IsCustomBudget ? " of custom budget" : "");
 
     private static double Percentage(decimal used, decimal allocation)
@@ -138,18 +138,18 @@ public static class TrayUsage
         if (!BillingPeriods.IsCurrent(snapshot, now)) return "outside current period";
         if (now - snapshot.FetchedAtUtc > freshness) return "stale";
         if (account.CustomBudgetUsd is not null || snapshot.Unlimited) return null;
-        if (snapshot.AllocationUsd is null) return "unknown allocation";
-        if (snapshot.AllocationUsd <= 0) return "zero allocation";
+        if (snapshot.AllocationUsd is null) return "unknown limit";
+        if (snapshot.AllocationUsd <= 0) return "zero limit";
         return null;
     }
 
     private static TrayIndicator Indicator(string? key, string name, double? percent, int included,
         int selected, string details, string reasons, string? host = null, bool unlimited = false, bool customBudget = false)
     {
-        string value = unlimited ? "Unlimited allocation" :
+        string value = unlimited ? "Unlimited" :
             percent is { } p ? TrayIndicator.FormatPercent(p) : "Unavailable";
         string qualifier = included > 0 && included < selected ? "Partial ! | " : "";
-        string over = percent > 100 ? customBudget ? " | Over budget" : " | Over allocation" : "";
+        string over = percent > 100 ? customBudget ? " | Over budget" : " | Over limit" : "";
         string counts = $"{included}/{selected} included";
         // Put truth qualifiers before potentially long user-controlled account names.
         string tooltip = $"{qualifier}{value}{over} | {counts}";
