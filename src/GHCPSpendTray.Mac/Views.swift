@@ -296,8 +296,8 @@ struct AccountDiagnosticsView: View {
                 row("Credits used (observed)", decimalText(account.details.creditsUsed).isEmpty ? "Unavailable" : decimalText(account.details.creditsUsed))
                 row("Consumption (observed)", money(account.details.observedConsumptionUsd))
                 row("Allocation (observed)", account.details.unlimited ? "Unlimited" : money(account.details.observedAllocationUsd))
-                if let budget = account.customBudgetUsd { row("Custom tracking budget", money(budget)) }
-                row("Percent (observed)", account.details.observedPercentConsumed.map { "\(decimalText($0))%" } ??
+                if let budget = account.customBudgetUsd { row("Custom tracking budget", budgetMoney(budget)) }
+                row("Percent (observed)", account.details.observedPercentConsumed.map { percentageText($0) } ??
                     (account.details.unlimited ? "Not applicable (unlimited allocation)" : "Unavailable"))
                 row("Current billing period", account.details.isCurrentPeriod ? "Yes" : "No")
                 row("Last fetched", dateText(account.updatedAt))

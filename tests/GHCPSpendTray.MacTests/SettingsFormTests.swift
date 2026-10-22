@@ -20,11 +20,18 @@ enum SettingsFormTests {
         {"total":"Synthetic","status":"Synthetic","tooltip":"Synthetic","isComplete":true,"isLastKnown":false,
          "accounts":[{"key":"github.com:1","name":"Synthetic","login":"fixture","host":"github.com",
           "details":{"unlimited":true,"isCurrentPeriod":true},"freshness":"Fresh","consumptionUsd":16.5,
-          "customBudgetUsd":50,"allocationUsd":50,"percent":33}]}
+          "customBudgetUsd":50,"allocationUsd":50,"percent":33.333333333333333333333333333}]}
         """.utf8))
         let account = model.dashboard!.accounts[0]
-        try check(account.allocationSummary == "33% of $50.00 custom budget",
-                  "Finite custom budgets must label usage even with unlimited API allocation.")
+        try check(account.allocationSummary == "33% of $50 custom budget",
+                  "Custom budget usage rounds repeating percentages and omits zero cents even with unlimited API allocation.")
+        let fractionalBudget = try JSONDecoder().decode(AccountData.self, from: Data("""
+        {"key":"github.com:5","name":"Synthetic","login":"fixture","host":"github.com",
+         "details":{"unlimited":false,"isCurrentPeriod":true},"freshness":"Fresh",
+         "consumptionUsd":26.25,"customBudgetUsd":50.50,"allocationUsd":50.50,"percent":52.5}
+        """.utf8))
+        try check(fractionalBudget.allocationSummary == "53% of $50.50 custom budget",
+                  "Custom budget usage rounds midpoints up and preserves nonzero cents.")
         let unknown = try JSONDecoder().decode(AccountData.self, from: Data("""
         {"key":"github.com:2","name":"Synthetic","login":"fixture","host":"github.com",
          "details":{"unlimited":false,"isCurrentPeriod":true},"freshness":"Fresh",
@@ -42,7 +49,7 @@ enum SettingsFormTests {
         {"key":"github.com:4","name":"Synthetic","login":"fixture","host":"github.com",
          "details":{"unlimited":false,"isCurrentPeriod":false},"freshness":"Stale","customBudgetUsd":50}
         """.utf8))
-        try check(unavailable.allocationSummary.contains("Consumption unavailable"),
+        try check(unavailable.allocationSummary == "$50 custom budget · Consumption unavailable",
                   "Saved budgets do not fabricate unavailable consumption.")
         model.selectAccount(account.key)
         model.loadAccountDraft(account.key)

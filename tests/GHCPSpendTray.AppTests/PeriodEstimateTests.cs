@@ -99,9 +99,15 @@ internal static class PeriodEstimateTests
         Check(session.Error is null && work.CustomBudgetUsd == 50m && work.AllocationUsd == 50m &&
             work.Percent == 33m && work.Details.ObservedAllocationUsd == 100m &&
             work.Details.ObservedPercentConsumed == 16.5m, "Windows Save changes the target, never the observed API values.");
-        Check(UI.UsagePercentage(work) == "33% of $50.00 custom budget" &&
+        Check(UI.UsagePercentage(work) == "33% of $50 custom budget" &&
             UI.EstimateContext(new(OverAllocationUsd: 2m), true) == "About $2 over custom budget",
             "Windows percentage and excess labels identify the budget basis.");
+        Check(UI.UsagePercentage(work with { Percent = 52.5m, CustomBudgetUsd = 50.50m }) ==
+            "53% of $50.50 custom budget" &&
+            UI.UsagePercentage(work with { Percent = 33.333333333333333333333333333m }) ==
+            "33% of $50 custom budget", "Windows rounds displayed percentages and retains nonzero budget cents.");
+        Check(UI.UsagePercentage(work with { CustomBudgetUsd = null }) == "33% of $50.00 allocation",
+            "API allocation money keeps its existing cent precision.");
         Check(session.Dashboard.Tray!.RollUp.Percent == 57d && session.Dashboard.ConsumptionUsd == 42.75m,
             "Budget updates the weighted tray immediately without changing dollar totals.");
         session.EditAccount(account.Key);

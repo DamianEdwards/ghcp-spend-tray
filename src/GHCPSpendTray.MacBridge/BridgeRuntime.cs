@@ -37,7 +37,7 @@ public sealed class BridgeRuntime : IDisposable
                     string text = result.CustomBudgetUsd is not { } budget
                         ? "Enter a positive USD amount with up to two decimal places."
                         : account is { Freshness: "Fresh", ConsumptionUsd: { } used } && account.Details.IsCurrentPeriod
-                            ? FormattableString.Invariant($"Preview: ${used:0.00} consumed = {UsageBudget.Percentage(used, budget):0.##}% of ${budget:0.00} custom budget")
+                            ? FormattableString.Invariant($"Preview: ${used:0.00} consumed = {UsageFormatting.Percentage(UsageBudget.Percentage(used, budget))} of {UsageFormatting.BudgetMoney(budget)} custom budget")
                             : "Preview unavailable until fresh current-period consumption is available.";
                     result = result with { Text = text };
                 }

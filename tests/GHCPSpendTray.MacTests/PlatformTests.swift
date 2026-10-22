@@ -28,6 +28,16 @@ enum PlatformTests {
         }
         try check(money(nil) == "Unavailable", "Missing consumption must not display zero.")
         try check(money(Decimal(string: "26.25")) == "$26.25", "Exact USD display.")
+        try check(money(50) == "$50.00", "Observed USD amounts retain zero cents.")
+        try check(budgetMoney(1500) == "$1,500" &&
+                  budgetMoney(Decimal(string: "1500.50")!) == "$1,500.50" &&
+                  budgetMoney(Decimal(string: "1500.05")!) == "$1,500.05",
+                  "Budget display omits only zero cents and keeps grouping.")
+        for (value, expected) in [("0", "0%"), ("0.49", "0%"), ("0.5", "1%"),
+                                  ("33.333333333333333333333333333", "33%"), ("52.5", "53%"),
+                                  ("99.5", "100%"), ("125.6", "126%"), ("1500.5", "1501%")] {
+            try check(percentageText(Decimal(string: value)!) == expected, "Whole percentage display for \(value).")
+        }
         try check(try parseAmount("12.50") == Decimal(string: "12.5"), "Exact cent parsing.")
         try check(try parseAmount("") == nil, "Empty amount inherits.")
         for value in ["-1", "1.001", "NaN", "1,50", "1e2", "12oops"] {

@@ -284,7 +284,17 @@ internal static partial class Program
                 True(result.Tooltip.Contains(result.ValueText));
             }
             var tiny = TrayUsage.Create(Settings(Account), [State(Account, .001m)], Now).RollUp;
-            Equal("<0.01%", tiny.ValueText);
+            Equal("0%", tiny.ValueText);
+            foreach (var (percent, text) in new (double, string)[]
+                { (0, "0%"), (.49, "0%"), (.5, "1%"), (33.333333333333, "33%"),
+                  (52.5, "53%"), (99.5, "100%"), (125.6, "126%"), (1500.5, "1501%") })
+            {
+                Equal(text, TrayIndicator.FormatPercent(percent));
+                Equal(text, UsageFormatting.Percentage((decimal)percent));
+            }
+            Equal("$1,500", UsageFormatting.BudgetMoney(1500.00m));
+            Equal("$1,500.50", UsageFormatting.BudgetMoney(1500.50m));
+            Equal("$1,500.05", UsageFormatting.BudgetMoney(1500.05m));
             var huge = State(Account, decimal.MaxValue, decimal.MaxValue);
             var huge2 = State(second, decimal.MaxValue, decimal.MaxValue);
             Equal<double?>(100, TrayUsage.Create(settings, [huge, huge2], Now).RollUp.Percent);

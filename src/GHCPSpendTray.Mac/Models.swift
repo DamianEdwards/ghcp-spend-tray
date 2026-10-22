@@ -59,9 +59,10 @@ struct AccountData: Decodable, Identifiable {
     var targetLabel: String { customBudgetUsd == nil ? "API allocation" : "custom budget" }
     var allocationSummary: String {
         if let percent {
-            return "\(decimalText(percent))% of \(money(customBudgetUsd ?? allocationUsd)) \(targetLabel)"
+            let target = customBudgetUsd.map { budgetMoney($0) } ?? money(allocationUsd)
+            return "\(percentageText(percent)) of \(target) \(targetLabel)"
         }
-        if let customBudgetUsd { return "\(money(customBudgetUsd)) custom budget · Consumption unavailable" }
+        if let customBudgetUsd { return "\(budgetMoney(customBudgetUsd)) custom budget · Consumption unavailable" }
         return details.unlimited ? "Unlimited API allocation" : "API allocation unavailable"
     }
 }
@@ -274,6 +275,20 @@ func money(_ value: Decimal?) -> String {
     format.locale = Locale(identifier: "en_US")
     format.numberStyle = .currency
     return format.string(from: value as NSDecimalNumber) ?? "\(value) USD"
+}
+
+func percentageText(_ value: Decimal) -> String {
+    var input = value
+    var rounded = Decimal()
+    NSDecimalRound(&rounded, &input, 0, .plain)
+    return "\(decimalText(rounded))%"
+}
+
+func budgetMoney(_ value: Decimal) -> String {
+    var input = value
+    var rounded = Decimal()
+    NSDecimalRound(&rounded, &input, 0, .plain)
+    return value == rounded ? wholeMoney(value) : money(value)
 }
 
 func wholeMoney(_ value: Decimal) -> String {

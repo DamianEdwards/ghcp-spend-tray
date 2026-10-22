@@ -39,8 +39,16 @@ internal static class BudgetBridgeTests
             Form = new() { Page = "account", InheritIncrement = true, UseCustomBudget = true, CustomBudget = "50.00" }
         });
         Check(validation.Error is null && validation.Text == (unlimited
-            ? "Preview: $26.25 consumed = 52.5% of $50.00 custom budget"
-            : "Preview: $16.50 consumed = 33% of $50.00 custom budget"), "Draft preview uses shared budget arithmetic.");
+            ? "Preview: $26.25 consumed = 53% of $50 custom budget"
+            : "Preview: $16.50 consumed = 33% of $50 custom budget"), "Draft preview rounds percentages and omits zero budget cents.");
+        var fractionalBudget = bridge.Send(new()
+        {
+            Method = "form.validate", Key = key,
+            Form = new() { Page = "account", InheritIncrement = true, UseCustomBudget = true, CustomBudget = "50.50" }
+        });
+        Check(fractionalBudget.Text == (unlimited
+            ? "Preview: $26.25 consumed = 52% of $50.50 custom budget"
+            : "Preview: $16.50 consumed = 33% of $50.50 custom budget"), "Draft preview retains nonzero budget cents.");
         Check(dashboard.Accounts[^1].CustomBudgetUsd == 50m, "Validation/preview does not mutate settings.");
         foreach (var (id, json) in new[]
         {
