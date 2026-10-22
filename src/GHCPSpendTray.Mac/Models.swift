@@ -54,17 +54,75 @@ struct AccountData: Decodable, Identifiable {
     let updatedAt: String?
     let avatarUrl: String?
     let periodEstimate: PeriodEstimateData?
+    let enterpriseConsumption: EnterpriseConsumptionData?
+    let forecast: UsageForecastData?
+    let actualUsage: UsagePositionData?
     var customBudgetUsd: Decimal? = nil
 
-    var targetLabel: String { customBudgetUsd == nil ? "API allocation" : "custom budget" }
+    var targetLabel: String { customBudgetUsd == nil ? "API limit" : "custom budget" }
+    var trackingTargetLabel: String { customBudgetUsd == nil ? "API limit" : "budget" }
+    var usageCaption: String {
+        if actualUsage != nil, let percent { return "\(percentageText(percent)) used" }
+        return allocationSummary
+    }
     var allocationSummary: String {
         if let percent {
-            let target = customBudgetUsd.map { budgetMoney($0) } ?? money(allocationUsd)
+            let target = customBudgetUsd.map { trackingTargetMoney($0) } ?? money(allocationUsd)
             return "\(percentageText(percent)) of \(target) \(targetLabel)"
         }
-        if let customBudgetUsd { return "\(budgetMoney(customBudgetUsd)) custom budget · Consumption unavailable" }
-        return details.unlimited ? "Unlimited API allocation" : "API allocation unavailable"
+
+        if let customBudgetUsd { return "\(trackingTargetMoney(customBudgetUsd)) custom budget · Consumption unavailable" }
+        return details.unlimited ? "Unlimited API limit" : "API limit unavailable"
     }
+}
+
+struct UsageForecastData: Decodable {
+    let actualFraction: Double
+    let forecastFraction: Double
+    let percent: Decimal
+    let band: ForecastBand
+}
+
+struct UsagePositionData: Decodable {
+    let fraction: Double
+    let percent: Decimal
+    let band: ForecastBand
+}
+
+enum ForecastBand: Int, Decodable {
+    case under, near, over
+}
+
+struct EnterpriseConsumptionData: Decodable {
+    let eligible: Bool
+    let message: String
+    let pendingIdentity: CorporateIdentityData?
+    let connected: Bool
+    let bars: [DailySpendData]?
+    let chartMessage: String?
+    let state: EnterpriseSetupState
+    let connectedUsername: String?
+    let axisTicks: [Decimal]?
+    let isLoading: Bool
+}
+enum EnterpriseSetupState: Int, Decodable {
+    case ready, cliMissing, signInRequired, confirmIdentity, connected, error
+}
+struct CorporateIdentityData: Decodable {
+    let alias: String
+    let tenantId: String
+    let objectId: String
+    let username: String?
+}
+struct DailySpendData: Decodable, Identifiable {
+    var id: String { date }
+    let date: String
+    let amountUsd: Decimal
+    let estimated: Bool
+    let derived: Bool
+
+    var kind: String { estimated ? "Estimated" : derived ? "Today - from current usage" : "Reported" }
+    var tooltip: String { "\(dailyDateText(date)): \(money(amountUsd)) USD - \(kind)" }
 }
 
 struct PeriodEstimateData: Decodable {
@@ -76,6 +134,15 @@ struct PeriodEstimateData: Decodable {
     let observedAtUtc: String?
     let isEarly: Bool
     let unavailableReason: String?
+    let averageStartDate: String?
+    let averageEndDate: String?
+    let reportedDayCount: Int
+
+    var method: String {
+        reportedDayCount > 0
+            ? "Current usage plus the average of the latest \(reportedDayCount) complete reported UTC days multiplied by the time remaining until reset. Excludes today's partial usage and estimated bars. Reports may lag by up to 3 days; not an invoice."
+            : "Period-to-date usage divided by exact elapsed UTC time, scaled to the whole UTC calendar month. Uses the source observation time, or fetch time when absent; not an invoice."
+    }
 
     var summary: String {
         summary(customBudget: false)
@@ -84,8 +151,9 @@ struct PeriodEstimateData: Decodable {
     func summary(customBudget: Bool) -> String {
         var parts: [String] = []
         if isEarly { parts.append("Early estimate") }
+        if reportedDayCount > 0 { parts.append("Latest \(reportedDayCount) reported days") }
         if let over = overAllocationUsd, over > 0 {
-            let target = customBudget ? "custom budget" : "allocation"
+            let target = customBudget ? "custom budget" : "limit"
             parts.append(over < 1 ? "Less than $1 over \(target)" : "About \(wholeMoney(over)) over \(target)")
         }
         if let reset = resetAtUtc { parts.append("Resets \(utcDateText(reset))") }
@@ -284,11 +352,17 @@ func percentageText(_ value: Decimal) -> String {
     return "\(decimalText(rounded))%"
 }
 
-func budgetMoney(_ value: Decimal) -> String {
+func trackingTargetMoney(_ value: Decimal?) -> String {
+    guard let value else { return "Unavailable" }
     var input = value
-    var rounded = Decimal()
-    NSDecimalRound(&rounded, &input, 0, .plain)
-    return value == rounded ? wholeMoney(value) : money(value)
+    var whole = Decimal()
+    NSDecimalRound(&whole, &input, 0, .down)
+    let format = NumberFormatter()
+    format.locale = Locale(identifier: "en_US")
+    format.numberStyle = .currency
+    format.minimumFractionDigits = value == whole ? 0 : 2
+    format.maximumFractionDigits = 2
+    return format.string(from: value as NSDecimalNumber) ?? "\(value) USD"
 }
 
 func wholeMoney(_ value: Decimal) -> String {
@@ -335,6 +409,20 @@ func dateValue(_ text: String?) -> Date? {
 
 func dateText(_ text: String?) -> String {
     dateValue(text)?.formatted(date: .abbreviated, time: .shortened) ?? "Unavailable"
+}
+
+func dailyDateText(_ text: String, month: Bool = false) -> String {
+    let parser = DateFormatter()
+    parser.locale = Locale(identifier: "en_US_POSIX")
+    parser.timeZone = TimeZone(secondsFromGMT: 0)
+    parser.dateFormat = "yyyy-MM-dd"
+    guard let date = parser.date(from: text) else { return text }
+    let formatter = DateFormatter()
+    formatter.locale = .current
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    if month { formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy") }
+    else { formatter.dateStyle = .short }
+    return formatter.string(from: date)
 }
 
 func utcDateText(_ text: String?) -> String {

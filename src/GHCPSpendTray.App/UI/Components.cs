@@ -4,9 +4,11 @@ using GHCPSpendTray.App.Native;
 using GHCPSpendTray.Core;
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
+using Microsoft.UI.Reactor.Input;
 using Microsoft.UI.Reactor.Layout;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using static Microsoft.UI.Reactor.Factories;
 
 namespace GHCPSpendTray.App.UI;
@@ -21,7 +23,10 @@ internal static class UI
     internal static string UsagePercentage(AccountView account) =>
         $"{(account.Percent is { } percent ? UsageFormatting.Percentage(percent) : "Unavailable")} of " +
         $"{(account.CustomBudgetUsd is { } budget ? UsageFormatting.BudgetMoney(budget) : Money(account.AllocationUsd))} " +
-        (account.CustomBudgetUsd is not null ? "custom budget" : "allocation");
+        (account.CustomBudgetUsd is not null ? "custom budget" : "limit");
+    internal static string TrackingTargetAmount(decimal amount) => UsageFormatting.BudgetMoney(amount);
+    internal static string UsageCaption(AccountView account) => account.ActualUsage is not null
+        ? $"{(account.Percent is { } percent ? UsageFormatting.Percentage(percent) : "Unavailable")} used" : UsagePercentage(account);
     internal static TextBlockElement Copy(string text) => TextBlock(text).TextWrapping().Foreground(Theme.SecondaryText);
     internal static Element SettingsInput(AppSession session, SettingsField field, string value, string label,
         string? placeholder = null, double? width = null, bool enabled = true)
@@ -75,7 +80,8 @@ internal static class UI
         TextBlock("Microsoft Store updates").SemiBold(),
         Copy(updates.Status).AutomationId("StoreUpdateStatus"),
         updates.Error is { } error ? InfoBar("Unable to complete update", error).Error().IsClosable(false) : null,
-        updates.Updating ? Progress(updates.Progress).AutomationName("App update progress") : null,
+        updates.Updating ? Progress(updates.Progress).AutomationName("App update progress")
+            .AutomationId("StoreUpdateProgress") : null,
         updates.HasUpdate
             ? VStack(8,
                 Copy("Windows will ask permission to download and install. The app may close and restart."),
@@ -133,7 +139,7 @@ internal static class UI
     internal static string Timestamp(DateTimeOffset? value, string missing = "Not available") =>
         value?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? missing;
     internal const string EstimateDescription =
-        "Estimate consumption at the end of the UTC calendar month using your average pace so far. Actual consumption may differ.";
+        "Estimate usage at reset using up to 7 recent reported days when available, otherwise the period-to-date pace. Actual usage may differ.";
     internal const string EstimateMethod =
         "Period-to-date consumption divided by exact elapsed UTC time, scaled to the whole UTC calendar month. " +
         "Uses the source observation time, or fetch time when not supplied, not when this account was connected. " +
@@ -146,43 +152,63 @@ internal static class UI
         value?.ToUniversalTime().ToString("MMM d, yyyy HH:mm:ss 'UTC'", CultureInfo.CurrentCulture) ?? "Not available";
     internal static string EstimateAmount(PeriodEstimate estimate) =>
         estimate.EstimatedConsumptionUsd is { } amount ? ApproximateMoney(amount) : "Unavailable";
+    internal static string EstimateMethodFor(PeriodEstimate estimate) => estimate.ReportedDayCount > 0
+        ? "Current period usage plus the average of the latest " + estimate.ReportedDayCount +
+            " complete reported UTC days multiplied by the exact time remaining until reset. " +
+            "Excludes today's partial usage and estimated bars. Reports may lag by up to 3 days. Not an invoice."
+        : EstimateMethod;
     internal static string EstimateContext(PeriodEstimate estimate, bool customBudget = false)
     {
         if (estimate.UnavailableReason is { } reason) return reason;
         var parts = new List<string>();
         if (estimate.IsEarly) parts.Add("Early estimate");
+        if (estimate.ReportedDayCount > 0) parts.Add($"Latest {estimate.ReportedDayCount} reported days");
         if (estimate.OverAllocationUsd is > 0 and < 1)
-            parts.Add("Less than $1 over " + (customBudget ? "custom budget" : "allocation"));
+            parts.Add("Less than $1 over " + (customBudget ? "custom budget" : "limit"));
         else if (estimate.OverAllocationUsd is { } over && over > 0)
             parts.Add($"About ${decimal.Round(over, 0, MidpointRounding.AwayFromZero).ToString("N0", CultureInfo.GetCultureInfo("en-US"))} over " +
-                (customBudget ? "custom budget" : "allocation"));
+                (customBudget ? "custom budget" : "limit"));
         if (estimate.ResetAtUtc is { } boundary)
             parts.Add($"Resets {boundary.ToUniversalTime().ToString("MMM d, yyyy 'UTC'", CultureInfo.CurrentCulture)}");
         return string.Join(" \u00B7 ", parts);
     }
-    internal static Element? EstimateRow(AccountView account, string idPrefix, bool rightAlignAmount = false) =>
+    internal static Element? EstimateRow(AccountView account, string idPrefix, bool rightAlignAmount = false, bool showAmount = true) =>
         account.PeriodEstimate is { } estimate
             ? VStack(3,
-                Grid([rightAlignAmount ? GridSize.Star() : GridSize.Auto, GridSize.Auto], [GridSize.Auto],
+                showAmount ? Grid([rightAlignAmount ? GridSize.Star() : GridSize.Auto, GridSize.Auto], [GridSize.Auto],
                     Copy("Estimated at reset").FontSize(12).Grid(column: 0).Margin(0, 0, 12, 0)
                         .AutomationId(idPrefix + "PeriodEstimateLabel"),
                     Copy(EstimateAmount(estimate)).FontSize(12).Grid(column: 1).HAlign(HorizontalAlignment.Right)
-                        .AutomationId(idPrefix + "PeriodEstimateAmount").LabeledBy(idPrefix + "PeriodEstimateLabel")),
+                        .AutomationId(idPrefix + "PeriodEstimateAmount").LabeledBy(idPrefix + "PeriodEstimateLabel")) : null,
                 Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
                     estimate.OverAllocationUsd is > 0
                         ? Icon(FontIcon("\uE7BA", "Segoe Fluent Icons", 12))
                             .AutomationName(account.CustomBudgetUsd is not null
-                                ? "Projected over custom budget, not observed usage" : "Projected over allocation, not observed usage")
+                                ? "Projected over custom budget, not observed usage" : "Projected over limit, not observed usage")
                             .AutomationId(idPrefix + "PeriodEstimateWarning").Grid(column: 0).Margin(0, 0, 6, 0) : null,
                     Copy(EstimateContext(estimate, account.CustomBudgetUsd is not null)).FontSize(12)
-                        .Foreground(estimate.OverAllocationUsd is > 0
-                            ? Theme.Ref("SystemFillColorCautionBrush") : Theme.SecondaryText)
+                        .Foreground(Theme.SecondaryText)
                         .AutomationId(idPrefix + "PeriodEstimateContext").Grid(column: 1))
-            ).ToolTip(EstimateDescription + " " + EstimateMethod).AutomationId(idPrefix + "PeriodEstimate")
+            ).ToolTip(EstimateDescription + " " + EstimateMethodFor(estimate)).AutomationId(idPrefix + "PeriodEstimate")
             : null;
+
+    internal static Element UsageMeter(AccountView account, string prefix, bool compact = false) => VStack(compact ? 5 : 6,
+        account.ActualUsage is not null
+            ? new ForecastTrackElement().Set(canvas => ForecastTrack.Apply(canvas, account, prefix, compact))
+                .Height(ForecastTrack.Height(account, compact))
+                .HAlign(HorizontalAlignment.Stretch).AutomationId(prefix + "ForecastTrack")
+            : account.Percent is { } percent
+                ? Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UsagePercentage(account))
+                : null,
+        Copy(account.Percent is not null ? UsageCaption(account) :
+            account.Details.Unlimited ? "Unlimited" : "Limit percentage not available").FontSize(compact ? 12 : 14),
+        EstimateRow(account, prefix, rightAlignAmount: compact, showAmount: account.Forecast is null));
     internal static Element? EstimateDetails(AccountView account, string idPrefix = "") => account.PeriodEstimate is { } estimate
         ? VStack(12,
-            DetailRow("Estimate method", EstimateMethod, idPrefix + "PeriodEstimateMethod"),
+            DetailRow("Estimate method", EstimateMethodFor(estimate), idPrefix + "PeriodEstimateMethod"),
+            estimate.AverageStartDate is { } first && estimate.AverageEndDate is { } last
+                ? DetailRow("Averaging window", $"{DailyChartPresentation.DateLabel(first)} - {DailyChartPresentation.DateLabel(last)} (UTC)",
+                    idPrefix + "PeriodEstimateWindow") : null,
             DetailRow("Estimated at reset", EstimateAmount(estimate), idPrefix + "PeriodEstimateDetailAmount"),
             DetailRow("Average per day", estimate.AverageDailyConsumptionUsd is { } daily
                 ? ApproximateMoney(daily) : "Unavailable", idPrefix + "PeriodEstimateDaily"),
@@ -193,6 +219,27 @@ internal static class UI
                 ? DetailRow("Estimate unavailable", reason, idPrefix + "PeriodEstimateUnavailable") : null
         ).AutomationId(idPrefix + "PeriodEstimateDisclosure")
         : null;
+
+    internal static Element? DailyConsumption(AccountView account, bool compact = false)
+    {
+        if (account.EnterpriseConsumption is not { } view) return null;
+        if (view.Bars is not { Length: > 0 })
+            return compact || !view.Connected ? null : VStack(8,
+                TextBlock("Daily usage").FontSize(16).SemiBold(),
+                Copy(view.IsLoading ? "Connected. Loading daily usage..." : view.ChartMessage ?? view.Message))
+                .AutomationId(account.Key + "_DailyConsumptionStatus");
+        var bars = view.Bars!;
+        string month = DateOnly.ParseExact(bars[0].Date, "yyyy-MM-dd", CultureInfo.InvariantCulture)
+            .ToString("Y", CultureInfo.CurrentCulture);
+        return VStack(compact ? 4 : 8,
+            TextBlock(compact ? $"Daily usage - {month}" : $"Daily usage - {month} (UTC)")
+                .FontSize(compact ? 12 : 16).SemiBold(),
+            new DailyChartElement().Set(canvas => DailyChart.Apply(canvas, bars, compact))
+                .Height(compact ? 96 : 200).HAlign(HorizontalAlignment.Stretch)
+                .AutomationId(account.Key + (compact ? "_CompactDailyPlot" : "_DailyPlot")),
+            !compact && !bars.Any(b => b.Derived) && view.ChartMessage is { } message ? Copy(message).FontSize(12) : null)
+            .AutomationId(account.Key + (compact ? "_CompactDailyConsumption" : "_DailyConsumption"));
+    }
 }
 
 internal abstract class SessionComponent(AppSession session) : Component
@@ -234,15 +281,19 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                 UI.Copy("Your Copilot consumption, one glance away. Connect an account to start tracking.")
                     .TextAlignment(TextAlignment.Center)).Padding(8, 36);
         else
-            body = VStack(18,
-                VStack(3,
-                    UI.Copy("This month's consumption"),
-                    TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(46).SemiBold().AutomationId("TotalConsumption"),
-                    UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
-                        model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable")
-                ),
+            body = VStack(12,
+                model.Accounts.Count > 1 ? Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                    VStack(3,
+                        UI.Copy("This month's usage"),
+                        UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
+                            model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable")
+                            .FontSize(12)
+                    ).Grid(column: 0).VAlign(VerticalAlignment.Center).Margin(0, 0, 12, 0),
+                    TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(28).SemiBold().AutomationId("TotalConsumption")
+                        .Grid(column: 1).VAlign(VerticalAlignment.Center)
+                ).AutomationId("FlyoutSummary") : null,
                 VStack(10, model.Accounts.Select(AccountCard).ToArray())
-            ).Padding(0, 8);
+            ).Padding(0, 4);
         return Grid([GridSize.Star()], [GridSize.Auto, GridSize.Star(), GridSize.Auto],
             Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Logo(28).Grid(column: 0).Margin(0, 0, 10, 0),
@@ -251,33 +302,31 @@ internal sealed class FlyoutComponent(AppSession session) : SessionComponent(ses
                     .AutomationId("OpenSettings").Grid(column: 2)
             ).Grid(row: 0).Padding(20, 14),
             ScrollView(VStack(12, UI.Feedback(Session, showNotice: false), UI.UpdateNotice(Session), body))
-                .Grid(row: 1).Padding(20, 0),
-            Border(VStack(10,
-                Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
-                    UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12).Grid(column: 0).VAlign(VerticalAlignment.Center),
-                    UI.Glyph("\uE72C", "Refresh consumption", () => Session.Refresh()).Grid(column: 1)
-                        .IsEnabled(Session.Initialized && !Session.Busy)),
-                UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12)
+                .AutomationId("FlyoutBodyScroll").Grid(row: 1).Padding(20, 0),
+            Border(Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
+                VStack(3,
+                    UI.Copy(Session.Busy ? "Refreshing..." : LastUpdated(model)).FontSize(12),
+                    UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12)
+                ).Grid(column: 0).VAlign(VerticalAlignment.Center).Margin(0, 0, 12, 0),
+                UI.Glyph("\uE72C", "Refresh consumption", () => Session.Refresh()).Grid(column: 1)
+                    .IsEnabled(Session.Initialized && !Session.Busy)
             )).Background(Theme.CardBackground).Padding(20, 12).Grid(row: 2)
         ).Background(Theme.SolidBackground).AutomationId("SpendFlyout");
     }
     private Element AccountCard(AccountView account) =>
-        Card(VStack(10,
+        Card(VStack(6,
             Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.AccountPicture(account, 36).Grid(column: 0).Margin(0, 0, 10, 0),
                 VStack(2, TextBlock(account.Name).SemiBold(), UI.Copy(account.Host).FontSize(12)).Grid(column: 1),
-                TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(21).SemiBold()
-                    .VAlign(VerticalAlignment.Center).Grid(column: 2)),
-            account.Percent is { } percent
-                ? VStack(5, Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UI.UsagePercentage(account)),
-                    UI.Copy(UI.UsagePercentage(account)).FontSize(12))
-                : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available").FontSize(12),
-            UI.EstimateRow(account, account.Key + "_Flyout_", rightAlignAmount: true),
+                account.ActualUsage is null ? TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(21).SemiBold()
+                    .VAlign(VerticalAlignment.Center).Grid(column: 2) : null),
+            UI.UsageMeter(account, account.Key + "_Flyout_", compact: true),
+            UI.DailyConsumption(account, compact: true),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                 UI.Copy(account.Freshness).FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 0),
-                Button("Details", () => Session.EditAccount(account.Key)).AutomationName($"Details for {account.Login}")
-                    .Grid(column: 1))
-        )).WithKey(account.Key);
+                Button("Details", () => Session.ViewUsage(account.Key)).AutomationName($"Usage details for {account.Login}")
+                    .AutomationId(account.Key + "_ViewUsage").Grid(column: 1))
+        )).Padding(12).AutomationId(account.Key + "_FlyoutAccount").WithKey(account.Key);
     private static string LastUpdated(DashboardView model)
     {
         var updates = model.Accounts.Where(a => a.UpdatedAt.HasValue).Select(a => a.UpdatedAt!.Value).ToArray();
@@ -290,11 +339,89 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     public override Element Render()
     {
         UseSession();
+        var usageKey = Session.UsageAccountKey;
+        var usageTarget = UseMemo(() => new ElementRef(), usageKey);
+        bool showingUsage = Session.Page == SettingsPage.Usage;
         var owner = UseWindow();
+        UseEffect(() =>
+        {
+            // Loaded can precede ref binding and the ScrollView's committed extent.
+            FrameworkElement? layoutRoot = null;
+            ScrollView? scrolling = null;
+            bool queued = false, finished = false;
+            void StopObserving()
+            {
+                if (layoutRoot is not null) layoutRoot.LayoutUpdated -= LayoutUpdated;
+                if (scrolling is not null)
+                {
+                    scrolling.ViewChanged -= ScrollGeometryChanged;
+                    scrolling.ExtentChanged -= ScrollGeometryChanged;
+                }
+                layoutRoot = null;
+                scrolling = null;
+            }
+            void QueueReveal()
+            {
+                if (queued || finished) return;
+                queued = true;
+                Session.Post(() => { queued = false; Reveal(); });
+            }
+            void LayoutUpdated(object? sender, object args) => QueueReveal();
+            void ScrollGeometryChanged(ScrollView sender, object args) => QueueReveal();
+            void Reveal()
+            {
+                if (finished) return;
+                if (!showingUsage || usageKey is null || Session.Page != SettingsPage.Usage || Session.UsageAccountKey != usageKey)
+                {
+                    finished = true;
+                    StopObserving();
+                    return;
+                }
+                if (layoutRoot is null && owner?.NativeWindow.Content is FrameworkElement root)
+                {
+                    layoutRoot = root;
+                    layoutRoot.LayoutUpdated += LayoutUpdated;
+                }
+                if (usageTarget.Current is not { IsLoaded: true, ActualHeight: > 0 } target) return;
+                ScrollView? scroll = null;
+                for (DependencyObject? parent = VisualTreeHelper.GetParent(target); parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                    if (parent is ScrollView view) { scroll = view; break; }
+                if (scroll is null || scroll.ViewportHeight <= 0) return;
+                if (!ReferenceEquals(scrolling, scroll))
+                {
+                    if (scrolling is not null)
+                    {
+                        scrolling.ViewChanged -= ScrollGeometryChanged;
+                        scrolling.ExtentChanged -= ScrollGeometryChanged;
+                    }
+                    scrolling = scroll;
+                    scrolling.ViewChanged += ScrollGeometryChanged;
+                    scrolling.ExtentChanged += ScrollGeometryChanged;
+                }
+                if (scroll.Content is FrameworkElement content && scroll.ExtentHeight + 1 < content.ActualHeight) return;
+                double top = target.TransformToVisual(scroll).TransformPoint(default).Y;
+                if (top >= -1 && top < scroll.ViewportHeight - 40)
+                {
+                    finished = true;
+                    StopObserving();
+                    return;
+                }
+                target.StartBringIntoView(new BringIntoViewOptions
+                {
+                    AnimationDesired = false, VerticalAlignmentRatio = 0
+                });
+            }
+            QueueReveal();
+            return () =>
+            {
+                finished = true;
+                StopObserving();
+            };
+        }, showingUsage, Session.UsageNavigationRevision);
         nint hwnd = owner is null ? 0 : WinRT.Interop.WindowNative.GetWindowHandle(owner.NativeWindow);
         Element content = Session.Page switch
         {
-            SettingsPage.Usage => Usage(),
+            SettingsPage.Usage => Usage(usageTarget),
             SettingsPage.Accounts => Accounts(hwnd),
             SettingsPage.Notifications => Notifications(),
             SettingsPage.About => About(hwnd),
@@ -356,7 +483,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     ).Padding(30, 14)).Background(Theme.Ref("LayerFillColorDefaultBrush"))
         .BorderBrush(Theme.Ref("DividerStrokeColorDefaultBrush")).BorderThickness(0, 1, 0, 0)
         .AutomationId("SettingsFormActions");
-    private Element Usage()
+    private Element Usage(ElementRef usageTarget)
     {
         var model = Session.Dashboard;
         if (!Session.Initialized)
@@ -375,22 +502,42 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                     .HAlign(HorizontalAlignment.Left)
             ).Padding(0, 16).AutomationId("UsagePage");
         return VStack(18,
-            Card(VStack(10,
-                UI.Copy("This month's consumption"),
-                TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId("UsageTotal"),
-                UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
-                    model.IsLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable"),
-                UI.Copy(model.Status).FontSize(12),
-                UI.Copy((model.Tray ?? TrayPresentation.Unavailable).RollUp.Details)
-                    .AutomationId("TrayUsageDetails"),
-                UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12),
-                Button(Session.Busy ? "Refreshing..." : "Refresh consumption", () => Session.Refresh())
-                    .AutomationName("Refresh consumption").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Left)
-                    .IsEnabled(Session.Initialized && !Session.Busy))),
-            VStack(16, model.Accounts.Select(UsageAccount).ToArray())
+            UsageOverview(model),
+            VStack(16, model.Accounts.Select(account => UsageAccount(account,
+                account.Key == Session.UsageAccountKey ? usageTarget : null).WithKey(account.Key)).ToArray())
         ).AutomationId("UsagePage");
     }
-    private Element UsageAccount(AccountView account) => Card(VStack(12,
+    private Element UsageOverview(DashboardView model) => Card(VStack(8,
+        FlexRow(
+            VStack(4,
+                UI.Copy("This month's usage").FontSize(12),
+                FlexRow(
+                    TextBlock(UI.Money(model.ConsumptionUsd)).FontSize(32).SemiBold().AutomationId("UsageTotal").Flex(shrink: 0),
+                    UI.Copy(model.IsComplete ? $"{model.Accounts.Count} connected account(s)" :
+                        model.IsLastKnown ? "Last-known / partial total" : "Partial total")
+                        .FontSize(12).AutomationId("UsageCoverage").Flex(shrink: 1)) with
+                {
+                    AlignItems = FlexAlign.Center, ColumnGap = 12, RowGap = 4, Wrap = FlexWrap.Wrap
+                }).AutomationId("UsageOverviewAmount").Flex(basis: 260, grow: 1),
+            (FlexRow(
+                UI.Copy(model.Status).FontSize(12).AutomationId("UsageOverviewStatus").Flex(basis: 120, grow: 1),
+                Button(HStack(8,
+                    Icon(FontIcon("\uE72C", "Segoe Fluent Icons", 16)),
+                    TextBlock(Session.Busy ? "Refreshing..." : "Refresh usage")), () => Session.Refresh())
+                    .AutomationName("Refresh usage").AutomationId("RefreshUsage").HAlign(HorizontalAlignment.Right)
+                    .IsEnabled(Session.Initialized && !Session.Busy).Flex(shrink: 0)) with
+            {
+                ColumnGap = 12, AlignItems = FlexAlign.Center
+            }).AutomationId("UsageOverviewActions").Flex(basis: 300, grow: 1)) with
+        {
+            Wrap = FlexWrap.Wrap, ColumnGap = 24, RowGap = 8, AlignItems = FlexAlign.Center
+        },
+        UI.Copy("AI-credit consumption value, not an invoice.").FontSize(12)
+    )).AutomationId("UsageOverview");
+
+    private Element UsageAccount(AccountView account, ElementRef? usageTarget)
+    {
+        var card = Card(VStack(12,
         Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
             UI.AccountPicture(account, 44).Grid(column: 0).Margin(0, 0, 12, 0),
             VStack(2, TextBlock(account.Name).FontSize(20).SemiBold(),
@@ -401,8 +548,11 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.AccountWarning(account) is { Length: > 0 } warning
             ? InfoBar("Account needs attention", warning).Warning().IsClosable(false) : null,
         UsageSummary(account, account.Key + "_"),
+        UI.DailyConsumption(account),
         UsageAdvancedDetails(account)
-    )).WithKey(account.Key);
+        )).AutomationId(account.Key + "_UsagePanel").WithKey(account.Key);
+        return usageTarget is null ? card : card.Ref(usageTarget);
+    }
     private Element UsageAdvancedDetails(AccountView account)
     {
         bool expanded = Session.ExpandedUsageAccounts.Contains(account.Key);
@@ -425,7 +575,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
             UI.SettingsInput(Session, SettingsField.PollMinutes, Session.PollMinutes, "Refresh interval in minutes", width: 180))),
         Card(VStack(12,
             TextBlock("System tray").SemiBold(),
-            UI.Copy("Show fresh usage against each account's custom budget or API allocation, independently of the dollar totals. New accounts are included by default."),
+            UI.Copy("Show fresh usage against each account's custom budget or API limit, independently of the dollar totals. New accounts are included by default."),
             TextBlock("Icon style"),
             ComboBox(["Pie chart", "Percentage number"], (int)Session.TrayStyle,
                 index => { if (index >= 0) { Session.TrayStyle = (TrayIconStyle)index; Session.Notify(); } })
@@ -446,7 +596,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         }, $"{account.Name} ({account.Host})").AutomationName($"Include {account.Login} on {account.Host} in tray")
                         .AutomationId("TrayAccount-" + account.Key).IsEnabled(!Session.Busy).WithKey(account.Key)).ToArray()),
             TrayPreview(),
-            UI.Copy("\u221e means unlimited allocation; ! means a partial roll-up; ? means unavailable. Mixed roll-ups show only finite allocations. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for details.").FontSize(12),
+            UI.Copy("\u221e means unlimited; ! means a partial roll-up; ? means unavailable. Mixed roll-ups show only finite limits. Numbers are rounded; <1 means below 1% and 999+ means above 999%. Hover for details.").FontSize(12),
             UI.Copy("A neutral icon remains when nothing is selected. Windows controls which icons appear in the notification area or its overflow.").FontSize(12)
         )),
         Button("Open data folder", () => Session.OpenLink(Session.Controller.DataDirectory, owner))
@@ -477,7 +627,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                         .Background(background)
                         .Padding(2).VAlign(VerticalAlignment.Center).Margin(0, 0, 10, 0).Grid(column: 0),
                     TextBlock($"{label} - {icon.ValueText}" +
-                        (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over allocation)" : ""))
+                        (icon.IsPartial ? " (partial)" : "") + (icon.IsOverAllocation ? " (over limit)" : ""))
                         .TextWrapping().FontSize(12).VAlign(VerticalAlignment.Center).Grid(column: 1))
                     .WithKey(icon.AccountKey ?? "rollup");
             }).ToArray())
@@ -487,9 +637,9 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.Section("Windows notifications", "Alerts apply independently to each account.",
             ToggleSwitch(Session.Notifications, value => { Session.Notifications = value; Session.Notify(); })
                 .AutomationName("Enable Windows notifications").IsEnabled(!Session.Busy)),
-        Card(VStack(10, TextBlock("Allocation thresholds").SemiBold(),
-            UI.Copy("Notify at these percentages of each account's custom budget or API allocation. Values above 100 are supported."),
-            UI.SettingsInput(Session, SettingsField.Thresholds, Session.Thresholds, "Default allocation thresholds"))),
+        Card(VStack(10, TextBlock("Limit thresholds").SemiBold(),
+            UI.Copy("Notify at these percentages of each account's custom budget or API limit. Values above 100 are supported."),
+            UI.SettingsInput(Session, SettingsField.Thresholds, Session.Thresholds, "Default limit thresholds"))),
         Card(VStack(10, TextBlock("Spending increments").SemiBold(),
             UI.Copy("Notify whenever an account crosses another USD increment this billing period. For example, 50 alerts at $50, $100, $150..."),
             UI.SettingsInput(Session, SettingsField.Increment, Session.Increment, "Default USD spending increment",
@@ -575,15 +725,16 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.AccountWarning(account) is { Length: > 0 } warning
             ? InfoBar("Account needs attention", warning).Warning().IsClosable(false).AutomationId("AccountWarning") : null,
         UsageSummary(account),
+        ConsumptionSetup(account, owner),
         BudgetSettings(account),
         Expander("Advanced details", Session.ShowAdvancedDetails ? AdvancedDetails(account) : VStack(),
             Session.ShowAdvancedDetails, expanded => { Session.ShowAdvancedDetails = expanded; Session.Notify(); })
             .HAlign(HorizontalAlignment.Stretch).AutomationId("AdvancedAccountDetails"),
         Card(VStack(10, TextBlock("Display name").SemiBold(),
             UI.SettingsInput(Session, SettingsField.DisplayName, Session.DisplayName, "Account display name"),
-            TextBlock("Allocation threshold overrides").SemiBold(),
+            TextBlock("Limit threshold overrides").SemiBold(),
             UI.SettingsInput(Session, SettingsField.AccountThresholds, Session.AccountThresholds,
-                "Account allocation threshold overrides", "Use global defaults"),
+                "Account limit threshold overrides", "Use global defaults"),
             CheckBox(Session.InheritIncrement, value => Session.SetInheritIncrement(value),
                 "Use default spending increment").IsEnabled(!Session.Busy),
             UI.SettingsInput(Session, SettingsField.AccountIncrement, Session.AccountIncrement,
@@ -606,7 +757,7 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     private Element BudgetSettings(AccountView account) => Card(VStack(10,
         TextBlock("Usage budget").SemiBold(),
         UI.Copy("Choose what this account's usage percentage is measured against."),
-        ComboBox(["Use API allocation", "Use a custom budget"], Session.UseCustomBudget ? 1 : 0,
+        ComboBox(["Use API limit", "Use a custom budget"], Session.UseCustomBudget ? 1 : 0,
             index => Session.SetCustomBudgetEnabled(index == 1))
             .AutomationName("Usage budget basis").AutomationId("BudgetBasis").IsEnabled(!Session.Busy),
         Session.UseCustomBudget
@@ -615,10 +766,10 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
                 UI.SettingsInput(Session, SettingsField.CustomBudget, Session.CustomBudget, "Custom budget in USD",
                     "e.g. 500", enabled: !Session.Busy),
                 UI.Copy(BudgetPreview(account)).FontSize(12).AutomationId("BudgetPreview"))
-            : UI.Copy("API allocation: " + (account.Details.Unlimited ? "Unlimited" :
+            : UI.Copy("API limit: " + (account.Details.Unlimited ? "Unlimited" :
                 UI.Money(account.Details.ObservedAllocationUsd))).FontSize(12),
         UI.Copy("Applies to this account's current billing period, usage meter, tray percentage, estimates, and percentage alerts. " +
-            "It does not cap spending or change your GitHub allocation. Choose Save account to apply.").FontSize(12)
+            "It does not cap spending or change your GitHub limit. Choose Save account to apply.").FontSize(12)
     )).AutomationId("UsageBudgetSettings");
 
     private string BudgetPreview(AccountView account)
@@ -632,16 +783,38 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
     }
 
     private static Element UsageSummary(AccountView account, string idPrefix = "") => Card(VStack(12,
-        VStack(2, UI.Copy("This month's consumption"),
-            TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold().AutomationId(idPrefix + "AccountConsumption")),
-        account.Percent is { } percent
-            ? VStack(6,
-                Progress((double)Math.Clamp(percent, 0, 100)).AutomationName(UI.UsagePercentage(account)),
-                UI.Copy(UI.UsagePercentage(account)))
-            : UI.Copy(account.Details.Unlimited ? "Unlimited allocation" : "Allocation percentage not available"),
-        UI.EstimateRow(account, idPrefix),
+        VStack(2, UI.Copy("This month's usage"),
+            account.ActualUsage is null ? TextBlock(UI.Money(account.ConsumptionUsd)).FontSize(36).SemiBold()
+                .AutomationId(idPrefix + "AccountConsumption") : null),
+        UI.UsageMeter(account, idPrefix),
         UI.Copy(account.UpdatedAt is { } updated ? $"Updated {updated.ToLocalTime():g}" : "No observations yet").FontSize(12)
     )).AutomationId(idPrefix + "AccountSummary");
+
+    private Element? ConsumptionSetup(AccountView account, nint owner)
+    {
+        if (account.EnterpriseConsumption is not { Eligible: true } view) return null;
+        Element action = view.State switch
+        {
+            EnterpriseSetupState.CliMissing => VStack(8,
+                Button("Install Azure CLI", () => Session.OpenLink("https://aka.ms/installazurecli", owner)).AccentButton(),
+                Button("Check again", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            EnterpriseSetupState.ConfirmIdentity => VStack(8,
+                TextBlock(view.PendingIdentity?.Username ?? view.PendingIdentity?.Alias ?? "").SemiBold(),
+                Button("Use this account", () => Session.ConnectConsumption(account.Key, true)).AccentButton().IsEnabled(!Session.Busy),
+                UI.Copy("Using the wrong account? Run az login in a terminal, then check again.").FontSize(12),
+                Button("Check again", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            EnterpriseSetupState.SignInRequired => VStack(8,
+                UI.Copy(DailyChartPresentation.LoginCommand).IsTextSelectionEnabled(),
+                Button("I've signed in - try again", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            EnterpriseSetupState.Connected => HStack(10,
+                UI.Copy(view.ConnectedUsername ?? "Work account connected"),
+                Button("Change account", () => Session.ConnectConsumption(account.Key)).IsEnabled(!Session.Busy)),
+            _ => Button(view.State == EnterpriseSetupState.Error ? "Try again" : "Connect work account",
+                () => Session.ConnectConsumption(account.Key)).AutomationName("Connect work account").AccentButton().IsEnabled(!Session.Busy)
+        };
+        return Card(VStack(10, TextBlock("Daily usage").SemiBold(), UI.Copy(view.Message), action))
+            .AutomationId("DailyConsumptionSetup");
+    }
 
     private static Element AdvancedDetails(AccountView account, string idPrefix = "") => VStack(12,
         UI.DetailRow("GitHub login", account.Login, idPrefix + "DetailLogin"),
@@ -650,10 +823,10 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         UI.DetailRow("AI credits", account.Details.CreditsUsed?.ToString("#,0.############################",
             CultureInfo.CurrentCulture) ?? "Not available", idPrefix + "DetailCredits"),
         UI.DetailRow("Recorded consumption", UI.Money(account.Details.ObservedConsumptionUsd), idPrefix + "DetailRecordedConsumption"),
-        UI.DetailRow("Recorded allocation", account.Details.Unlimited ? "Unlimited" :
+        UI.DetailRow("Recorded limit", account.Details.Unlimited ? "Unlimited" :
             UI.Money(account.Details.ObservedAllocationUsd), idPrefix + "DetailRecordedAllocation"),
-        UI.DetailRow("Allocation consumed", account.Details.ObservedPercentConsumed is { } percent ?
-            UsageFormatting.Percentage(percent) : account.Details.Unlimited ? "Not applicable (unlimited allocation)" :
+        UI.DetailRow("Limit consumed", account.Details.ObservedPercentConsumed is { } percent ?
+            UsageFormatting.Percentage(percent) : account.Details.Unlimited ? "Not applicable (unlimited)" :
             "Not available", idPrefix + "DetailRecordedPercent"),
         UI.DetailRow("Last fetched", UI.Timestamp(account.UpdatedAt), idPrefix + "DetailFetched"),
         UI.DetailRow("Source timestamp", UI.Timestamp(account.Details.SourceTimestampUtc, "Not supplied"), idPrefix + "DetailSource"),

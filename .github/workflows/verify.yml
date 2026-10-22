@@ -64,6 +64,7 @@ jobs:
         shard: [Application, CorePlatformShared]
     env:
       TEST_SHARD: ${{ matrix.shard }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -105,6 +106,7 @@ jobs:
             artifact: unsigned-store-msix
     env:
       STORE_PACKAGE: ${{ matrix.store }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       PACKAGE_DIRECTORY: ${{ matrix.package_directory }}
       RELEASE_DIRECTORY: ${{ matrix.release_directory }}
     steps:
@@ -200,6 +202,8 @@ jobs:
     if: needs.changes.outputs.macos == 'true'
     runs-on: macos-26
     timeout-minutes: 40
+    env:
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -224,6 +228,8 @@ jobs:
     if: needs.changes.outputs.macos == 'true'
     runs-on: macos-26
     timeout-minutes: 40
+    env:
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:

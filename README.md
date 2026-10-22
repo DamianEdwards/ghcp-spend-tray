@@ -5,7 +5,7 @@
 
 GHCPSpendTray is an independent Windows 11 tray and macOS menu-bar app for
 keeping an eye on GitHub Copilot AI-credit consumption. It shows per-account
-usage and allocation and offers optional spending alerts without a browser tab
+usage and limits and offers optional spending alerts without a browser tab
 or a hosted service.
 
 [Install from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295)
@@ -26,7 +26,11 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 
 ## Features
 
-- A tray flyout with per-account consumption and allocation meters.
+- A tray flyout with per-account consumption and limit meters.
+  With one account, its card is the summary; the aggregate total appears only
+  with multiple accounts, leaving room for the daily chart.
+  **Details** opens that account's panel on Usage; account preferences remain
+  available through **Manage account**.
 - Configurable pie-chart or percentage tray icons: one weighted roll-up by
   default, or one icon per selected account.
 - Multiple accounts, including different identities on the same GitHub host.
@@ -37,6 +41,82 @@ It does not require a separate .NET runtime, `gh`, WebView, or backend service.
 - Local history and settings, with OAuth tokens in Windows Credential Manager
   or the macOS login Keychain.
 - Opt-in launch at login on either platform.
+- Optional corporate daily-consumption charts for eligible Microsoft enterprise
+  accounts, using Azure CLI authentication and explicit corporate-identity confirmation.
+
+### Corporate daily consumption
+
+Accounts whose Copilot `enterprise_list` contains `1578` (microsoftopensource) or
+`134482` (microsoftcopilot), or `13213` (Microsoft internal EMU) offer
+**Connect work account** in account management.
+MSFT ESME is also supported: accounts on the exact `msft.ghe.com` host with
+returned enterprise membership map to `proxima:msft.ghe.com` in the daily service,
+without assuming that numeric enterprise IDs are portable between GitHub hosts.
+Install [Azure CLI](https://aka.ms/installazurecli), then run
+`az login --scope "2efaf292-00a0-426c-ba7d-f5d2b214b8fc/.default"` with your corporate
+account. Confirm the displayed corporate identity for each GitHub account.
+The corporate service must also grant that identity consumption-read access.
+
+The app reads the build-configured corporate daily API, requesting
+the UTC calendar month to date with `group-by=day`, `start-date`, and exclusive
+`end-date`. The charts in Usage and the tray/menu-bar popup include only the eligible
+enterprises reported by that GitHub account. Columns use the system accent color
+with a labeled USD scale. Solid bars show reported gross USD consumption; dashed
+bars with translucent fill spread a multi-day unreported remainder evenly through
+the usage observation's UTC day. When today is the only missing day and all prior
+days reconcile, its solid bar is derived from current usage rather than
+labeled an estimate. Tooltips distinguish the source and use regional date
+formatting without changing the UTC day. These values are not invoiced charges.
+Internal missing days, negative remainders, stale observations, and incompatible
+billing periods disable estimates. Other billing profiles and dual-access usage
+are outside the service's coverage.
+
+Azure CLI owns login and refresh credentials. Access tokens and daily responses
+remain in app memory; only the confirmed username, alias, tenant, and object ID are saved
+in account settings. The app reacquires expiring tokens, retries authentication
+once, and refreshes daily reports with a 15-minute minimum interval when usage
+updates arrive. If CLI authentication changes identities, reconfirm in account
+management. The regular GitHub usage totals, notifications, and tray remain
+independent of this optional integration.
+
+Connecting a work account publishes the confirmed connection immediately, while
+daily reports load in the background. Report requests are serialized only within
+each account; a slow account does not block setting up or refreshing another.
+Usage shows a loading message while the first report is fetched and an explicit
+connected-but-no-data message if the service has no available daily reports.
+Unavailable reports are not treated as zero usage or turned into estimated bars.
+
+#### Build-time API configuration
+
+Set `GHCP_CONSUMPTION_API_URL` in the build process's environment to the HTTPS
+cross-enterprise consumption **base route**, without an alias or query string.
+For example, a synthetic configuration is:
+
+```powershell
+$env:GHCP_CONSUMPTION_API_URL = 'https://usage.example.invalid/api/copilot/consumption/crossEnterprise/'
+```
+
+MSBuild embeds this value in the shared Core assembly for both Windows and macOS.
+The app appends the confirmed corporate alias, `/consumption`, and query parameters.
+The value must not contain credentials, a query, fragment, or a non-default port.
+An unset or empty variable disables all corporate-consumption UI and access,
+even for otherwise eligible accounts. The variable is read at build time, not
+from the running app's environment; rebuild after changing it.
+
+For local development, set the variable in your shell profile or user environment
+and start a new build process. GitHub Actions reads the same-named
+`GHCP_CONSUMPTION_API_URL` secret in verification, Windows/macOS release,
+and Store packaging. CodeQL intentionally builds without secrets to keep private
+endpoint configuration out of analysis diagnostics. Use a repository secret for
+all lanes, or an environment secret in `production` / `microsoft-store` for those
+release jobs. Fork PRs and builds without the secret remain functional with this
+feature hidden for real accounts. Demo mode includes only synthetic chart data
+for UI verification. Tests inject synthetic endpoints and never contact the service.
+
+This keeps the URL out of source, not out of the distributed binary. Generated
+assembly metadata, build logs/binlogs, diagnostic artifacts, and binaries may
+contain it; do not publish private build diagnostics. Authentication remains the
+actual access boundary.
 
 ## Install
 
@@ -98,7 +178,7 @@ Background refreshes never open permission prompts or System Settings.
 
 In **General > Menu Bar**, choose a pie or percentage, a single weighted roll-up
 or one icon per selected account, and the accounts to include. The live preview
-uses the shared allocation rules; only **Save** applies it to the menu bar.
+uses the shared limit rules; only **Save** applies it to the menu bar.
 The monochrome template graphics adapt to macOS light/dark menu-bar appearance.
 Per-account icons open account settings. If macOS hides icons on a crowded
 menu bar, reopening GHCPSpendTray brings its settings window forward.
@@ -133,6 +213,19 @@ development build with an isolated data directory:
 
 This starts one synthetic unlimited account, disables authentication and
 notifications, and keeps sample settings in memory.
+
+To review usage-track states together, use `--demo-usage-states` instead:
+
+```powershell
+.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-usage-states --portable --data-dir C:\Temp\ghcp-usage-states-preview
+```
+
+Eight labeled sample accounts show under/near/over-budget forecasts, near/over
+actual usage, an estimate switched off, an unavailable estimate, and unlimited
+allocation. They include custom budgets, API limits, daily charts, and connected
+daily usage without reports. Forecast amounts are fixed synthetic examples for
+visual review, not live projections. Refresh and preference changes remain
+isolated and in memory; the ordinary two-account demo is unchanged.
 
 ## Connect an account
 
@@ -187,6 +280,11 @@ unavailable data rather than treating it as zero. See
 On Windows, left-click the tray icon to toggle the flyout immediately. Open
 **Settings > Usage** with the flyout's gear or the right-click **Settings** action.
 There is no double-click shortcut; rapid clicks remain ordinary selections.
+The popup uses a compact total and footer so the first account's usage, daily
+chart, and **Details** action fit together. With multiple accounts and
+daily data for the first account, it allows up to 640 DIPs of height, bounded by
+the monitor work area, and adapts when daily data arrives. Later accounts remain
+scrollable; smaller work areas can still require scrolling.
 Right-click the icon for **Open**,
 **Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
 current total, per-account consumption and diagnostics, availability status,
@@ -196,7 +294,7 @@ simple **Add account** prompt without empty totals, diagnostics, or refresh cont
 per-account preferences; **General** and **Notifications** configure refresh
 and alerts. **About** shows the running app's version, including preview labels.
 The default refresh interval
-is 10 minutes (configurable from 5 to 1440), and the default allocation alerts
+is 10 minutes (configurable from 5 to 1440), and the default limit alerts
 are 50%, 80%, and 100%.
 
 Open **Settings > Accounts > Manage > Usage budget** (or **Manage account** on macOS) to choose
@@ -207,8 +305,8 @@ saving. Budgets follow the API billing period (or the calendar-month fallback);
 they are tracking targets, not spending caps or changes to your GitHub quota.
 Displayed usage percentages round to whole numbers. Custom budgets omit `.00`
 but retain nonzero cents; observed consumption amounts keep their cents.
-The API allocation remains available in **Advanced details**. Select **Use API
-allocation** and save to remove the override. Accounts without overrides behave
+The API limit remains available in **Advanced details**. Select **Use API
+limit** and save to remove the override. Accounts without overrides behave
 as before. Changing the budget rearms
 percentage alerts for the new target on the next successful refresh, without
 repeating already-notified dollar milestones.
@@ -239,16 +337,19 @@ refresh, Settings, notifications and Exit remain available. If no accounts are
 selected or connected, a neutral access icon remains.
 
 The roll-up percentage is **eligible consumption divided by the same accounts'
-eligible allocation (or custom budget)**, not an average of account percentages. Only valid, fresh,
-current-period observations with known, finite positive allocation qualify.
-Stale, failed, unsupported, unknown/zero-allocation and unlimited accounts are
+eligible limit (or custom budget)**, not an average of account percentages. Only valid, fresh,
+current-period observations with known, finite positive limits qualify.
+Stale, failed, unsupported, unknown/zero-limit and unlimited accounts are
 excluded from both sides unless a custom budget supplies a finite positive
 target. A budget never makes stale or unavailable consumption eligible.
-`!` marks a partial roll-up; `?` means no percentage is
+A warning badge marks a partial roll-up: an amber triangle on Windows, or `!`
+on macOS. Windows High Contrast uses a system-colored triangle instead of amber.
+The warning identifies incomplete account coverage, not a projected budget
+overrun. `?` means no percentage is
 available, not zero. Fresh unlimited accounts show an infinity sign in either
-icon style, with an **Unlimited allocation** tooltip. A roll-up shows infinity
+icon style, with an **Unlimited** tooltip. A roll-up shows infinity
 when its usable accounts are all unlimited; unavailable accounts still cause a
-partial `!` badge. Mixed finite/unlimited roll-ups retain the finite accounts'
+partial warning badge. Mixed finite/unlimited roll-ups retain the finite accounts'
 weighted percentage and identify unlimited accounts in the details. Stale or
 failed unlimited observations remain unavailable, never infinity.
 On macOS, an unavailable pie stays an empty outline with
@@ -263,8 +364,8 @@ unit is shown in the tooltip and preview label instead of a tiny extra glyph.
 Both styles are antialiased at the taskbar's pixel size on a transparent canvas.
 The settings preview places them on a taskbar-colored swatch so they remain
 readable when the app and taskbar themes differ.
-Pies fill to 100%; a `+` on either style marks over-allocation. Tooltips show the
-uncapped percentage rounded to a whole number and label over-allocation.
+Pies fill to 100%; a `+` on either style marks over-limit usage. Tooltips show the
+uncapped percentage rounded to a whole number and label over-limit usage.
 Rounding affects display only, not usage calculations or alert thresholds.
 Eligibility is reevaluated at least every
 minute and on refresh/resume, including billing rollover. Windows controls
@@ -273,26 +374,56 @@ remain unhidden.
 
 In **Settings > Notifications**, you can also set a USD increment (for example,
 `50` for alerts at $50, $100, and so on). An account can inherit that value,
-override it, or disable it. Unknown or unlimited allocations can still use
+override it, or disable it. Unknown limits or unlimited accounts can still use
 dollar alerts, but not percentage alerts. Windows may suppress a notification
 even when the app submits it.
 
 Displayed USD consumption is `credits_used / 100` from GitHub's token-billing
-quota data. It is **not** an invoice, a finance budget, or total spend across all
+usage data. It is **not** an invoice, a finance budget, or total spend across all
 GitHub products. Stale or partial observations are identified; previous billing
-periods are not counted as current spend. GitHub's quota snapshot does not
+periods are not counted as current spend. GitHub's usage snapshot does not
 provide a verified per-day consumption breakdown, so the app does not chart
 daily usage from its locally sampled refreshes.
 
 On either platform, **Settings > Accounts > select an account > Show estimated
-period consumption** enables an optional **Estimated at reset** row in that
+period consumption** enables an optional end-of-period forecast in that
 account's tray flyout/menu-bar popup, Usage summary, and details. It is off by
 default; choose **Save account** on Windows or **Save** on macOS to apply it.
-The whole-dollar amount is right-aligned below observed allocation, with a
-secondary early/reset/projected-excess line. Windows uses a theme-aware caution
-color and warning glyph for projected excess. There is no combined forecast,
-forecast-based alert, or change to the observed allocation meter or tray/menu-bar
-icons.
+For a finite custom budget (or API limit), a dashed segment continues the
+solid actual-usage line to the forecast endpoint. A callout beneath
+the endpoint stacks the approximate whole-dollar amount above a smaller
+**est. total** subtitle, centered on the marker and kept within panel bounds.
+Forecast dashes are three times as long as their gaps. The dashed segment and
+marker use the accent color below 95% of the target, amber at
+95% to below 100%, and red at 100% or above. The track remains fixed at 100%:
+over-target forecasts pin the marker to the right edge and show the full amount
+and projected percentage in the callout. The label stays inside the account
+panel on resize, separate from the actual-usage label.
+The estimated amount uses normal theme text; its slightly larger subtitle
+and projected percentage use secondary theme text rather than the accent or
+risk colors. This keeps small text readable while the line and icons carry
+the status colors.
+
+The exact current amount moves with its solid-line endpoint in a larger neutral
+callout above the line, labeled **used**, rather than being repeated in the
+account header. A warning icon marks actual usage at 95% to below 100% of the
+tracking target; an error icon marks 100% or above. These icons reflect actual
+usage, not the forecast. Current and projected labels are clamped within panel
+bounds; above-target amounts retain their full values while their markers stay
+at 100%. Accounts with no finite target keep their existing amount display.
+
+A fixed column immediately after the line shows the tracking target, with a
+medium-sized amount above a centered **budget** or **API limit** label. Tooltips
+identify user-set targets as **custom budget**. Whole-dollar
+targets omit redundant cents; fractional targets retain two decimal places.
+The percentage caption is simply **% used** rather than repeating that amount.
+The fixed column has its own space: the solid/dashed track is scaled to the
+remaining width, and both moving callouts stay inside that track area.
+
+The early/reset/method context remains below the usage line. Unknown or
+unlimited targets and unavailable forecasts keep the text-only presentation.
+The setting remains opt-in. There is no combined forecast, forecast-based alert,
+or change to actual usage calculations or tray/menu-bar icons.
 
 Accounts rows use the same shaded panels as Usage and show an explicit
 **Manage account** action; clicking anywhere in the card opens that account's
@@ -301,16 +432,29 @@ normal active control colors. On Usage and account details,
 click anywhere across the **Advanced Details** heading to expand or collapse
 the diagnostics, not just the disclosure arrow.
 
-The estimate extrapolates the account's average consumption so far across a
-UTC calendar month, not its recent usage trend. It assumes the same pace
-continues and is not an invoice. A supplied reset must match the next first
+When suitable daily reports are available for the same account and enterprises,
+the estimate uses the latest seven consecutive complete reported UTC days.
+Early in the month it uses fewer complete days if the reporting period contains
+fewer than seven. Today's partial usage and derived/estimated chart bars are
+never used in that average. The forecast is **current period usage + recent
+daily average multiplied by the exact time remaining until reset**; it does not
+apply the recent pace retroactively to usage already incurred.
+
+The averaging window must end within three UTC dates of the current usage
+observation. Missing days in that window, stale reports, incompatible periods,
+incomplete enterprise scope, or daily totals exceeding the current usage cause a
+fallback to the existing period-to-date calculation. Accounts without daily
+reports always use that existing calculation, unchanged. The compact forecast
+identifies recent reported-day estimates; Advanced Details shows their actual
+date range and calculation method. Both approaches assume the selected pace
+continues and are not an invoice. A supplied reset must match the next first
 of the month at midnight UTC; a missing reset uses the calendar-month
 fallback. Estimates remain unavailable for the first 24 hours, are labeled
 early before 72 hours, and show a reason when data is stale, failed, expired,
 or inconsistent with that period. Estimates are rounded to whole USD
 (`<$1` for small nonzero values); actual consumption retains cents.
-Unknown or unlimited allocation still allows a dollar forecast without an
-over-allocation comparison. Advanced Details explains the method and shows
+An unknown limit or unlimited account still allows a dollar forecast without an
+over-limit comparison. Advanced Details explains the method and shows
 the average per day, period boundaries, and observation time. On Windows these
 fields are in the existing **Advanced information** disclosure on Usage and
 **Advanced details** on account settings. Estimate boundaries explicitly use
@@ -409,7 +553,8 @@ only in sample mode, both before and after adding examples. Each click adds
 one account; examples last only for that process and are not saved. Use
 `--demo` instead of `--demo-empty` to start with the existing sample accounts,
 or `--demo-unlimited` for one synthetic account with unlimited allocation and
-an infinity menu-bar indicator.
+an infinity menu-bar indicator. `--demo-usage-states` starts the eight-account
+usage and forecast showcase described above.
 All demo modes require a separate data directory and disable authentication,
 notifications, and launch-at-login changes; they do not access saved accounts
 or credentials.

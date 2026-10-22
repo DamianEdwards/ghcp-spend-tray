@@ -26,10 +26,11 @@ internal static class Program
         bool smoke = packageSmoke || args.Contains("--smoke-test", StringComparer.Ordinal);
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
         bool unlimitedDemo = args.Contains("--demo-unlimited", StringComparer.Ordinal);
-        bool demo = smoke || emptyDemo || unlimitedDemo || args.Contains("--demo", StringComparer.Ordinal);
+        bool usageStatesDemo = args.Contains("--demo-usage-states", StringComparer.Ordinal);
+        bool demo = smoke || emptyDemo || unlimitedDemo || usageStatesDemo || args.Contains("--demo", StringComparer.Ordinal);
         bool verifyTelemetry = args.Contains("--verify-telemetry", StringComparer.Ordinal);
         string[] bootstrapArgs = args.Where(a => a is not "--smoke-test" and not "--package-smoke-test" and
-            not "--demo" and not "--demo-empty" and not "--demo-unlimited" and not "--verify-telemetry").ToArray();
+            not "--demo" and not "--demo-empty" and not "--demo-unlimited" and not "--demo-usage-states" and not "--verify-telemetry").ToArray();
         try
         {
             if (verifyTelemetry && (!demo || smoke || !bootstrapArgs.Contains("--portable", StringComparer.Ordinal)))
@@ -54,7 +55,8 @@ internal static class Program
             var smokeTime = smoke ? new SmokeTimeProvider() : null;
             var smokeUpdates = smoke ? new SmokeStoreUpdates() : null;
             using IApplicationController controller = demo ? new DemoController(runtime.DataDirectory, emptyDemo, smokeTime, unlimitedDemo,
-                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: verifyTelemetry, SyntheticVerification: verifyTelemetry)) :
+                telemetry: new(UI.UI.Version, "demo", TrackedAllowed: verifyTelemetry, SyntheticVerification: verifyTelemetry),
+                usageStates: usageStatesDemo) :
                 new ApplicationController(runtime.DataDirectory, runtime.IsPortable,
                     telemetry: new(UI.UI.Version, PackageContext.InstallationSource));
             int smokeExit = 0;
@@ -68,12 +70,12 @@ internal static class Program
                     shell = new ReactorShell(controller, storeUpdates: !demo, updateService: smokeUpdates);
                     Application.Current.UnhandledException += (_, e) =>
                     {
-                        Diagnostics.Record($"Reactor dispatch failed ({e.Exception.GetType().Name}).");
+                        Diagnostics.RecordFailure("Reactor dispatch failed", e.Exception);
                         if (smoke)
                         {
                             smokeExit = 1;
                             File.WriteAllText(Path.Combine(runtime.DataDirectory, "native-smoke-result.txt"),
-                                $"FAIL: Reactor dispatch: {e.Exception.GetType().Name}\n");
+                                $"FAIL: Reactor dispatch: {e.Exception.GetType().Name}, HRESULT 0x{e.Exception.HResult:X8}\n{e.Exception.StackTrace}\n");
                             ReactorApp.Exit(1);
                         }
                         else shell.Session.SetError("A user-interface operation failed. See the diagnostic log.");
@@ -155,6 +157,75 @@ internal static class Program
             await InvokeButtonAsync(shell, "OpenSettings", flyout: true);
             await WaitForSettingsUI(shell, "usage settings from the gear");
             bool empty = shell.Session.Dashboard.Accounts.Count == 0;
+            if (!empty)
+            {
+                await OnUI(shell, () =>
+                {
+                    string key = shell.Session.Dashboard.Accounts[0].Key;
+                    if (Find(shell.SettingsWindow!, key + "_DailyConsumption") is null ||
+                        Find(shell.Flyout!, key + "_CompactDailyConsumption") is null)
+                        throw new InvalidOperationException("Synthetic daily consumption is missing from Usage or the popup.");
+                    if (shell.Session.Dashboard.Accounts.Count > 1 &&
+                        Find(shell.SettingsWindow!, shell.Session.Dashboard.Accounts[1].Key + "_DailyConsumptionStatus") is null)
+                        throw new InvalidOperationException("Connected daily usage without reports did not explain its missing data.");
+                    if (Find(shell.SettingsWindow!, key + "_DailyPlot") is not Canvas plot ||
+                        !plot.Children.OfType<TextBlock>().Any(t => t.Text == "USD"))
+                        throw new InvalidOperationException("The daily chart has no USD axis.");
+                    var rectangles = plot.Children.OfType<Microsoft.UI.Xaml.Shapes.Rectangle>().ToArray();
+                    var accent = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent);
+                    if (!rectangles.Any(r => r.Fill is SolidColorBrush fill && fill.Color == accent && r.Opacity == 1) ||
+                        !rectangles.Any(r => r.Fill is SolidColorBrush fill && fill.Color == accent && Math.Abs(r.Opacity - 0.2) < 0.0001) ||
+                        !rectangles.Any(r => r.StrokeDashArray is { Count: > 0 }))
+                        throw new InvalidOperationException("The daily chart is missing accent-color columns or dashed translucent estimates.");
+                    foreach (var (window, chartSuffix, plotSuffix) in new[]
+                    {
+                        (shell.SettingsWindow!, "_DailyConsumption", "_DailyPlot"),
+                        (shell.Flyout!, "_CompactDailyConsumption", "_CompactDailyPlot")
+                    })
+                    {
+                        if (Find(window, key + chartSuffix) is not FrameworkElement chart || HasLegend(chart) ||
+                            Find(window, key + plotSuffix) is not Canvas dailyPlot ||
+                            !dailyPlot.Children.OfType<Border>().Any(b => ToolTipService.GetToolTip(b) is string tip &&
+                                tip.EndsWith(" - Reported", StringComparison.Ordinal)) ||
+                            !dailyPlot.Children.OfType<Border>().Any(b => ToolTipService.GetToolTip(b) is string tip &&
+                                tip.EndsWith(" - Estimated", StringComparison.Ordinal)))
+                            throw new InvalidOperationException("Daily charts must omit the legend while retaining reported/estimated bar tooltips.");
+                    }
+
+                    static bool HasLegend(DependencyObject node)
+                    {
+                        if (node is TextBlock { Text: "Solid: reported. Dashed: estimated." or
+                            "Today's amount is from current usage." or "Reported daily usage." }) return true;
+                        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                            if (HasLegend(VisualTreeHelper.GetChild(node, i))) return true;
+                        return false;
+                    }
+                });
+                for (int update = 0; update < 2; update++)
+                {
+                    await OnUI(shell, shell.Session.Notify);
+                    await WaitForSettingsUI(shell, "daily chart after dashboard rerender");
+                    await OnUI(shell, () =>
+                    {
+                        string key = shell.Session.Dashboard.Accounts[0].Key;
+                        foreach (var (window, suffix) in new[]
+                        {
+                            (shell.SettingsWindow!, "_DailyPlot"), (shell.Flyout!, "_CompactDailyPlot")
+                        })
+                        {
+                            if (Find(window, key + suffix) is not Canvas updatedPlot ||
+                                !updatedPlot.Children.OfType<TextBlock>().Any(t => t.Text == "USD") ||
+                                !updatedPlot.Children.OfType<Microsoft.UI.Xaml.Shapes.Rectangle>().Any())
+                                throw new InvalidOperationException("Daily chart drawing was cleared by a dashboard rerender.");
+                        }
+                    });
+                }
+            }
+            if (!empty)
+            {
+                RecordSmokePhase(directory, "Testing first-account popup fit with daily usage and forecast risk states");
+                await SmokeFirstAccountPopupAsync(shell);
+            }
             await OnUI(shell, () =>
             {
                 if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
@@ -196,6 +267,7 @@ internal static class Program
                 }
             });
             await WaitForSettingsUI(shell, "Usage after empty-state navigation");
+            if (!empty) await SmokeUsageOverviewAsync(shell);
             RecordSmokePhase(directory, "Testing Usage disclosures");
             await SmokeUsageDisclosureAsync(shell);
             await SmokePeriodEstimateAsync(shell, time, phase => RecordSmokePhase(directory, phase));
@@ -328,6 +400,8 @@ internal static class Program
                 shell.ShowSettings(SettingsPage.Notifications);
             });
             await WaitForSettingsUI(shell, "reopened Notifications settings");
+            if (!empty) await SmokeUsageDeepLinksAsync(shell);
+            if (empty) await SmokeSingleAccountPopupAsync(shell);
             RecordSmokePhase(directory, "Testing synthetic Store update About controls");
             await SmokeStoreUpdatesAsync(shell, updates);
             await OnUI(shell, () =>
@@ -349,7 +423,8 @@ internal static class Program
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
                     "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
                     "simulated TaskbarCreated recovery and display-change repaint, " +
-                    "synthetic Store latest/update About controls, native update notification opens About, consent cancellation and retry, " +
+                    "synthetic Store latest/update About controls, native update notification opens About, " +
+                    "pending consent, download/install progress, consent cancellation and retry, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -367,13 +442,17 @@ internal static class Program
     {
         internal bool Available { get; set; }
         internal int Installs { get; private set; }
+        internal Action<StoreUpdateProgress>? Progress { get; private set; }
+        internal TaskCompletionSource<StoreInstallResult> Installation { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<bool> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(Available);
         public Task<StoreInstallResult> InstallAsync(nint owner, Action<StoreUpdateProgress> progress,
             CancellationToken cancellationToken)
         {
             if (owner == 0) throw new InvalidOperationException("Synthetic Store request has no owner HWND.");
             Installs++;
-            return Task.FromResult(StoreInstallResult.Canceled);
+            Progress = progress;
+            return Installation.Task;
         }
         public void Restart() => throw new InvalidOperationException("Synthetic canceled update must not restart.");
     }
@@ -413,11 +492,39 @@ internal static class Program
                 throw new InvalidOperationException("Clicking the Store update notification must open About with its Update action.");
         });
         await InvokeButtonAsync(shell, "InstallStoreUpdate");
+        await WaitForSettingsUI(shell, "Store update preparing");
+        await OnUI(shell, () =>
+        {
+            if (!shell.Session.StoreUpdates!.Updating ||
+                Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Preparing update. Windows may close and restart the app..." } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not ProgressBar { Value: 0 } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: false })
+                throw new InvalidOperationException("Pending Store consent must render update preparation with its action disabled.");
+            updates.Progress!(new(.25, false));
+        });
+        await WaitForSettingsUI(shell, "Store update downloading");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Downloading update... 25%" } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not ProgressBar { Value: 25 })
+                throw new InvalidOperationException("Store download progress did not render.");
+            updates.Progress!(new(1, true));
+        });
+        await WaitForSettingsUI(shell, "Store update installing");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Installing update. The app will restart..." } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not ProgressBar { Value: 100 })
+                throw new InvalidOperationException("Store installation progress did not render.");
+            updates.Installation.SetResult(StoreInstallResult.Canceled);
+        });
         await WaitForSettingsUI(shell, "Store consent cancellation");
         await OnUI(shell, () =>
         {
             if (updates.Installs != 1 || shell.Session.StoreUpdates!.Updating ||
                 Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Update canceled. You can try again." } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not null ||
+                shell.Session.Error is not null ||
                 Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
                 throw new InvalidOperationException("Canceled Store consent must leave a retryable Update action.");
             shell.Session.Navigate(SettingsPage.Usage);
@@ -450,6 +557,133 @@ internal static class Program
         internal DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
     }
+    private static async Task SmokeUsageDeepLinksAsync(ReactorShell shell)
+    {
+        var keys = shell.Session.Dashboard.Accounts.Select(a => a.Key).Reverse().ToArray();
+        foreach (string key in keys)
+        {
+            await OnUI(shell, shell.ShowFlyout);
+            await WaitForFlyoutUI(shell, "account Usage link in popup");
+            await InvokeButtonAsync(shell, key + "_ViewUsage", flyout: true);
+            await WaitForSettingsUI(shell, "account Usage destination");
+            await OnUI(shell, () =>
+            {
+                var panel = Find(shell.SettingsWindow!, key + "_UsagePanel") as FrameworkElement;
+                var scroll = Find(shell.SettingsWindow!, "SettingsScroll");
+                RecordSmokePhase(shell.Session.Controller.DataDirectory,
+                    $"Usage destination key={key}, target={shell.Session.UsageAccountKey}, panel={panel?.GetType().Name}, " +
+                    $"scroll={scroll?.GetType().Name}, top={(scroll is UIElement element ? panel?.TransformToVisual(element).TransformPoint(default).Y : null)}, " +
+                    $"offset={(scroll as ScrollView)?.VerticalOffset}, maximum={(scroll as ScrollView)?.ScrollableHeight}, " +
+                    $"viewport={(scroll as ScrollView)?.ViewportHeight}.");
+            });
+            await WaitForUI(shell, "account Usage panel brought into view", () =>
+            {
+                var window = shell.SettingsWindow!;
+                if (shell.Session.Page != SettingsPage.Usage || shell.Session.UsageAccountKey != key ||
+                    shell.Session.SelectedAccount is not null || shell.Session.ShowAddForm ||
+                    Find(window, key + "_UsagePanel") is not FrameworkElement panel ||
+                    Find(window, "SettingsScroll") is not ScrollView scroll)
+                    return false;
+                double top = panel.TransformToVisual(scroll).TransformPoint(default).Y;
+                return top >= -1 && top < scroll.ActualHeight - 40;
+            });
+            await OnUI(shell, () =>
+            {
+                if (Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0)
+                    throw new InvalidOperationException("Account Usage navigation did not dismiss the popup.");
+            });
+        }
+        await OnUI(shell, () => shell.Session.Navigate(SettingsPage.Notifications));
+        await WaitForSettingsUI(shell, "Notifications after popup Usage links");
+    }
+
+    private static async Task SmokeFirstAccountPopupAsync(ReactorShell shell)
+    {
+        var demo = (DemoController)shell.Session.Controller;
+        var account = shell.Session.Dashboard.Accounts[0];
+        var preferences = demo.AccountSettings(account.Key);
+        try
+        {
+            await demo.SaveAccountAsync(account.Key, preferences.DisplayName, preferences.Thresholds,
+                preferences.SpendIncrementUsd, showPeriodEstimate: true);
+            await WaitForUI(shell, "sample forecast for popup fit", () =>
+                shell.Session.Dashboard.Accounts[0].PeriodEstimate?.EstimatedConsumptionUsd is > 0);
+            decimal projected = shell.Session.Dashboard.Accounts[0].PeriodEstimate!.EstimatedConsumptionUsd!.Value;
+            await OnUI(shell, shell.ShowFlyout);
+            await WaitForFlyoutUI(shell, "popup before late daily-data sizing");
+            await OnUI(shell, () =>
+            {
+                var size = shell.Flyout!.AppWindow.Size;
+                shell.Flyout.AppWindow.Resize(new(size.Width, (int)(590 * size.Width / 400d)));
+            });
+            foreach (decimal? fraction in new decimal?[] { null, 0.8m, 0.97m, 1.2m })
+            {
+                await demo.SaveAccountAsync(account.Key, preferences.DisplayName, preferences.Thresholds,
+                    preferences.SpendIncrementUsd, showPeriodEstimate: fraction is not null,
+                    customBudgetUsd: fraction is { } value ? decimal.Round(projected / value, 2) : null,
+                    updateCustomBudget: true);
+                await WaitForFlyoutUI(shell, "first complete account with daily chart");
+                await OnUI(shell, () =>
+                {
+                    var window = shell.Flyout!;
+                    if (Find(window, "FlyoutBodyScroll") is not ScrollView scroll ||
+                        Find(window, account.Key + "_FlyoutAccount") is not FrameworkElement card ||
+                        Find(window, account.Key + "_CompactDailyPlot") is not FrameworkElement plot ||
+                        Find(window, account.Key + "_ViewUsage") is not Button details)
+                        throw new InvalidOperationException("The multi-account popup is missing its daily chart or Details action.");
+                    if (scroll.VerticalOffset > 1 || scroll.ScrollableHeight <= 0)
+                        throw new InvalidOperationException("The multi-account popup must start at the first account and retain scrolling for later accounts.");
+                    foreach (var element in new[] { card, plot, details })
+                    {
+                        double top = element.TransformToVisual(scroll).TransformPoint(default).Y;
+                        if (top < -1 || top + element.ActualHeight > scroll.ViewportHeight + 1)
+                            throw new InvalidOperationException($"First-account popup content is clipped (forecast={fraction}, top={top:F1}, height={element.ActualHeight:F1}, viewport={scroll.ViewportHeight:F1}).");
+                    }
+                    if (plot.ActualHeight < 96 || Find(window, "TotalConsumption") is not TextBlock { FontSize: >= 28 })
+                        throw new InvalidOperationException("The compact popup sacrificed chart height or total readability.");
+                });
+            }
+        }
+        finally
+        {
+            await demo.SaveAccountAsync(account.Key, preferences.DisplayName, preferences.Thresholds,
+                preferences.SpendIncrementUsd, preferences.ShowPeriodEstimate,
+                account.CustomBudgetUsd, updateCustomBudget: true);
+            await OnUI(shell, () => shell.Flyout!.Hide());
+        }
+    }
+
+    private static async Task SmokeSingleAccountPopupAsync(ReactorShell shell)
+    {
+        var demo = (DemoController)shell.Session.Controller;
+        await demo.AddExampleAccountAsync();
+        await WaitForUI(shell, "single synthetic account", () => shell.Session.Dashboard.Accounts.Count == 1);
+        string key = shell.Session.Dashboard.Accounts[0].Key;
+        foreach (bool estimate in new[] { false, true })
+        {
+            await demo.SaveAccountAsync(key, "", "", showPeriodEstimate: estimate);
+            await OnUI(shell, shell.ShowFlyout);
+            await WaitForFlyoutUI(shell, "single account with daily chart and optional estimate");
+            await OnUI(shell, () =>
+            {
+                if (Find(shell.Flyout!, key + "_CompactDailyConsumption") is null)
+                    throw new InvalidOperationException("Single-account popup is missing its daily chart.");
+                if (Find(shell.Flyout!, "TotalConsumption") is not null)
+                    throw new InvalidOperationException("Single-account popup repeats the account total.");
+                var scroll = Find(shell.Flyout!, "FlyoutBodyScroll");
+                double overflow = scroll switch
+                {
+                    ScrollView modern => modern.ScrollableHeight,
+                    ScrollViewer classic => classic.ScrollableHeight,
+                    _ => throw new InvalidOperationException("Popup body scroll control is missing.")
+                };
+                if (overflow > 1)
+                    throw new InvalidOperationException($"Single-account popup requires {overflow:F1} DIPs of vertical scrolling (estimate={estimate}).");
+            });
+        }
+        await OnUI(shell, () => shell.Flyout!.Hide());
+    }
+
     private static async Task SmokeDirtyFormsAsync(ReactorShell shell)
     {
         if (shell.Session.Dashboard.Accounts.Count == 0) return;
@@ -720,6 +954,7 @@ internal static class Program
         {
             var window = shell.SettingsWindow!;
             AssertEstimateRow(window, "", amount);
+            AssertForecastThresholds(window, shell.Session.Dashboard.Accounts[0]);
             if (Find(window, "PeriodEstimateWarning") is null ||
                 Find(window, "PeriodEstimateDisclosure") is not null ||
                 Find(window, "AccountConsumption") is not TextBlock { Text: "$26.25" } ||
@@ -829,8 +1064,227 @@ internal static class Program
                 throw new InvalidOperationException("Estimate disclosure is not keyboard/screen-reader accessible.");
             expand.Expand();
         }
+        static void AssertForecastThresholds(ReactorWindow window, AccountView source)
+        {
+            if (Find(window, "ForecastTrack") is not Canvas track)
+                throw new InvalidOperationException("Enabled finite-target estimate has no forecast track.");
+            double originalWidth = track.Width;
+            try
+            {
+                foreach (double width in new[] { 220d, 620d })
+                {
+                    track.Width = width;
+                    ((FrameworkElement)window.NativeWindow.Content).UpdateLayout();
+                    foreach (decimal projected in new[] { 94.99m, 95m, 99.99m, 100m, 150m })
+                    {
+                        var fixture = source with
+                        {
+                            ConsumptionUsd = 60, Percent = 60, AllocationUsd = 100, CustomBudgetUsd = 100,
+                            PeriodEstimate = new(EstimatedConsumptionUsd: projected)
+                        };
+                        UI.ForecastTrack.Apply(track, fixture, "");
+                        track.UpdateLayout();
+                        AssertEstimateRow(window, "", UI.UI.EstimateAmount(fixture.PeriodEstimate));
+                        var extension = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastExtension")!;
+                        var marker = (Microsoft.UI.Xaml.Shapes.Line)Find(window, "ForecastMarker")!;
+                        var baseline = AssertTrackingTarget(window, "", 100, "budget");
+                        var brush = (SolidColorBrush)extension.Stroke;
+                        var expected = projected >= 100
+                            ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCriticalBrush"]
+                            : projected >= 95 ? (SolidColorBrush)Application.Current.Resources["SystemFillColorCautionBrush"]
+                            : new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent));
+                        if (brush.Color != expected.Color || Math.Abs(extension.X1 - (baseline.X1 + 0.6 * (baseline.X2 - baseline.X1))) > 0.1 ||
+                            Math.Abs(marker.X1 - (baseline.X1 + (double)Math.Min(1, projected / 100) * (baseline.X2 - baseline.X1))) > 0.1)
+                            throw new InvalidOperationException("Forecast threshold color, abutting extension, or clamped marker is incorrect.");
+                    }
+                    foreach (decimal used in new[] { 0m, 60m, 94.99m, 95m, 99.99m, 100m, 110m })
+                    {
+                        var fixture = source with
+                        {
+                            ConsumptionUsd = used, Percent = used, AllocationUsd = 100, CustomBudgetUsd = 100,
+                            PeriodEstimate = new(EstimatedConsumptionUsd: 150)
+                        };
+                        UI.ForecastTrack.Apply(track, fixture, "");
+                        track.UpdateLayout();
+                        AssertActualCallout(window, used, "");
+                        UI.ForecastTrack.Apply(track, fixture with { PeriodEstimate = null }, "");
+                        track.UpdateLayout();
+                        AssertActualCallout(window, used, "");
+                        if (Find(window, "ForecastMarker") is not null || Find(window, "PeriodEstimateAmount") is not null)
+                            throw new InvalidOperationException("Disabling the forecast retained projected native drawing.");
+                    }
+                    foreach (decimal target in new[] { 0.01m, 1500.25m, 10000m, decimal.MaxValue })
+                    {
+                        var fixture = source with
+                        {
+                            ConsumptionUsd = target * 0.6m, Percent = 60, AllocationUsd = target, CustomBudgetUsd = null,
+                            PeriodEstimate = new(EstimatedConsumptionUsd: target * 0.9m)
+                        };
+                        UI.ForecastTrack.Apply(track, fixture, "");
+                        track.UpdateLayout();
+                        AssertTrackingTarget(window, "", target, "API limit");
+                        AssertEstimateRow(window, "", UI.UI.EstimateAmount(fixture.PeriodEstimate));
+                    }
+                }
+            }
+            finally
+            {
+                track.Width = originalWidth;
+                ((FrameworkElement)window.NativeWindow.Content).UpdateLayout();
+                UI.ForecastTrack.Apply(track, source, "");
+                track.UpdateLayout();
+            }
+        }
+
+        static void AssertActualCallout(ReactorWindow window, decimal used, string prefix)
+        {
+            if (Find(window, prefix + "ForecastTrack") is not Canvas track ||
+                Find(window, prefix + "AccountConsumption") is not TextBlock amount || amount.Text != UI.UI.Money(used) ||
+                Find(window, prefix + "ActualUsageCallout") is not FrameworkElement callout ||
+                Find(window, prefix + "ActualUsageMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
+                Find(window, prefix + "ActualUsageLine") is not Microsoft.UI.Xaml.Shapes.Line usageLine ||
+                Find(window, prefix + "UsageBaseline") is not Microsoft.UI.Xaml.Shapes.Line baseline ||
+                amount.FontSize < 21 || AutomationProperties.GetLabeledBy(amount) is not TextBlock { Text: "used" } ||
+                Canvas.GetTop(callout) + callout.ActualHeight > marker.Y1 + 1 ||
+                Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > baseline.X2 + 3)
+                throw new InvalidOperationException("Actual usage callout did not retain its exact large amount above the solid marker.");
+            AssertActualMarker(track, marker, usageLine);
+            AssertTrackingTarget(window, prefix, 100, "budget");
+            double expected = baseline.X1 + (double)Math.Min(1, used / 100) * (baseline.X2 - baseline.X1);
+            if (Math.Abs(marker.X1 - expected) > 0.1)
+                throw new InvalidOperationException("Actual usage marker does not match actual percentage.");
+            var icon = Find(window, prefix + "ActualUsageWarning");
+            if (used < 95 && icon is not null || used >= 95 && icon is not FontIcon)
+                throw new InvalidOperationException("Actual warning icon incorrectly follows the forecast.");
+            if (icon is FontIcon warning)
+            {
+                string expectedGlyph = used >= 100 ? "\uE711" : "\uE7BA";
+                var expectedBrush = (SolidColorBrush)Application.Current.Resources[used >= 100
+                    ? "SystemFillColorCriticalBrush" : "SystemFillColorCautionBrush"];
+                if (warning.Glyph != expectedGlyph || warning.Foreground is not SolidColorBrush brush ||
+                    brush.Color != expectedBrush.Color)
+                    throw new InvalidOperationException("Actual usage warning/error glyph or color is incorrect.");
+            }
+        }
+
+        static void AssertActualMarker(Canvas track, Microsoft.UI.Xaml.Shapes.Line marker, Microsoft.UI.Xaml.Shapes.Line usageLine)
+        {
+            if (marker.Y1 >= usageLine.Y1 - usageLine.StrokeThickness / 2 ||
+                marker.Y2 <= usageLine.Y1 + usageLine.StrokeThickness / 2 ||
+                track.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Any(line =>
+                    line != marker && Canvas.GetZIndex(line) >= Canvas.GetZIndex(marker)))
+                throw new InvalidOperationException("Actual usage marker does not cross above the horizontal strokes at a higher drawing priority.");
+            if (marker.Stroke is not SolidColorBrush markerBrush ||
+                markerBrush.Color != new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Foreground))
+                throw new InvalidOperationException("Actual usage marker lost its theme-aware neutral color.");
+        }
+
+        static Microsoft.UI.Xaml.Shapes.Line AssertTrackingTarget(ReactorWindow window, string prefix,
+            decimal? expectedAmount = null, string? expectedLabel = null)
+        {
+            if (Find(window, prefix + "ForecastTrack") is not Canvas track ||
+                Find(window, prefix + "UsageBaseline") is not Microsoft.UI.Xaml.Shapes.Line baseline ||
+                Find(window, prefix + "TrackingTarget") is not FrameworkElement column ||
+                Find(window, prefix + "TrackingTargetAmount") is not TextBlock amount ||
+                Find(window, prefix + "TrackingTargetLabel") is not TextBlock label ||
+                AutomationProperties.GetLabeledBy(amount) != label || label.Text is not ("budget" or "API limit") ||
+                amount.FontSize < 16 || label.FontSize >= amount.FontSize ||
+                Canvas.GetLeft(column) < baseline.X2 + 10 ||
+                Canvas.GetLeft(column) + column.ActualWidth > track.ActualWidth + 1 ||
+                Canvas.GetTop(column) + column.ActualHeight > track.ActualHeight + 1 ||
+                ToolTipService.GetToolTip(column) is not string tooltip ||
+                !tooltip.EndsWith(label.Text == "budget" ? " custom budget" : " API limit", StringComparison.Ordinal) ||
+                AutomationProperties.GetName(column) != tooltip ||
+                expectedAmount is { } value && amount.Text != UI.UI.TrackingTargetAmount(value) ||
+                expectedLabel is not null && label.Text != expectedLabel)
+                throw new InvalidOperationException("The fixed tracking target is missing, mislabeled, or overlapping the usage track.");
+            var origin = amount.TransformToVisual(track).TransformPoint(default);
+            if (Math.Abs(origin.Y + amount.ActualHeight / 2 - baseline.Y1) > 1)
+                throw new InvalidOperationException("The fixed target amount is not aligned with the horizontal track.");
+            var labelOrigin = label.TransformToVisual(track).TransformPoint(default);
+            if (Math.Abs(origin.X + amount.ActualWidth / 2 - labelOrigin.X - label.ActualWidth / 2) > 1 ||
+                amount.HorizontalAlignment != HorizontalAlignment.Center || label.HorizontalAlignment != HorizontalAlignment.Center)
+                throw new InvalidOperationException("The fixed target label is not centered beneath its amount.");
+            return baseline;
+        }
+
         static void AssertEstimateRow(ReactorWindow window, string prefix, string expected, bool rightAlignAmount = false)
         {
+            if (Find(window, prefix + "ForecastTrack") is Canvas track &&
+                Find(window, prefix + "ForecastExtension") is not null)
+            {
+                if (Find(window, prefix + "ForecastExtension") is not Microsoft.UI.Xaml.Shapes.Line { StrokeDashArray.Count: > 0 } dashed ||
+                    Find(window, prefix + "ForecastMarker") is not Microsoft.UI.Xaml.Shapes.Line marker ||
+                    Find(window, prefix + "UsageBaseline") is not Microsoft.UI.Xaml.Shapes.Line baseline ||
+                    Find(window, prefix + "ForecastCallout") is not FrameworkElement callout ||
+                    Find(window, prefix + "PeriodEstimateAmount") is not TextBlock projectedAmount || projectedAmount.Text != expected ||
+                    Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "est. total" } projectedLabel ||
+                    AutomationProperties.GetLabeledBy(projectedAmount) != projectedLabel ||
+                    ToolTipService.GetToolTip(callout) is null ||
+                    dashed.X1 > dashed.X2 || marker.X1 < 0 || marker.X1 > baseline.X2 + 1 ||
+                    Canvas.GetLeft(callout) < 0 || Canvas.GetLeft(callout) + callout.ActualWidth > baseline.X2 + 3 ||
+                    Canvas.GetTop(callout) < marker.Y2 || Canvas.GetTop(callout) + callout.ActualHeight > track.ActualHeight + 1 ||
+                    dashed.StrokeDashArray.Count != 2 || dashed.StrokeDashArray[0] <= dashed.StrokeDashArray[1])
+                    throw new InvalidOperationException("Forecast track, marker, callout, accessibility, or bounds are invalid.");
+                if (Find(window, prefix + "ActualUsageMarker") is not Microsoft.UI.Xaml.Shapes.Line actualMarker ||
+                    Find(window, prefix + "ActualUsageLine") is not Microsoft.UI.Xaml.Shapes.Line usageLine)
+                    throw new InvalidOperationException("Actual usage marker is missing beside the forecast.");
+                AssertActualMarker(track, actualMarker, usageLine);
+                AssertTrackingTarget(window, prefix);
+                var calloutAmountOrigin = projectedAmount.TransformToVisual(callout).TransformPoint(default);
+                var calloutLabelOrigin = projectedLabel.TransformToVisual(callout).TransformPoint(default);
+                double expectedLeft = Math.Clamp(marker.X1 - callout.ActualWidth / 2, 0,
+                    Math.Max(0, baseline.X2 + 2 - callout.ActualWidth));
+                if (projectedLabel.FontSize >= projectedAmount.FontSize ||
+                    projectedLabel.FontSize < 11 ||
+                    projectedAmount.Foreground is not SolidColorBrush mainText ||
+                    mainText.Color != new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Foreground) ||
+                    projectedLabel.Foreground is not SolidColorBrush secondaryText ||
+                    secondaryText.Color != ((SolidColorBrush)Application.Current.Resources["TextFillColorSecondaryBrush"]).Color ||
+                    projectedAmount.Opacity != 1 || projectedLabel.Opacity != 1 ||
+                    calloutLabelOrigin.Y < calloutAmountOrigin.Y + projectedAmount.ActualHeight - 1 ||
+                    Math.Abs(calloutLabelOrigin.X + projectedLabel.ActualWidth / 2 - (calloutAmountOrigin.X + projectedAmount.ActualWidth / 2)) > 1 ||
+                    Math.Abs(Canvas.GetLeft(callout) - expectedLeft) > 1)
+                    throw new InvalidOperationException("Forecast subtitle is not centered beneath the amount or aligned with the marker.");
+                if (ForecastTextContrast(projectedAmount) < 4.5 || ForecastTextContrast(projectedLabel) < 4.5)
+                    throw new InvalidOperationException("Forecast text does not meet 4.5:1 contrast against its panel.");
+                return;
+            }
+
+            static double ForecastTextContrast(TextBlock text)
+            {
+                var layers = new List<SolidColorBrush>();
+                for (DependencyObject? parent = VisualTreeHelper.GetParent(text); parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                {
+                    Brush? background = parent switch
+                    {
+                        Border border => border.Background,
+                        Panel panel => panel.Background,
+                        Control control => control.Background,
+                        _ => null
+                    };
+                    if (background is SolidColorBrush layer) layers.Add(layer);
+                }
+                var baseColor = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Background);
+                var surface = (R: baseColor.R / 255d, G: baseColor.G / 255d, B: baseColor.B / 255d);
+                foreach (var layer in layers.AsEnumerable().Reverse()) surface = Composite(layer, surface);
+                var ink = Composite((SolidColorBrush)text.Foreground, surface);
+                double first = Luminance(ink), second = Luminance(surface);
+                return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
+
+                static (double R, double G, double B) Composite(SolidColorBrush brush, (double R, double G, double B) background)
+                {
+                    double alpha = brush.Color.A / 255d * brush.Opacity;
+                    return (brush.Color.R / 255d * alpha + background.R * (1 - alpha),
+                        brush.Color.G / 255d * alpha + background.G * (1 - alpha),
+                        brush.Color.B / 255d * alpha + background.B * (1 - alpha));
+                }
+                static double Luminance((double R, double G, double B) color)
+                {
+                    static double Linear(double value) => value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+                    return 0.2126 * Linear(color.R) + 0.7152 * Linear(color.G) + 0.0722 * Linear(color.B);
+                }
+            }
             if (Find(window, prefix + "PeriodEstimate") is not FrameworkElement row ||
                 Find(window, prefix + "PeriodEstimateLabel") is not TextBlock { Text: "Estimated at reset" } label ||
                 Find(window, prefix + "PeriodEstimateAmount") is not TextBlock amount || amount.Text != expected ||
@@ -886,6 +1340,60 @@ internal static class Program
             });
         }
     }
+    private static async Task SmokeUsageOverviewAsync(ReactorShell shell)
+    {
+        var original = default(Windows.Graphics.SizeInt32);
+        await OnUI(shell, () => original = shell.SettingsWindow!.AppWindow.Size);
+        try
+        {
+            foreach (int width in new[] { 1100, 640, 1100 })
+            {
+                double scale = 1;
+                int acceptedWidth = 0;
+                await OnUI(shell, () =>
+                {
+                    var root = (FrameworkElement)shell.SettingsWindow!.NativeWindow.Content;
+                    scale = root.XamlRoot.RasterizationScale;
+                    shell.SettingsWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(width * scale), original.Height));
+                    // Windows can clamp an oversized request to the monitor's maximum tracking width.
+                    acceptedWidth = shell.SettingsWindow.AppWindow.Size.Width;
+                    RecordSmokePhase(shell.Session.Controller.DataDirectory,
+                        $"Requested Usage width {width} DIPs: {SmokeWindowState(shell.SettingsWindow)}");
+                });
+                await WaitForUI(shell, $"compact Usage overview at {width} DIPs", () =>
+                    shell.SettingsWindow!.AppWindow.Size.Width == acceptedWidth &&
+                    LayoutReady(shell.SettingsWindow) &&
+                    Math.Abs(((FrameworkElement)shell.SettingsWindow.NativeWindow.Content).ActualWidth - acceptedWidth / scale) <= 32);
+                await OnUI(shell, () =>
+                {
+                    var window = shell.SettingsWindow!;
+                    var overview = Find(window, "UsageOverview") as FrameworkElement ??
+                        throw new InvalidOperationException("Usage overview is missing.");
+                    var amount = (FrameworkElement)Find(window, "UsageOverviewAmount")!;
+                    var actions = (FrameworkElement)Find(window, "UsageOverviewActions")!;
+                    var amountOrigin = amount.TransformToVisual(overview).TransformPoint(default);
+                    var actionsOrigin = actions.TransformToVisual(overview).TransformPoint(default);
+                    if (overview.ActualHeight > (width > 640 ? 152 : 190))
+                        throw new InvalidOperationException($"Usage overview exceeds its compact height budget at {width} DIPs: {overview.ActualHeight:F1}.");
+                    if (width > 640 && actionsOrigin.X < amountOrigin.X + amount.ActualWidth - 1)
+                        throw new InvalidOperationException("Wide Usage overview is not using horizontal space.");
+                    if (width == 640 && actionsOrigin.Y < amountOrigin.Y + amount.ActualHeight - 1)
+                        throw new InvalidOperationException("Narrow Usage overview did not reflow.");
+                    if (Find(window, "RefreshUsage") is not Button { IsEnabled: true } refresh ||
+                        refresh.TransformToVisual(overview).TransformPoint(default).X + refresh.ActualWidth > overview.ActualWidth + 1)
+                        throw new InvalidOperationException("Responsive Usage overview clipped its refresh action.");
+                    if (Find(window, "TrayUsageDetails") is not null)
+                        throw new InvalidOperationException("Usage overview repeats the per-account breakdown.");
+                });
+            }
+        }
+        finally
+        {
+            await OnUI(shell, () => shell.SettingsWindow!.AppWindow.Resize(original));
+            await WaitForSettingsUI(shell, "restored Usage overview size");
+        }
+    }
+
     private static async Task SmokeUsageDisclosureAsync(ReactorShell shell)
     {
         if (shell.Session.Dashboard.Accounts.Count == 0) return;
@@ -1001,13 +1509,14 @@ internal static class Program
             {
                 await OnUI(shell, () =>
                 {
-                    complete = ready();
                     state = $"page={shell.Session.Page}, initialized={shell.Session.Initialized}, busy={shell.Session.Busy}, " +
                         $"revision={shell.Session.Revision}, settingsRender={shell.SettingsRenderedRevision}, " +
                         $"flyoutRender={shell.FlyoutRenderedRevision}, addForm={shell.Session.ShowAddForm}, " +
                         $"back={shell.Session.CanGoBack}, settings={shell.SettingsWindow is not null}, " +
                         $"flyoutVisible={shell.Flyout is not null && Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0}, " +
-                        $"foreground=0x{Win32.GetForegroundWindow():X}, error={shell.Session.Error ?? "none"}";
+                        $"foreground=0x{Win32.GetForegroundWindow():X}, error={shell.Session.Error ?? "none"}, " +
+                        $"settingsGeometry={SmokeWindowState(shell.SettingsWindow)}";
+                    complete = ready();
                 }).WaitAsync(remaining);
             }
             catch (TimeoutException ex)
@@ -1032,6 +1541,16 @@ internal static class Program
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
                 foreach (string fragment in TextInTree(VisualTreeHelper.GetChild(node, i))) yield return fragment;
         }
+    }
+
+    private static string SmokeWindowState(ReactorWindow? window)
+    {
+        if (window is null) return "none";
+        var size = window.AppWindow.Size;
+        return window.NativeWindow.Content is FrameworkElement root
+            ? $"native={size.Width}x{size.Height}, root={root.ActualWidth:F1}x{root.ActualHeight:F1}, " +
+                $"scale={root.XamlRoot?.RasterizationScale:F2}, loaded={root.IsLoaded}"
+            : $"native={size.Width}x{size.Height}, no root";
     }
 
     private static async Task SmokeTraySettingsAsync(ReactorShell shell)

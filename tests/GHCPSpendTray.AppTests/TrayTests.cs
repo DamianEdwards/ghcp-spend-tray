@@ -8,7 +8,7 @@ internal static class TrayTests
     {
         if (size is < 16 or > 64) throw new ArgumentOutOfRangeException(nameof(size));
         int cellWidth = Math.Max(60, size * 2 + 16), cellHeight = size * 3 + 16;
-        double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50, null, null];
+        double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50, null, null, 105];
         int width = cellWidth * values.Length, height = cellHeight * 4;
         var sheet = new uint[width * height];
         Array.Fill(sheet, 0xFF808080u);
@@ -16,8 +16,8 @@ internal static class TrayTests
             for (int col = 0; col < values.Length; col++)
             {
                 var palette = row < 2 ? new TrayPalette(0xFFF3F3F3, 0xFF161616) : new TrayPalette(0xFF202020, 0xFFF5F5F5);
-                var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col is 7 or 9 ? 2 : 1,
-                    "", "", IsUnlimited: col >= 8);
+                var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col is 7 or 9 or 10 ? 2 : 1,
+                    "", "", IsUnlimited: col is 8 or 9);
                 var pixels = TrayIconRenderer.Pixels(indicator, row % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage, size, palette);
                 for (int y = 0; y < cellHeight; y++)
                     Array.Fill(sheet, palette.Background, (row * cellHeight + y) * width + col * cellWidth, cellWidth);
@@ -147,7 +147,7 @@ internal static class TrayTests
             var missing = TrayIconRenderer.Pixels(Indicator(null), style, 16, palette);
             var zero = TrayIconRenderer.Pixels(Indicator(0), style, 16, palette);
             check(!full.SequenceEqual(partial) && !zero.SequenceEqual(missing),
-                "partial and unavailable have distinct monochrome geometry, not just color");
+                "partial and unavailable have distinct warning geometry, not just color");
             var opaqueWhite = TrayIconRenderer.Pixels(Indicator(50), style, 24, palette);
             var color = new TrayPalette(0xFFB02090, 0xFF19AAE6);
             var tinted = TrayIconRenderer.Pixels(Indicator(50), style, 24, color);
@@ -159,11 +159,62 @@ internal static class TrayTests
             check(tinted.SequenceEqual(TrayIconRenderer.Pixels(Indicator(50), style, 24,
                 color with { Background = 0xFF00FFFF })), "tray artwork never bakes in a taskbar background rectangle");
         }
+        foreach (int size in new[] { 16, 20, 24, 32, 48, 64 })
+            foreach (var style in Enum.GetValues<TrayIconStyle>())
+                foreach (var colors in new[]
+                {
+                    new TrayPalette(0xFFF3F3F3, 0xFF161616),
+                    new TrayPalette(0xFF202020, 0xFFF5F5F5)
+                })
+                    foreach (var indicator in new[]
+                    {
+                        Indicator(50, partial: true), Indicator(105, partial: true),
+                        Indicator(null, partial: true) with { IsUnlimited = true, IncludedAccounts = 1 }
+                    })
+                    {
+                        var pixels = TrayIconRenderer.Pixels(indicator, style, size, colors);
+                        uint At(double x, double y) => pixels[(int)(y * size / 16) * size + (int)(x * size / 16)];
+                        static bool Amber(uint pixel) => pixel >> 24 > 160 &&
+                            (pixel >> 16 & 255) > 180 && (pixel >> 8 & 255) > 110 && (pixel & 255) < 80;
+                        int AmberRow(double y) => Enumerable.Range(0, size).Count(x => Amber(pixels[(int)(y * size / 16) * size + x]));
+                        check(pixels.Any(Amber) && AmberRow(14.5) > AmberRow(9.5),
+                            "partial badges use a filled amber triangle that widens toward its base in both taskbar themes and icon styles");
+                        check((At(11.5, 11.5) >> 24) > 200 && (At(11.5, 11.5) >> 16 & 255) < 128 &&
+                            (At(11.5, 14.3) >> 24) > 200 && (At(11.5, 14.3) >> 16 & 255) < 128 &&
+                            Amber(At(11.5, 13.3)),
+                            "warning triangles retain a dark exclamation stem, separate dot, and clear gap at every tray DPI");
+                        check(pixels[0] == 0 && pixels[size - 1] == 0 && pixels[^size] == 0 && pixels[^1] == 0 &&
+                            pixels.All(p => (p >> 16 & 255) <= p >> 24 && (p >> 8 & 255) <= p >> 24 && (p & 255) <= p >> 24),
+                            "colored warning artwork keeps transparent corners and premultiplied alpha without dark fringes");
+                        check(pixels.SequenceEqual(TrayIconRenderer.Pixels(indicator, style, size,
+                            colors with { Background = 0xFF00FFFF })),
+                            "warning isolation stays transparent instead of baking a taskbar background into the icon");
+                        var contrastColors = new TrayPalette(0xFF000000, 0xFF19AAE6, Warning: null);
+                        var contrast = TrayIconRenderer.Pixels(indicator, style, size, contrastColors);
+                        check(!contrast.Any(Amber) && contrast.All(p =>
+                            Math.Abs((long)(p >> 16 & 255) - (0x19 * (p >> 24) + 127) / 255) <= 1 &&
+                            Math.Abs((long)(p >> 8 & 255) - (0xAA * (p >> 24) + 127) / 255) <= 1 &&
+                            Math.Abs((long)(p & 255) - (0xE6 * (p >> 24) + 127) / 255) <= 1),
+                            "High Contrast warning triangles use only the supplied system foreground with a transparent exclamation cutout");
+                        check(contrast[(int)(11.5 * size / 16) * size + (int)(11.5 * size / 16)] >> 24 < 80,
+                            "High Contrast warning glyphs remain distinct through transparent geometry, not color alone");
+                        var monochrome = TrayIconRenderer.Pixels(indicator, style, size, colors with { Warning = null });
+                        int unchanged = size * (int)(7 * size / 16d);
+                        check(pixels.AsSpan(0, unchanged).SequenceEqual(monochrome.AsSpan(0, unchanged)),
+                            "warning colors leave the main usage artwork above the badge unchanged");
+                        if (indicator.IsOverAllocation)
+                        {
+                            int plus = (int)(13 * size / 16d) * size + (int)(3.5 * size / 16d);
+                            check(pixels[plus] == monochrome[plus] && pixels[plus] >> 24 > 200,
+                                "the separate over-allocation plus remains visible beside the partial-data warning");
+                        }
+                    }
         var selected = Presentation(Indicator(25, "github.com:1"), Indicator(null, "example.ghe.com:2"));
         var rollUp = Presentation(Indicator(25, partial: true));
         var callbackShell = new FakeShell();
         using (var host = new TrayHost(root, callbackShell.Call))
         {
+            NativeMenuThemeTests.Run(check, host.Handle);
             List<string?> opened = [];
             int settings = 0, notifications = 0;
             string? notificationAccount = null;

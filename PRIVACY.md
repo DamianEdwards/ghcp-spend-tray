@@ -15,7 +15,7 @@ and requested, refresh tokens.
 
 The app retrieves account information such as your login, account ID, host and
 avatar URL, as well as Copilot consumption information such as credits used,
-allocation, billing period, reset dates and observation timestamps. It also
+limit, billing period, reset dates and observation timestamps. It also
 stores preferences you choose, including account display names, refresh
 intervals and alert thresholds.
 This information is used to display consumption, maintain history and generate
@@ -48,6 +48,18 @@ to contain technical error categories rather than tokens, device authorization
 codes, account identities or consumption amounts.
 
 ## Network requests and third parties
+
+For eligible enterprise accounts, you can optionally connect Microsoft's
+corporate daily-consumption service. The app invokes your installed Azure CLI
+to obtain an Entra access token and, after you confirm the corporate identity,
+sends that token and corporate alias to the corporate API endpoint configured at
+build time. Builds without an endpoint do not offer or invoke this integration.
+Azure CLI manages its own credentials and token renewal; the app does not save
+these access tokens or daily responses to disk. Confirmed corporate usernames, aliases,
+tenant IDs, and object IDs are saved in account settings until you remove the
+account or replace its connection. Daily data is displayed only for the eligible
+enterprises associated with the GitHub account. The service receives ordinary
+network information such as your IP address.
 
 GHCPSpendTray communicates directly over HTTPS with the GitHub host and API
 associated with each connected account for authorization, identity lookup, token

@@ -60,6 +60,18 @@ internal static class DirtyFormsTests
         session.CancelChanges();
         Check(!session.HasUnsavedChanges && session.CustomBudget == "50", "Cancel also restores override modes.");
 
+        session.SetInput(SettingsField.CustomBudget, "60");
+        session.ViewUsage(personal);
+        Check(session.HasPendingNavigation && session.Page == SettingsPage.Accounts && session.SelectedAccount == work &&
+            session.UsageAccountKey is null, "Popup Usage navigation protects a custom-budget draft.");
+        session.ResolveUnsavedChanges(UnsavedChangesChoice.KeepEditing);
+        Check(session.CustomBudget == "60" && session.HasUnsavedChanges, "Keep editing after popup Details preserves the budget.");
+        session.ViewUsage(personal);
+        session.ResolveUnsavedChanges(UnsavedChangesChoice.Discard);
+        Check(session.Page == SettingsPage.Usage && session.UsageAccountKey == personal && session.SelectedAccount is null,
+            "Discarding a custom-budget draft continues popup navigation to the intended Usage account.");
+        session.EditAccount(work);
+
         session.SetInput(SettingsField.DisplayName, "Blocked save");
         controller.RejectSave = true;
         session.Navigate(SettingsPage.General);

@@ -137,6 +137,15 @@ try
 
     var credentialLogRoot = Path.Combine(root, "credential-diagnostics");
     Diagnostics.Initialize(credentialLogRoot);
+    Diagnostics.RecordFailure("Synthetic UI failure",
+        new System.Runtime.InteropServices.COMException("synthetic-secret-must-not-be-logged", unchecked((int)0x80004005)));
+    Diagnostics.RecordFailure("Synthetic native failure",
+        new InvalidOperationException("synthetic-secret-must-not-be-logged", new System.ComponentModel.Win32Exception(5)));
+    string failureLog = await File.ReadAllTextAsync(Path.Combine(credentialLogRoot, "logs", "diagnostics.log"));
+    Check(failureLog.Contains("Synthetic UI failure (COMException, HRESULT 0x80004005).") &&
+        failureLog.Contains("Synthetic native failure (InvalidOperationException, HRESULT 0x80131509, native error 5).") &&
+        !failureLog.Contains("synthetic-secret"),
+        "failure diagnostics preserve HRESULTs and native error codes without exception messages");
     credentials.WriteError = new CredentialVaultException(8, "write", "synthetic-secret-must-not-be-logged");
     try
     {

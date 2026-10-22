@@ -87,6 +87,7 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.windows_version }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       PRERELEASE: ${{ inputs.prerelease }}
       MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
       MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
@@ -292,6 +293,7 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.macos_version }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       PRERELEASE: ${{ inputs.prerelease }}
       GH_TOKEN: ${{ github.token }}
       SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}

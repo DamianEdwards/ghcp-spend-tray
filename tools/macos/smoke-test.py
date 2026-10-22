@@ -15,11 +15,11 @@ def smoke(app):
     executable = bundle / "Contents/MacOS/GHCPSpendTray"
     require_binary(executable)
     require_binary(bundle / "Contents/Frameworks/GHCPSpendTray.MacBridge.dylib")
-    for empty in (False, True):
+    for scenario in (None, "--demo-empty", "--demo-usage-states"):
         with tempfile.TemporaryDirectory(prefix="ghcp-mac-smoke-") as directory:
             command = ["arch", "-arm64", str(executable), "--smoke-test", "--data-dir", directory]
-            if empty:
-                command.append("--demo-empty")
+            if scenario:
+                command.append(scenario)
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
                 try:
                     stdout, stderr = process.communicate(timeout=90)
@@ -43,10 +43,14 @@ def smoke(app):
             if "PASS: native notification settings callback." not in stdout:
                 raise RuntimeError("The app did not exercise its native notification settings callback.")
             result = Path(directory, "smoke-result.txt").read_text()
-            if not result.startswith("PASS:") or "protected close and save-before-Quit" not in result:
+            showcase = scenario == "--demo-usage-states"
+            expected = "native eight-state usage showcase" if showcase else "protected close and save-before-Quit"
+            if not result.startswith("PASS:") or expected not in result:
                 raise RuntimeError("The application did not complete its smoke assertions.")
-            for page in ("Flyout", "FlyoutWithExample", "FlyoutWithEstimate", "AccountWithEstimate",
-                         "AccountWithBudget", "Usage", "Accounts", "General", "Notifications", "About"):
+            pages = ("FlyoutStates", *(f"UsageState{i}" for i in range(8))) if showcase else (
+                "Flyout", "FlyoutWithExample", "FlyoutWithEstimate", "AccountWithEstimate",
+                "AccountWithBudget", "Usage", "Accounts", "General", "Notifications", "About")
+            for page in pages:
                 if Path(directory, f"{page}.png").stat().st_size < 1000:
                     raise RuntimeError(f"{page} did not render.")
 
