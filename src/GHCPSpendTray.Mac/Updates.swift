@@ -67,7 +67,7 @@ protocol UpdateService: AnyObject {
 final class AppUpdates: ObservableObject {
     @Published private(set) var state = UpdateState()
     @Published private(set) var enabled = false
-    @Published private(set) var explanation = "Updates are disabled in development and demonstration builds."
+    @Published private(set) var explanation: String? = "Updates are disabled in development and demonstration builds."
     private var service: (any UpdateService)?
     private let makeService: () -> any UpdateService
 
@@ -134,7 +134,7 @@ final class AppUpdates: ObservableObject {
             try service.start()
             self.service = service
             enabled = true
-            explanation = "Updates come from stable macOS releases. Settings, history and sign-ins stay on this Mac."
+            explanation = nil
         } catch {
             service.stateChanged = nil
             state.error = "Automatic updates could not start: \(error.localizedDescription)"

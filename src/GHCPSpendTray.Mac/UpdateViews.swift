@@ -43,7 +43,9 @@ struct UpdatePreferences: View {
                 }
             }
             if let error = updates.state.error { Text(error).font(.caption).foregroundStyle(.red) }
-            Text(updates.explanation).font(.caption).foregroundStyle(.secondary)
+            if let explanation = updates.explanation {
+                Text(explanation).font(.caption).foregroundStyle(.secondary)
+            }
         }.frame(maxWidth: 470)
     }
 }

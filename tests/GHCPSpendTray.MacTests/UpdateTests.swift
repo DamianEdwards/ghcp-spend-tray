@@ -31,6 +31,7 @@ enum UpdateTests {
         updates.start(channel: "Stable", isolated: false)
         try check(updates.enabled && updates.state.canCheck && fixture.starts == 1,
                   "Production startup enables the service once.")
+        try check(updates.explanation == nil, "Enabled updates do not show an unnecessary explanatory footer.")
         updates.start(channel: "Stable", isolated: false)
         try check(created == 1 && fixture.starts == 1, "Repeated startup cannot create duplicate schedulers.")
         updates.checkForUpdates()
