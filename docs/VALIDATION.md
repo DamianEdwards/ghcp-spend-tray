@@ -85,6 +85,12 @@ certificate trust, or alter login startup preferences.
 CI exercises the exact extracted x64 MSIX in both deployment modes, including
 fresh process startup and repeated constrained smoke observations. A failed
 observation stops the lane; repeated observations are not retries until green.
+Each launch logs activation before calling Windows, bounds the isolated activation
+helper to 15 seconds, and then allows 45 seconds for the app to exit. Failures
+retain activation phases, helper errors, the returned process ID (when available),
+and native smoke diagnostics per scenario. An activation timeout terminates the
+helper and any app process from that test's exact development layout; it is not
+retried automatically.
 
 #### Interactive synthetic demo
 
