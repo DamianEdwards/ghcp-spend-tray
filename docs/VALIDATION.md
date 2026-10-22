@@ -361,6 +361,7 @@ Missing reports produce an explicit connected-but-no-data Usage status, not an
 empty hidden chart or fabricated zeroes. Loading state is exercised through the
 source-generated bridge; the native demo includes a no-report account, and
 populated smoke checks that its explanatory Usage status exists.
+
 ## Native macOS telemetry verification (October 16, 2026)
 
 `bash tools/macos/verify.sh` passed on Apple silicon/macOS 26.7.1 with the pinned

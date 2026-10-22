@@ -1319,6 +1319,8 @@ internal static class Program
                     var root = (FrameworkElement)shell.SettingsWindow!.NativeWindow.Content;
                     scale = root.XamlRoot.RasterizationScale;
                     shell.SettingsWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(width * scale), original.Height));
+                    RecordSmokePhase(shell.Session.Controller.DataDirectory,
+                        $"Requested Usage width {width} DIPs: {SmokeWindowState(shell.SettingsWindow)}");
                 });
                 await WaitForUI(shell, $"compact Usage overview at {width} DIPs", () =>
                     Math.Abs(shell.SettingsWindow!.AppWindow.Size.Width - width * scale) <= 2 &&
@@ -1469,13 +1471,14 @@ internal static class Program
             {
                 await OnUI(shell, () =>
                 {
-                    complete = ready();
                     state = $"page={shell.Session.Page}, initialized={shell.Session.Initialized}, busy={shell.Session.Busy}, " +
                         $"revision={shell.Session.Revision}, settingsRender={shell.SettingsRenderedRevision}, " +
                         $"flyoutRender={shell.FlyoutRenderedRevision}, addForm={shell.Session.ShowAddForm}, " +
                         $"back={shell.Session.CanGoBack}, settings={shell.SettingsWindow is not null}, " +
                         $"flyoutVisible={shell.Flyout is not null && Win32.IsWindowVisible(FlyoutHwnd(shell)) != 0}, " +
-                        $"foreground=0x{Win32.GetForegroundWindow():X}, error={shell.Session.Error ?? "none"}";
+                        $"foreground=0x{Win32.GetForegroundWindow():X}, error={shell.Session.Error ?? "none"}, " +
+                        $"settingsGeometry={SmokeWindowState(shell.SettingsWindow)}";
+                    complete = ready();
                 }).WaitAsync(remaining);
             }
             catch (TimeoutException ex)
@@ -1500,6 +1503,16 @@ internal static class Program
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
                 foreach (string fragment in TextInTree(VisualTreeHelper.GetChild(node, i))) yield return fragment;
         }
+    }
+
+    private static string SmokeWindowState(ReactorWindow? window)
+    {
+        if (window is null) return "none";
+        var size = window.AppWindow.Size;
+        return window.NativeWindow.Content is FrameworkElement root
+            ? $"native={size.Width}x{size.Height}, root={root.ActualWidth:F1}x{root.ActualHeight:F1}, " +
+                $"scale={root.XamlRoot?.RasterizationScale:F2}, loaded={root.IsLoaded}"
+            : $"native={size.Width}x{size.Height}, no root";
     }
 
     private static async Task SmokeTraySettingsAsync(ReactorShell shell)
