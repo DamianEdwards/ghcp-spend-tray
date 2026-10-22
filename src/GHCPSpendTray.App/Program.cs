@@ -1314,18 +1314,21 @@ internal static class Program
             foreach (int width in new[] { 1100, 640, 1100 })
             {
                 double scale = 1;
+                int acceptedWidth = 0;
                 await OnUI(shell, () =>
                 {
                     var root = (FrameworkElement)shell.SettingsWindow!.NativeWindow.Content;
                     scale = root.XamlRoot.RasterizationScale;
                     shell.SettingsWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(width * scale), original.Height));
+                    // Windows can clamp an oversized request to the monitor's maximum tracking width.
+                    acceptedWidth = shell.SettingsWindow.AppWindow.Size.Width;
                     RecordSmokePhase(shell.Session.Controller.DataDirectory,
                         $"Requested Usage width {width} DIPs: {SmokeWindowState(shell.SettingsWindow)}");
                 });
                 await WaitForUI(shell, $"compact Usage overview at {width} DIPs", () =>
-                    Math.Abs(shell.SettingsWindow!.AppWindow.Size.Width - width * scale) <= 2 &&
+                    shell.SettingsWindow!.AppWindow.Size.Width == acceptedWidth &&
                     LayoutReady(shell.SettingsWindow) &&
-                    Math.Abs(((FrameworkElement)shell.SettingsWindow.NativeWindow.Content).ActualWidth - width) <= 32);
+                    Math.Abs(((FrameworkElement)shell.SettingsWindow.NativeWindow.Content).ActualWidth - acceptedWidth / scale) <= 32);
                 await OnUI(shell, () =>
                 {
                     var window = shell.SettingsWindow!;

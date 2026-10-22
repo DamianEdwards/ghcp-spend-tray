@@ -181,6 +181,11 @@ Inspect retained phase/result files and redacted diagnostics rather than relaxin
 assertions, adding retry-until-green behavior, or changing user preferences.
 Shell acceptance of a notification is not proof that the user saw it.
 
+Responsive-window probes synchronize against the bounds accepted by Windows,
+not the requested outer size: monitor/DPI tracking limits can clamp oversized
+requests. They must still assert both wide and narrow component layouts and
+retain native/XAML sizes and rasterization scale in failure diagnostics.
+
 ## Known limitations and manual acceptance
 
 ### Windows desktop integration
