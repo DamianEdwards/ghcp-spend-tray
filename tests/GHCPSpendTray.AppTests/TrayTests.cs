@@ -214,6 +214,7 @@ internal static class TrayTests
         var callbackShell = new FakeShell();
         using (var host = new TrayHost(root, callbackShell.Call))
         {
+            NativeMenuThemeTests.Run(check, host.Handle);
             List<string?> opened = [];
             int settings = 0, notifications = 0;
             string? notificationAccount = null;

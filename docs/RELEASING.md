@@ -370,8 +370,9 @@ SDK/build configuration, CI routing, or unrecognized paths run both. Markdown
 changes run the Markdown job without native builds. Manual Verify runs run all
 checks. The stable **Verification** gate requires all applicable jobs to
 succeed and fails if change detection fails. Selected Release jobs check that gate
-on the pinned main commit and rerun their platform's verification before
-publishing, even when its previous main checks were legitimately skipped.
+on the pinned main commit without repeating CI's test suites. Release still
+rebuilds the production-versioned artifacts and validates their identity,
+packaging, signatures, provenance and downloaded assets before publishing.
 
 Verify runs managed/Native AOT tests and packaging/startup smoke on separate
 Windows runners after change detection. Each job caches only NuGet packages,
@@ -814,8 +815,9 @@ and system-default trust, never an **Always Trust** override.
    macOS version components are limited to major `0..9999`, minor/patch
    `0..99`; `0.0.0` is forbidden. A bump exceeding these limits fails rather
    than wrapping to a different component.
-3. The workflow validates source/version, reruns Mac verification, rebuilds with
-   that version, signs/notarizes, exercises the hardened app with synthetic
+3. The workflow validates source/version and the exact commit's successful CI
+   without rerunning its test suites, rebuilds with that version,
+   signs/notarizes, exercises the hardened app with synthetic
    data, attests the DMG, and creates a `macos-v<version>` draft release.
    It downloads the draft assets and verifies their exact bytes, notarization,
    Gatekeeper acceptance and attestation before publishing.
@@ -898,7 +900,12 @@ downloads/install-on-quit are off by default and user-controlled; Sparkle stores
 these preferences in native defaults, separate from shared account settings.
 The popup and About page surface gentle reminders without stealing focus.
 Downloaded updates expose **Install and Relaunch...**, which opens Sparkle's
-standard installation UI. Updates preserve the existing bundle identity,
+standard installation UI. About explicitly shows the update version and whether
+it is available to download, downloading, downloaded but still being prepared,
+ready to install, or installing. It confirms installation on quit only after
+Sparkle schedules it, rather than inferring it from the automatic-download
+preference. Quitting means quitting the app, not closing its Settings window.
+Updates preserve the existing bundle identity,
 external Application Support data and Keychain credential targets. Updating
 from a disk image or other non-writable/translocated installation may require
 moving the app to Applications first.

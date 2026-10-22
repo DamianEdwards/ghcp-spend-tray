@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -5,6 +6,14 @@ namespace GHCPSpendTray.App.Native;
 
 internal static unsafe partial class Win32
 {
+    internal static bool IsHighContrast()
+    {
+        var contrast = new HIGHCONTRAST { cbSize = (uint)sizeof(HIGHCONTRAST) };
+        if (SystemParametersInfo(0x42, contrast.cbSize, ref contrast, 0) == 0)
+            throw new Win32Exception("Cannot read Windows contrast settings.");
+        return (contrast.dwFlags & 1) != 0;
+    }
+
     internal const uint WM_DESTROY = 2, WM_SIZE = 5, WM_CLOSE = 0x10, WM_PAINT = 0xF,
         WM_QUERYENDSESSION = 0x11, WM_ENDSESSION = 0x16,
         WM_COMMAND = 0x111, WM_TIMER = 0x113, WM_CONTEXTMENU = 0x7B, WM_DPICHANGED = 0x2E0,

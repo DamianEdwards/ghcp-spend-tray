@@ -145,22 +145,26 @@ internal sealed class TrayHost : ShellWindow
     }
     private void ContextMenu()
     {
-        var menu = Win32.CreatePopupMenu();
-        if (menu == 0) throw new InvalidOperationException("Cannot create the tray menu.");
-        try
+        int command;
+        using (NativeMenuTheme.Apply(Handle))
         {
-            Win32.AppendMenu(menu, 0, 1, "Open GHCPSpendTray");
-            Win32.AppendMenu(menu, 0, 2, "Refresh now");
-            Win32.AppendMenu(menu, 0, 3, "Settings");
-            Win32.AppendMenu(menu, 0x800, 0, null);
-            Win32.AppendMenu(menu, 0, 4, "Exit");
-            Win32.GetCursorPos(out var point);
-            Win32.SetForegroundWindow(Handle);
-            var command = Win32.TrackPopupMenuEx(menu, 0x102, point.x, point.y, Handle, 0);
-            Win32.PostMessage(Handle, 0, 0, 0);
-            ExecuteMenuCommand(command);
+            var menu = Win32.CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Cannot create the tray menu.");
+            try
+            {
+                Win32.AppendMenu(menu, 0, 1, "Open GHCPSpendTray");
+                Win32.AppendMenu(menu, 0, 2, "Refresh now");
+                Win32.AppendMenu(menu, 0, 3, "Settings");
+                Win32.AppendMenu(menu, 0x800, 0, null);
+                Win32.AppendMenu(menu, 0, 4, "Exit");
+                Win32.GetCursorPos(out var point);
+                Win32.SetForegroundWindow(Handle);
+                command = Win32.TrackPopupMenuEx(menu, 0x102, point.x, point.y, Handle, 0);
+                Win32.PostMessage(Handle, 0, 0, 0);
+            }
+            finally { Win32.DestroyMenu(menu); }
         }
-        finally { Win32.DestroyMenu(menu); }
+        ExecuteMenuCommand(command);
     }
     internal void ExecuteMenuCommand(int command)
     {

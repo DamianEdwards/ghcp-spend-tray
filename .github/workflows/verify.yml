@@ -69,13 +69,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-windows-storage
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
       - name: Cache test NuGet packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~\.nuget\packages
+          path: ${{ env.NUGET_PACKAGES }}
           key: nuget-${{ runner.os }}-${{ runner.arch }}-tests-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-${{ runner.arch }}-tests-
@@ -112,13 +113,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-windows-storage
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
       - name: Cache packaging NuGet packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~\.nuget\packages
+          path: ${{ env.NUGET_PACKAGES }}
           key: nuget-${{ runner.os }}-${{ runner.arch }}-package-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-${{ runner.arch }}-package-
