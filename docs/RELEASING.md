@@ -900,7 +900,12 @@ downloads/install-on-quit are off by default and user-controlled; Sparkle stores
 these preferences in native defaults, separate from shared account settings.
 The popup and About page surface gentle reminders without stealing focus.
 Downloaded updates expose **Install and Relaunch...**, which opens Sparkle's
-standard installation UI. Updates preserve the existing bundle identity,
+standard installation UI. About explicitly shows the update version and whether
+it is available to download, downloading, downloaded but still being prepared,
+ready to install, or installing. It confirms installation on quit only after
+Sparkle schedules it, rather than inferring it from the automatic-download
+preference. Quitting means quitting the app, not closing its Settings window.
+Updates preserve the existing bundle identity,
 external Application Support data and Keychain credential targets. Updating
 from a disk image or other non-writable/translocated installation may require
 moving the app to Applications first.

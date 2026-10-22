@@ -2,36 +2,50 @@ import AppKit
 import Combine
 import Sparkle
 
+enum UpdatePhase: Equatable {
+    case idle, checking, available, downloading, preparing, ready, installing
+}
+
 struct UpdateState: Equatable {
     var canCheck = false
     var automaticallyChecks = false
     var automaticallyDownloads = false
     var lastChecked: Date?
     var availableVersion: String?
-    var readyToInstall = false
+    var phase = UpdatePhase.idle
+    var installsOnQuit = false
     var error: String?
+
+    var readyToInstall: Bool { phase == .ready }
 }
 
 struct UpdateAvailability {
     private(set) var version: String?
-    private(set) var readyToInstall = false
+    private(set) var phase = UpdatePhase.idle
     private var onQuitVersion: String?
 
+    var readyToInstall: Bool { phase == .ready }
+    var installsOnQuit: Bool { onQuitVersion != nil && version == onQuitVersion }
+
     mutating func offered(version: String, downloaded: Bool) {
+        progress(version: version, phase: downloaded ? .ready : .available)
+    }
+
+    mutating func progress(version: String, phase: UpdatePhase) {
         self.version = version
-        readyToInstall = downloaded
+        self.phase = phase
     }
 
     mutating func scheduledOnQuit(version: String) {
         self.version = version
-        readyToInstall = true
+        phase = .ready
         onQuitVersion = version
     }
 
     mutating func finished() {
         if let onQuitVersion {
             version = onQuitVersion
-            readyToInstall = true
+            phase = .ready
         } else {
             self = UpdateAvailability()
         }
@@ -53,14 +67,47 @@ protocol UpdateService: AnyObject {
 final class AppUpdates: ObservableObject {
     @Published private(set) var state = UpdateState()
     @Published private(set) var enabled = false
-    @Published private(set) var explanation = "Updates are disabled in development and demonstration builds."
+    @Published private(set) var explanation: String? = "Updates are disabled in development and demonstration builds."
     private var service: (any UpdateService)?
     private let makeService: () -> any UpdateService
 
     var actionTitle: String {
         if state.readyToInstall { return "Install and Relaunch..." }
+        if state.phase == .checking { return "Checking for Updates..." }
+        if state.phase == .downloading { return "Downloading Update..." }
+        if state.phase == .preparing { return "Preparing Update..." }
+        if state.phase == .installing { return "Installing Update..." }
         if let version = state.availableVersion { return "Update Available: \(version)..." }
         return "Check for Updates..."
+    }
+
+    var statusTitle: String {
+        let version = state.availableVersion.map { " \($0)" } ?? ""
+        switch state.phase {
+        case .idle: return state.error == nil ? "No update pending" : "Update could not complete"
+        case .checking: return "Checking for updates"
+        case .available: return "Update\(version) available to download"
+        case .downloading: return "Downloading update\(version)"
+        case .preparing: return "Update\(version) downloaded; preparing to install"
+        case .ready: return "Update\(version) downloaded and ready to install"
+        case .installing: return "Installing update\(version)"
+        }
+    }
+
+    var statusDetail: String {
+        switch state.phase {
+        case .idle: return "Check for updates to look for a newer version."
+        case .checking: return "Looking for a newer stable macOS release."
+        case .available: return "This update has not been downloaded. Open the update to download and install it."
+        case .downloading: return "The update is not ready to install yet."
+        case .preparing: return "The download is complete. The update is not ready to install yet."
+        case .ready:
+            if state.installsOnQuit {
+                return "This update will install when you quit GHCPSpendTray, not when you close this window. You can also install and relaunch now."
+            }
+            return "Install and relaunch to finish updating. Installation on quit has not been scheduled."
+        case .installing: return "Follow the update dialog to finish installing and relaunch the app."
+        }
     }
 
     init(makeService: @escaping () -> any UpdateService = { SparkleUpdateService() }) {
@@ -87,7 +134,7 @@ final class AppUpdates: ObservableObject {
             try service.start()
             self.service = service
             enabled = true
-            explanation = "Updates come from stable macOS releases. Settings, history and sign-ins stay on this Mac."
+            explanation = nil
         } catch {
             service.stateChanged = nil
             state.error = "Automatic updates could not start: \(error.localizedDescription)"
@@ -168,6 +215,9 @@ private final class SparkleUpdateService: NSObject, UpdateService, SPUUpdaterDel
         updater.publisher(for: \.lastUpdateCheckDate).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.publish() }
         }.store(in: &observations)
+        updater.publisher(for: \.sessionInProgress).sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.publish() }
+        }.store(in: &observations)
         publish()
     }
 
@@ -234,6 +284,35 @@ private final class SparkleUpdateService: NSObject, UpdateService, SPUUpdaterDel
         if choice == .skip { availability.cancelled(); publish() }
     }
 
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        availability.offered(version: item.displayVersionString, downloaded: false)
+        updateError = nil
+        publish()
+        #if UPDATE_REHEARSAL
+        rehearsal?.record("found", fields: ["version": item.versionString])
+        #endif
+    }
+
+    func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+        availability.progress(version: item.displayVersionString, phase: .downloading)
+        publish()
+    }
+
+    func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+        availability.progress(version: item.displayVersionString, phase: .preparing)
+        publish()
+    }
+
+    func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) {
+        availability.progress(version: item.displayVersionString, phase: .ready)
+        publish()
+    }
+
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        availability.progress(version: item.displayVersionString, phase: .installing)
+        publish()
+    }
+
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
         #if UPDATE_REHEARSAL
         rehearsal?.record("cycle-finished", fields: ["check": updateCheck.rawValue, "error": (error as NSError?)?.code ?? 0])
@@ -249,10 +328,6 @@ private final class SparkleUpdateService: NSObject, UpdateService, SPUUpdaterDel
     func feedURLString(for updater: SPUUpdater) -> String? {
         guard let rehearsal else { return nil }
         return (UpdateRehearsal.marker == "rehearsal-B" ? rehearsal.downgradeURL : rehearsal.feedURL).absoluteString
-    }
-
-    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        rehearsal?.record("found", fields: ["version": item.versionString])
     }
 
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
@@ -274,6 +349,8 @@ private final class SparkleUpdateService: NSObject, UpdateService, SPUUpdaterDel
             automaticallyChecks: updater.automaticallyChecksForUpdates,
             automaticallyDownloads: updater.automaticallyDownloadsUpdates,
             lastChecked: updater.lastUpdateCheckDate, availableVersion: availability.version,
-            readyToInstall: availability.readyToInstall, error: updateError))
+            phase: availability.phase == .idle && updater.sessionInProgress && updateError == nil
+                ? .checking : availability.phase,
+            installsOnQuit: availability.installsOnQuit, error: updateError))
     }
 }
