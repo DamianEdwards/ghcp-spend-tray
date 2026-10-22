@@ -539,7 +539,9 @@ internal static class Program
                 var scroll = Find(shell.SettingsWindow!, "SettingsScroll");
                 RecordSmokePhase(shell.Session.Controller.DataDirectory,
                     $"Usage destination key={key}, target={shell.Session.UsageAccountKey}, panel={panel?.GetType().Name}, " +
-                    $"scroll={scroll?.GetType().Name}, top={(scroll is UIElement element ? panel?.TransformToVisual(element).TransformPoint(default).Y : null)}.");
+                    $"scroll={scroll?.GetType().Name}, top={(scroll is UIElement element ? panel?.TransformToVisual(element).TransformPoint(default).Y : null)}, " +
+                    $"offset={(scroll as ScrollView)?.VerticalOffset}, maximum={(scroll as ScrollView)?.ScrollableHeight}, " +
+                    $"viewport={(scroll as ScrollView)?.ViewportHeight}.");
             });
             await WaitForUI(shell, "account Usage panel brought into view", () =>
             {

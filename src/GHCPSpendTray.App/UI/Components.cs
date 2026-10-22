@@ -8,6 +8,7 @@ using Microsoft.UI.Reactor.Input;
 using Microsoft.UI.Reactor.Layout;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using static Microsoft.UI.Reactor.Factories;
 
 namespace GHCPSpendTray.App.UI;
@@ -340,39 +341,82 @@ internal sealed class SettingsComponent(AppSession session) : SessionComponent(s
         var usageKey = Session.UsageAccountKey;
         var usageTarget = UseMemo(() => new ElementRef(), usageKey);
         bool showingUsage = Session.Page == SettingsPage.Usage;
+        var owner = UseWindow();
         UseEffect(() =>
         {
-            FrameworkElement? waiting = null;
-            void QueueReveal() => ReactorApp.UIDispatcher?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Reveal);
+            // Loaded can precede ref binding and the ScrollView's committed extent.
+            FrameworkElement? layoutRoot = null;
+            ScrollView? scrolling = null;
+            bool queued = false, finished = false;
+            void StopObserving()
+            {
+                if (layoutRoot is not null) layoutRoot.LayoutUpdated -= LayoutUpdated;
+                if (scrolling is not null)
+                {
+                    scrolling.ViewChanged -= ScrollGeometryChanged;
+                    scrolling.ExtentChanged -= ScrollGeometryChanged;
+                }
+                layoutRoot = null;
+                scrolling = null;
+            }
+            void QueueReveal()
+            {
+                if (queued || finished) return;
+                queued = true;
+                Session.Post(() => { queued = false; Reveal(); });
+            }
+            void LayoutUpdated(object? sender, object args) => QueueReveal();
+            void ScrollGeometryChanged(ScrollView sender, object args) => QueueReveal();
             void Reveal()
             {
-                if (!showingUsage || usageKey is null || Session.Page != SettingsPage.Usage ||
-                    Session.UsageAccountKey != usageKey || usageTarget.Current is not { } target) return;
-                if (!target.IsLoaded)
+                if (finished) return;
+                if (!showingUsage || usageKey is null || Session.Page != SettingsPage.Usage || Session.UsageAccountKey != usageKey)
                 {
-                    waiting = target;
-                    target.Loaded += TargetLoaded;
+                    finished = true;
+                    StopObserving();
                     return;
                 }
-                target.UpdateLayout();
+                if (layoutRoot is null && owner?.NativeWindow.Content is FrameworkElement root)
+                {
+                    layoutRoot = root;
+                    layoutRoot.LayoutUpdated += LayoutUpdated;
+                }
+                if (usageTarget.Current is not { IsLoaded: true, ActualHeight: > 0 } target) return;
+                ScrollView? scroll = null;
+                for (DependencyObject? parent = VisualTreeHelper.GetParent(target); parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                    if (parent is ScrollView view) { scroll = view; break; }
+                if (scroll is null || scroll.ViewportHeight <= 0) return;
+                if (!ReferenceEquals(scrolling, scroll))
+                {
+                    if (scrolling is not null)
+                    {
+                        scrolling.ViewChanged -= ScrollGeometryChanged;
+                        scrolling.ExtentChanged -= ScrollGeometryChanged;
+                    }
+                    scrolling = scroll;
+                    scrolling.ViewChanged += ScrollGeometryChanged;
+                    scrolling.ExtentChanged += ScrollGeometryChanged;
+                }
+                if (scroll.Content is FrameworkElement content && scroll.ExtentHeight + 1 < content.ActualHeight) return;
+                double top = target.TransformToVisual(scroll).TransformPoint(default).Y;
+                if (top >= -1 && top < scroll.ViewportHeight - 40)
+                {
+                    finished = true;
+                    StopObserving();
+                    return;
+                }
                 target.StartBringIntoView(new BringIntoViewOptions
                 {
                     AnimationDesired = false, VerticalAlignmentRatio = 0
                 });
             }
-            void TargetLoaded(object sender, RoutedEventArgs args)
-            {
-                if (waiting is not null) waiting.Loaded -= TargetLoaded;
-                waiting = null;
-                QueueReveal();
-            }
             QueueReveal();
             return () =>
             {
-                if (waiting is not null) waiting.Loaded -= TargetLoaded;
+                finished = true;
+                StopObserving();
             };
         }, showingUsage, Session.UsageNavigationRevision);
-        var owner = UseWindow();
         nint hwnd = owner is null ? 0 : WinRT.Interop.WindowNative.GetWindowHandle(owner.NativeWindow);
         Element content = Session.Page switch
         {
