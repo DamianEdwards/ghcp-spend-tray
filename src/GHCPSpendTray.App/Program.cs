@@ -68,12 +68,12 @@ internal static class Program
                     shell = new ReactorShell(controller, storeUpdates: !demo, updateService: smokeUpdates);
                     Application.Current.UnhandledException += (_, e) =>
                     {
-                        Diagnostics.Record($"Reactor dispatch failed ({e.Exception.GetType().Name}).");
+                        Diagnostics.RecordFailure("Reactor dispatch failed", e.Exception);
                         if (smoke)
                         {
                             smokeExit = 1;
                             File.WriteAllText(Path.Combine(runtime.DataDirectory, "native-smoke-result.txt"),
-                                $"FAIL: Reactor dispatch: {e.Exception.GetType().Name}\n");
+                                $"FAIL: Reactor dispatch: {e.Exception.GetType().Name}, HRESULT 0x{e.Exception.HResult:X8}\n{e.Exception.StackTrace}\n");
                             ReactorApp.Exit(1);
                         }
                         else shell.Session.SetError("A user-interface operation failed. See the diagnostic log.");
@@ -349,7 +349,8 @@ internal static class Program
                     "tray style/mode/selection controls, per-account callback mapping, retired callbacks ignored, neutral access icon, " +
                     "unsaved live preview pixel parity, Save isolation and reusable image-buffer lifecycle, " +
                     "simulated TaskbarCreated recovery and display-change repaint, " +
-                    "synthetic Store latest/update About controls, native update notification opens About, consent cancellation and retry, " +
+                    "synthetic Store latest/update About controls, native update notification opens About, " +
+                    "pending consent, download/install progress, consent cancellation and retry, " +
                     "Shell notification submission and isolated Credential Manager round-trip.\n" +
                     "No live account access, installation, or startup writes.\n");
                 shell.Exit();
@@ -367,13 +368,17 @@ internal static class Program
     {
         internal bool Available { get; set; }
         internal int Installs { get; private set; }
+        internal Action<StoreUpdateProgress>? Progress { get; private set; }
+        internal TaskCompletionSource<StoreInstallResult> Installation { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<bool> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(Available);
         public Task<StoreInstallResult> InstallAsync(nint owner, Action<StoreUpdateProgress> progress,
             CancellationToken cancellationToken)
         {
             if (owner == 0) throw new InvalidOperationException("Synthetic Store request has no owner HWND.");
             Installs++;
-            return Task.FromResult(StoreInstallResult.Canceled);
+            Progress = progress;
+            return Installation.Task;
         }
         public void Restart() => throw new InvalidOperationException("Synthetic canceled update must not restart.");
     }
@@ -413,11 +418,39 @@ internal static class Program
                 throw new InvalidOperationException("Clicking the Store update notification must open About with its Update action.");
         });
         await InvokeButtonAsync(shell, "InstallStoreUpdate");
+        await WaitForSettingsUI(shell, "Store update preparing");
+        await OnUI(shell, () =>
+        {
+            if (!shell.Session.StoreUpdates!.Updating ||
+                Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Preparing update. Windows may close and restart the app..." } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not ProgressBar { Value: 0 } ||
+                Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: false })
+                throw new InvalidOperationException("Pending Store consent must render update preparation with its action disabled.");
+            updates.Progress!(new(.25, false));
+        });
+        await WaitForSettingsUI(shell, "Store update downloading");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Downloading update... 25%" } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not ProgressBar { Value: 25 })
+                throw new InvalidOperationException("Store download progress did not render.");
+            updates.Progress!(new(1, true));
+        });
+        await WaitForSettingsUI(shell, "Store update installing");
+        await OnUI(shell, () =>
+        {
+            if (Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Installing update. The app will restart..." } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not ProgressBar { Value: 100 })
+                throw new InvalidOperationException("Store installation progress did not render.");
+            updates.Installation.SetResult(StoreInstallResult.Canceled);
+        });
         await WaitForSettingsUI(shell, "Store consent cancellation");
         await OnUI(shell, () =>
         {
             if (updates.Installs != 1 || shell.Session.StoreUpdates!.Updating ||
                 Find(shell.SettingsWindow!, "StoreUpdateStatus") is not TextBlock { Text: "Update canceled. You can try again." } ||
+                Find(shell.SettingsWindow!, "StoreUpdateProgress") is not null ||
+                shell.Session.Error is not null ||
                 Find(shell.SettingsWindow!, "InstallStoreUpdate") is not Button { IsEnabled: true })
                 throw new InvalidOperationException("Canceled Store consent must leave a retryable Update action.");
             shell.Session.Navigate(SettingsPage.Usage);

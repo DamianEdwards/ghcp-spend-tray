@@ -233,8 +233,11 @@ The app does not delete other applications' credentials or use plaintext storage
 
 ### Updates
 
-**Microsoft Store:** synthetic availability, consent, progress, restart, and
-failure tests do not establish package replacement. Validate using an actual
+**Microsoft Store:** native UI smoke holds a synthetic update open through
+preparation, download, and installation progress before canceling consent. It
+checks progress values, the disabled Update action, and the retryable canceled
+state. These and the synthetic availability, restart, and failure tests do not
+establish package replacement. Validate using an actual
 Store-signed older version with a newer update offered to the same account/device.
 Confirm the real consent dialogs, replacement, and new-version relaunch.
 The supported update API does not supply the incoming version; GitHub's

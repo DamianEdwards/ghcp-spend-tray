@@ -74,7 +74,8 @@ internal static class UI
         TextBlock("Microsoft Store updates").SemiBold(),
         Copy(updates.Status).AutomationId("StoreUpdateStatus"),
         updates.Error is { } error ? InfoBar("Unable to complete update", error).Error().IsClosable(false) : null,
-        updates.Updating ? Progress(updates.Progress).AutomationName("App update progress") : null,
+        updates.Updating ? Progress(updates.Progress).AutomationName("App update progress")
+            .AutomationId("StoreUpdateProgress") : null,
         updates.HasUpdate
             ? VStack(8,
                 Copy("Windows will ask permission to download and install. The app may close and restart."),
