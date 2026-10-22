@@ -20,12 +20,9 @@ internal static class TrayIconRenderer
     internal static int SizeForDpi(uint dpi) => Math.Clamp(Win32.GetSystemMetricsForDpi(49, dpi), 16, 256);
     internal static int NotificationSizeForDpi(uint dpi) => Math.Clamp(Win32.GetSystemMetricsForDpi(11, dpi), 16, 256);
 
-    internal static unsafe TrayPalette SystemPalette()
+    internal static TrayPalette SystemPalette()
     {
-        var contrast = new Win32.HIGHCONTRAST { cbSize = (uint)sizeof(Win32.HIGHCONTRAST) };
-        if (Win32.SystemParametersInfo(0x42, contrast.cbSize, ref contrast, 0) == 0)
-            throw new Win32Exception("Cannot read Windows contrast settings.");
-        if ((contrast.dwFlags & 1) != 0)
+        if (Win32.IsHighContrast())
             return new(Argb(Win32.GetSysColor(5)), Argb(Win32.GetSysColor(8)));
         return TrayAppearance.IsLightTheme() ? new(0xFFF3F3F3, 0xFF161616) : new(0xFF202020, 0xFFF5F5F5);
     }
