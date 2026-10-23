@@ -92,6 +92,13 @@ and native smoke diagnostics per scenario. An activation timeout terminates the
 helper and any app process from that test's exact development layout; it is not
 retried automatically.
 
+Release-tooling checks use in-memory process doubles in
+`tools/test-package-smoke.ps1` to verify exact timeout arguments, failure handling,
+diagnostic retention, and owned-process cleanup without launching helper processes,
+sleeping, or asserting elapsed time. These deterministic checks do not establish
+real process startup or COM activation; the packaged startup lanes above cover
+that integration.
+
 #### Interactive synthetic demo
 
 To inspect the published app without accessing normal accounts or settings:

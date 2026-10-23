@@ -10,58 +10,85 @@ try {
     $script = Join-Path $root 'smoke-test-package.ps1'
     Copy-Item -LiteralPath "$PSScriptRoot\smoke-test-package.ps1" -Destination $script
     Copy-Item -LiteralPath "$PSScriptRoot\export-smoke-diagnostics.ps1" -Destination $root
-    Set-Content -LiteralPath (Join-Path $root 'activate-package-smoke.ps1') -Value @'
-param([string] $ApplicationId, [string] $AppArguments, [string] $ProcessIdPath)
-$ErrorActionPreference = 'Stop'
-$fixturePath = Join-Path $PSScriptRoot 'activation-fixture.json'
-$fixture = Get-Content -LiteralPath $fixturePath -Raw | ConvertFrom-Json
-$fixture.Launches++
-$fixture | ConvertTo-Json | Set-Content -LiteralPath $fixturePath
-$expected = if ($fixture.Launches % 2 -eq 0) { '--package-smoke-test --demo-empty' } else { '--package-smoke-test' }
-if ($ApplicationId -cne 'Synthetic!App' -or $AppArguments -cne $expected -or
-    $ProcessIdPath -cne (Join-Path $PSScriptRoot 'Packages\Synthetic\LocalState\Data\package-smoke-activation-pid.txt')) {
-    throw 'Activation arguments were not passed intact.'
-}
-Write-Output 'synthetic activation entered'
-$failed = $fixture.Launches -eq $fixture.FailAt
-if ($failed -and $fixture.FailKind -eq 'activation-error') { throw 'synthetic activation error' }
-if ($failed -and $fixture.FailKind -eq 'activation-timeout') { Start-Sleep -Seconds 120 }
-if ($failed -and $fixture.FailKind -eq 'activation-missing') { exit 0 }
-$id = if ($failed -and $fixture.FailKind -eq 'activation-invalid') { 'invalid' } else { '42' }
-Set-Content -LiteralPath $ProcessIdPath -Value $id
-Write-Output 'synthetic activation returned PID'
-if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sleep -Seconds 120 }
-'@
     $global:PackageSmokeTestState = [pscustomobject]@{
-        Registered = $false; Launches = 0; FailAt = 0; FailKind = 'assertion'; Layout = $layout
+        Registered = $false; Launches = 0; ActivationLaunches = 0; FailAt = 0; FailKind = 'assertion'; Layout = $layout
         Processes = [Collections.Generic.List[object]]::new()
-        Workers = [Collections.Generic.List[int]]::new()
+        Workers = [Collections.Generic.List[object]]::new()
         Stopped = [Collections.Generic.List[int]]::new()
-    }
-    function Reset-ActivationFixture {
-        param([int] $FailAt = 0, [string] $FailKind = '')
-        @{ Launches = 0; FailAt = $FailAt; FailKind = $FailKind } | ConvertTo-Json |
-            Set-Content -LiteralPath (Join-Path $root 'activation-fixture.json')
     }
     function Add-AppxPackage { $global:PackageSmokeTestState.Registered = $true }
     function Remove-AppxPackage { $global:PackageSmokeTestState.Registered = $false }
     function Start-Process {
         param($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, [switch] $PassThru)
-        $worker = Microsoft.PowerShell.Management\Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
-            -RedirectStandardOutput $RedirectStandardOutput -RedirectStandardError $RedirectStandardError -PassThru
-        $global:PackageSmokeTestState.Workers.Add($worker.Id)
+        $state = $global:PackageSmokeTestState
+        $state.ActivationLaunches++
+        $data = Join-Path $env:LOCALAPPDATA 'Packages\Synthetic\LocalState\Data'
+        $pidPath = Join-Path $data 'package-smoke-activation-pid.txt'
+        $appArguments = if ($state.ActivationLaunches % 2 -eq 0) { '--package-smoke-test --demo-empty' } else { '--package-smoke-test' }
+        $expectedArguments = @(
+            '-NoProfile', '-NonInteractive', '-STA', '-File', "`"$(Join-Path $root 'activate-package-smoke.ps1')`"",
+            '-ApplicationId', '"Synthetic!App"', '-AppArguments', "`"$appArguments`"",
+            '-ProcessIdPath', "`"$pidPath`""
+        )
+        if ($FilePath -cne (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -or
+            -not $PassThru -or $ArgumentList.Count -ne $expectedArguments.Count -or
+            $RedirectStandardOutput -cne (Join-Path $data 'package-smoke-activation.log') -or
+            $RedirectStandardError -cne (Join-Path $data 'package-smoke-activation-error.log')) {
+            throw 'Activation process configuration changed.'
+        }
+        for ($index = 0; $index -lt $expectedArguments.Count; $index++) {
+            if ($ArgumentList[$index] -cne $expectedArguments[$index]) {
+                throw "Activation argument $index was not passed intact."
+            }
+        }
+        $worker = [pscustomobject]@{
+            Id = 1000 + $state.Workers.Count; Handle = 1; ExitCode = 0; HasExited = $false; Disposed = $false
+            Failure = $(if ($state.ActivationLaunches -eq $state.FailAt) { $state.FailKind } else { '' })
+            OutputPath = $RedirectStandardOutput; ErrorPath = $RedirectStandardError; PidPath = $pidPath
+            Waits = [Collections.Generic.List[int]]::new()
+        }
+        $worker | Add-Member ScriptMethod WaitForExit {
+            param($milliseconds)
+            $this.Waits.Add($milliseconds)
+            if ($this.Waits.Count -eq 2) {
+                if ($milliseconds -ne 5000 -or -not $this.HasExited) {
+                    throw 'A terminated activation helper must be given 5 seconds to exit.'
+                }
+                return $true
+            }
+            if ($this.Waits.Count -ne 1 -or $milliseconds -ne 15000) {
+                throw 'The activation helper must be given 15 seconds to exit.'
+            }
+            Set-Content -LiteralPath $this.OutputPath -Value 'synthetic activation entered'
+            Set-Content -LiteralPath $this.ErrorPath -Value ''
+            if ($this.Failure -eq 'activation-timeout') { return $false }
+            if ($this.Failure -eq 'activation-error') {
+                Set-Content -LiteralPath $this.ErrorPath -Value 'synthetic activation error'
+                $this.ExitCode = 1
+            } elseif ($this.Failure -ne 'activation-missing') {
+                $id = if ($this.Failure -eq 'activation-invalid') { 'invalid' } else { '42' }
+                Set-Content -LiteralPath $this.PidPath -Value $id
+                Add-Content -LiteralPath $this.OutputPath -Value 'synthetic activation returned PID'
+            }
+            if ($this.Failure -eq 'activation-release-timeout') { return $false }
+            $this.HasExited = $true
+            return $true
+        }
+        $worker | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
+        $state.Workers.Add($worker)
         return $worker
     }
     function Stop-Process {
         param([int] $Id, [switch] $Force)
         $global:PackageSmokeTestState.Stopped.Add($Id)
         if ($Id -eq 85) { throw 'An unrelated app must never be terminated.' }
-        if ($Id -eq 42 -or $Id -eq 84) {
-            foreach ($process in $global:PackageSmokeTestState.Processes) {
-                if ($process.Id -eq $Id) { $process.HasExited = $true }
-            }
-        } else {
-            Microsoft.PowerShell.Management\Stop-Process -Id $Id -Force:$Force
+        $owned = @(
+            (@($global:PackageSmokeTestState.Processes) + @($global:PackageSmokeTestState.Workers)) |
+                Where-Object { $_.Id -eq $Id }
+        )
+        if (-not $owned -or -not $Force) { throw "Unexpected process termination: $Id" }
+        foreach ($process in $owned) {
+            $process.HasExited = $true
         }
     }
     function Get-AppxPackage {
@@ -118,7 +145,6 @@ if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sle
         $global:PackageSmokeTestState.Processes.Add($process)
         return $process
     }
-    Reset-ActivationFixture
     $diagnostics = Join-Path $root 'diagnostics'
     & $script -Layout $layout -DiagnosticsDirectory $diagnostics -Iterations 3 -Constrained | Out-Null
     if ($global:PackageSmokeTestState.Registered -or $global:PackageSmokeTestState.Launches -ne 6 -or
@@ -149,13 +175,12 @@ if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sle
         @{ kind = 'activation-release-timeout'; message = 'activation timed out after 15 seconds' }
     )) {
         $global:PackageSmokeTestState.Launches = 0
+        $global:PackageSmokeTestState.ActivationLaunches = 0
         $global:PackageSmokeTestState.FailAt = 2
         $global:PackageSmokeTestState.FailKind = $failure.kind
-        Reset-ActivationFixture -FailAt 2 -FailKind $failure.kind
         $failureDiagnostics = Join-Path $root $failure.kind
         $rejected = $false
         $messages = [Collections.Generic.List[string]]::new()
-        $elapsed = [Diagnostics.Stopwatch]::StartNew()
         try {
             & $script -Layout $layout -DiagnosticsDirectory $failureDiagnostics -Iterations 3 |
                 ForEach-Object { $messages.Add([string]$_) }
@@ -164,11 +189,9 @@ if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sle
             if ($_.Exception.Message -notmatch $failure.message) { throw }
             $rejected = $true
         }
-        $elapsed.Stop()
         $expectedLaunches = if ($failure.kind -like 'activation-*') { 1 } else { 2 }
-        $fixture = Get-Content -LiteralPath (Join-Path $root 'activation-fixture.json') -Raw | ConvertFrom-Json
         if (-not $rejected -or $global:PackageSmokeTestState.Launches -ne $expectedLaunches -or
-            $fixture.Launches -ne 2 -or $global:PackageSmokeTestState.Registered) {
+            $global:PackageSmokeTestState.ActivationLaunches -ne 2 -or $global:PackageSmokeTestState.Registered) {
             throw 'A failed observation must stop immediately without retrying or retaining registration.'
         }
         if ($failure.kind -like 'activation-*') {
@@ -184,9 +207,8 @@ if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sle
                 throw 'Activation errors must retain the helper error output.'
             }
             if ($failure.kind -like '*timeout') {
-                if ($elapsed.Elapsed.TotalSeconds -lt 15 -or $elapsed.Elapsed.TotalSeconds -ge 40 -or
-                    $messages[0] -notmatch 'preparing activation') {
-                    throw 'A hung activation must be announced before launch and bounded independently of app execution.'
+                if ($messages[0] -notmatch 'preparing activation') {
+                    throw 'A hung activation must be announced before launch.'
                 }
                 $pidFile = Join-Path $last 'package-smoke-activation-pid.txt'
                 if ((Test-Path -LiteralPath $pidFile) -ne ($failure.kind -eq 'activation-release-timeout')) {
@@ -198,16 +220,20 @@ if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sle
     if (@($global:PackageSmokeTestState.Stopped | Where-Object { $_ -eq 42 }).Count -ne 1 -or
         @($global:PackageSmokeTestState.Stopped | Where-Object { $_ -eq 84 }).Count -ne 2 -or
         @($global:PackageSmokeTestState.Stopped | Where-Object {
-            $global:PackageSmokeTestState.Workers.Contains($_)
+            $_ -ge 1000
         }).Count -ne 2) {
         throw 'Timeouts must terminate the hung helpers and only app processes owned by this test.'
     }
     if (@($global:PackageSmokeTestState.Processes | Where-Object { $_.Id -ne 85 -and -not $_.Disposed }).Count) {
         throw 'Owned app process handles must always be disposed.'
     }
-    foreach ($workerId in $global:PackageSmokeTestState.Workers) {
-        if (Microsoft.PowerShell.Management\Get-Process -Id $workerId -ErrorAction SilentlyContinue) {
-            throw "Activation helper $workerId was left running."
+    foreach ($worker in $global:PackageSmokeTestState.Workers) {
+        $hung = $worker.Failure -in @('activation-timeout', 'activation-release-timeout')
+        $expectedWaits = if ($hung) { '15000,5000' } else { '15000' }
+        if (-not $worker.HasExited -or -not $worker.Disposed -or
+            ($worker.Waits -join ',') -cne $expectedWaits -or
+            $global:PackageSmokeTestState.Stopped.Contains($worker.Id) -ne $hung) {
+            throw "Activation helper $($worker.Id) must observe exact timeout, termination and disposal semantics."
         }
     }
     $global:PackageSmokeTestState.Registered = $true
@@ -220,18 +246,9 @@ if ($failed -and $fixture.FailKind -eq 'activation-release-timeout') { Start-Sle
     if (-not $rejected -or -not $global:PackageSmokeTestState.Registered -or $global:PackageSmokeTestState.Launches -ne 1) {
         throw 'Existing development registrations must remain untouched.'
     }
-    Write-Output 'PASS: repeated/constrained packaged smoke, bounded activation and release, retained failure phases, fail-fast assertions and isolated cleanup.'
+    Write-Output 'PASS: deterministic repeated/constrained packaged smoke, bounded activation and release, retained failure phases, fail-fast assertions and isolated cleanup.'
 }
 finally {
-    if (Test-Path variable:global:PackageSmokeTestState) {
-        foreach ($workerId in $global:PackageSmokeTestState.Workers) {
-            $worker = Microsoft.PowerShell.Management\Get-Process -Id $workerId -ErrorAction SilentlyContinue
-            if ($worker) {
-                try { Microsoft.PowerShell.Management\Stop-Process -Id $workerId -Force }
-                finally { $worker.Dispose() }
-            }
-        }
-    }
     $env:LOCALAPPDATA = $originalLocalAppData
     Remove-Variable -Name PackageSmokeTestState -Scope Global -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
