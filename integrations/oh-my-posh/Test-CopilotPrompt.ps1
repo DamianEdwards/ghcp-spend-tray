@@ -45,7 +45,8 @@ try {
     $previousAlias = Get-Alias Set-PoshContext -Scope Global -ErrorAction SilentlyContinue
     New-Alias Set-PoshContext Invoke-SyntheticContext -Scope Global -Force
     $initialization = Get-AppInitialization
-    Invoke-Expression $initialization
+    Assert-Equal (($initialization.TrimEnd() -split "`n").Count) 1 'Native stdout provides one complete init expression'
+    $initialization -split "`r?`n" | Where-Object { $_.Length -gt 0 } | Invoke-Expression
     Assert-Equal ((Get-Alias Set-PoshContext).Definition) 'Invoke-CopilotPromptContext' 'Emitted init installs hook'
     $global:LASTEXITCODE = 42
     Set-PoshContext $false
@@ -53,12 +54,19 @@ try {
     Assert-Equal $script:PreviousCalls 1 'Existing context composed'
     Assert-Equal $env:COPILOT_SPEND '$40 (~80%)' 'App custom budget consumed'
     Assert-Equal $env:COPILOT_CONNECTION_STATE 'connected' 'Connection field'
-    Invoke-Expression (Get-AppInitialization)
+    (Get-AppInitialization) -split "`r?`n" | Where-Object { $_.Length -gt 0 } | Invoke-Expression
     Set-PoshContext $true
     Assert-Equal $script:PreviousCalls 2 'Repeated initialization is not recursive'
     Disable-CopilotPrompt
     Assert-Equal (Get-Alias Set-PoshContext).Definition 'Invoke-SyntheticContext' 'Previous alias restored'
     Assert-Equal ([string]::IsNullOrEmpty($env:COPILOT_SPEND)) $true 'Exports removed'
+    # Exercise real native line streaming, not a captured whole-string evaluation.
+    & $fixture init pwsh --data-dir $directory | Invoke-Expression
+    Assert-Equal ((Get-Alias Set-PoshContext).Definition) 'Invoke-CopilotPromptContext' 'Direct native init pipeline installs the hook'
+    Update-CopilotPrompt
+    Assert-Equal $env:COPILOT_SPEND '$40 (~80%)' 'Direct native pipeline configures snapshot query'
+    Disable-CopilotPrompt
+    Assert-Equal (Get-Alias Set-PoshContext).Definition 'Invoke-SyntheticContext' 'Direct native pipeline restores prior hook'
     if ($Render) {
         $theme = Join-Path $directory 'theme.omp.json'
         $segment = Get-Content (Join-Path $PSScriptRoot 'copilot.segment.json') -Raw | ConvertFrom-Json

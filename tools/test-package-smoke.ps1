@@ -33,6 +33,10 @@ try {
                     'init pwsh \| Invoke-Expression') {
                     throw 'Packaged initialization must test the direct PowerShell profile pipeline.'
                 }
+                if ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ArgumentList[3])) -notmatch
+                    [regex]::Escape("`$ErrorActionPreference = 'Stop'")) {
+                    throw 'Packaged init parser errors must terminate the profile pipeline.'
+                }
             }
             elseif (($ArgumentList -join ',') -cne 'usage,--format,json' -or -not $PassThru) {
                 throw 'Usage alias must receive read-only JSON arguments.'

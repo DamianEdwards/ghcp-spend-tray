@@ -33,7 +33,12 @@ public static class ShellIntegration
             code += "Initialize-CopilotPrompt -AppExecutable " + QuotePowerShell(executable);
             foreach ((string name, string value) in options)
                 code += (name == "--account" ? " -Account " : " -DataDirectory ") + QuotePowerShell(value);
-            return code + " -InstallHook\n";
+            code += " -InstallHook\n";
+            // Native stdout is piped as individual lines to Invoke-Expression.
+            // Keep the complete adapter in one expression, not partial function bodies.
+            string encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(code));
+            return "Invoke-Expression ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" +
+                encoded + "')))";
         }
         code += "initialize_copilot_prompt --app-executable " + QuotePosix(executable);
         foreach ((string name, string value) in options) code += " " + name + " " + QuotePosix(value);

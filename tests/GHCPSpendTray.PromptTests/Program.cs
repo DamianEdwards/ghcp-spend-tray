@@ -50,11 +50,17 @@ try
         var initialization = UsageCommands.Run(["init", shell, "--data-dir", initializationDirectory,
             "--account", "github.com:123"], initializationDirectory, now, quotedApp);
         Equal(initialization.ExitCode, 0, "embedded initialization available");
-        Check(initialization.Output.Contains(shell == "pwsh" ? "function Initialize-CopilotPrompt" : "initialize_copilot_prompt()",
+        string script = initialization.Output;
+        if (shell == "pwsh")
+        {
+            Equal(initialization.Output.TrimEnd().Split('\n').Length, 1, "PowerShell init is one pipeline expression");
+            script = DecodePowerShellInitialization(initialization.Output);
+        }
+        Check(script.Contains(shell == "pwsh" ? "function Initialize-CopilotPrompt" : "initialize_copilot_prompt()",
             StringComparison.Ordinal), "embedded canonical shell function");
-        Check(initialization.Output.TrimEnd().EndsWith(shell == "pwsh" ? "-InstallHook" : "--install-hook", StringComparison.Ordinal),
+        Check(script.TrimEnd().EndsWith(shell == "pwsh" ? "-InstallHook" : "--install-hook", StringComparison.Ordinal),
             "initialization includes hook installation");
-        Check(initialization.Output.Contains(shell == "pwsh" ? "app '' $()" : "app '\"'\"' $()", StringComparison.Ordinal),
+        Check(script.Contains(shell == "pwsh" ? "app '' $()" : "app '\"'\"' $()", StringComparison.Ordinal),
             "app path is quoted for the selected shell");
         Check(!Directory.Exists(initializationDirectory), "init does not read or create app data");
     }
@@ -173,7 +179,7 @@ try
         string executable = Path.GetFullPath(args[1]);
         var appInit = Execute(executable, ["init", "pwsh", "--data-dir", root]);
         Equal(appInit.Code, 0, "actual app initialization exit");
-        Check(appInit.Output.Contains("Initialize-CopilotPrompt -AppExecutable", StringComparison.Ordinal), "actual app embedded PowerShell init");
+        Check(DecodePowerShellInitialization(appInit.Output).Contains("Initialize-CopilotPrompt -AppExecutable", StringComparison.Ordinal), "actual app embedded PowerShell init");
         var appSegment = Execute(executable, ["integration", "oh-my-posh", "segment"]);
         Equal(appSegment.Code, 0, "actual app embedded segment exit");
         Equal(appSegment.Output.Trim(), segmentExport.Output.Trim(), "actual executable ships canonical segment");
@@ -240,5 +246,16 @@ static (int Code, string Output, string Error) Execute(string executable, string
         process.Kill(entireProcessTree: true);
         throw new TimeoutException("App CLI started UI or did not exit.");
     }
+
     return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
+}
+
+static string DecodePowerShellInitialization(string output)
+{
+    const string prefix = "Invoke-Expression ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('";
+    const string suffix = "')))";
+    string expression = output.TrimEnd();
+    if (!expression.StartsWith(prefix, StringComparison.Ordinal) || !expression.EndsWith(suffix, StringComparison.Ordinal))
+        throw new InvalidDataException("Unexpected PowerShell initialization expression.");
+    return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(expression[prefix.Length..^suffix.Length]));
 }

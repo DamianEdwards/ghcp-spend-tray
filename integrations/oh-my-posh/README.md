@@ -142,6 +142,12 @@ After your existing Oh My Posh initialization in `$PROFILE`, add:
 ghcp-spend-tray.exe init pwsh | Invoke-Expression
 ```
 
+PowerShell native pipelines pass stdout one line at a time. `init pwsh` therefore
+emits one complete expression that decodes the embedded UTF-8 adapter from
+Base64 before evaluating it, rather than streaming partial function definitions.
+Base64 is transport encoding, not encryption; the canonical adapter source
+remains `CopilotPrompt.ps1`. Bash/zsh initialization remains ordinary shell text.
+
 This profile form uses the installed **console execution alias**, not a raw
 GUI-subsystem development executable. Development scripts can still source the
 canonical adapter from the repository and call

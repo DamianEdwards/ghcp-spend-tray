@@ -48,7 +48,7 @@ try {
         Write-Output 'PASS: installed execution alias returns JSON and exits without starting the tray UI.'
     }
     finally { $query.Dispose() }
-    $profileCode = "& '" + $alias.Replace("'", "''") + "' init pwsh | Invoke-Expression; " +
+    $profileCode = "`$ErrorActionPreference = 'Stop'; & '" + $alias.Replace("'", "''") + "' init pwsh | Invoke-Expression; " +
         "if ((Get-Alias Set-PoshContext -ErrorAction Stop).Definition -ne 'Invoke-CopilotPromptContext') { throw 'Init hook missing.' }; " +
         "Disable-CopilotPrompt; Write-Output 'PASS: bundled shell initialization.'"
     $encodedProfile = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($profileCode))
@@ -65,10 +65,18 @@ try {
         if ($init.ExitCode -ne 0 -or
             [IO.File]::ReadAllText($initOutput).Trim() -cne 'PASS: bundled shell initialization.' -or
             [IO.File]::ReadAllText($initError).Trim()) {
-            throw 'Packaged shell initialization pipeline failed.'
+            Write-Output ([IO.File]::ReadAllText($initOutput))
+            Write-Output ([IO.File]::ReadAllText($initError))
+            throw "Packaged shell initialization pipeline failed (exit code $($init.ExitCode))."
         }
     }
-    finally { $init.Dispose() }
+    finally {
+        $init.Dispose()
+        if ($DiagnosticsDirectory) {
+            & "$PSScriptRoot\export-smoke-diagnostics.ps1" -DataDirectory $queryDirectory `
+                -Destination (Join-Path $DiagnosticsDirectory 'shell-init') | Out-Null
+        }
+    }
     $result = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalState\Data\native-smoke-result.txt"
     for ($iteration = 1; $iteration -le $Iterations; $iteration++) {
         foreach ($arguments in @('--package-smoke-test', '--package-smoke-test --demo-empty')) {

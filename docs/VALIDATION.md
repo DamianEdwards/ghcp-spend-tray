@@ -174,6 +174,10 @@ execution alias and its `init pwsh | Invoke-Expression` profile pipeline before 
 App initialization output is executable shell code; cached usage output remains
 data-only. Emitted-code tests check quoting, repeated initialization, and hook
 restoration against the same scripts embedded as assembly resources.
+PowerShell coverage includes native stdout piped directly into
+`Invoke-Expression`, not only evaluating a captured whole script. Packaged
+initialization stdout/stderr are retained on failures; usage JSON is excluded
+from diagnostic artifacts because it can contain private consumption data.
 The manifest permits separate query
 processes; the app's own coordinator still enforces one GUI instance.
 Do not treat an unpackaged executable test as proof of alias activation.
