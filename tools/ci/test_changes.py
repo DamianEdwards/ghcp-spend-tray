@@ -5,19 +5,26 @@ from changes import classify
 class ChangesTests(unittest.TestCase):
     def test_platform_boundaries(self):
         for path in ("src/GHCPSpendTray.Mac/Views.swift", "src/GHCPSpendTray.MacBridge/Exports.cs",
+                     "src/GHCPSpendTray.MacBridge/FormValidation.cs",
+                     "tests/GHCPSpendTray.MacTests/SettingsFormTests.swift",
                      "packaging/macos/Info.plist", "tests/GHCPSpendTray.MacTests/PlatformTests.swift",
                      "tools/macos/build.sh", "tools/macos/architecture.py", "tools/macos/test_architecture.py",
-                     ".github/actions/setup-macos/action.yml", ".github/workflows/notarization-status.yml"):
+                     ".github/actions/setup-macos/action.yml", ".github/workflows/notarization-status.yml",
+                     ".github/workflows/macos-updates.yml", "packaging/macos/sparkle.json", "tools/macos/updates.py",
+                     "tools/macos/rehearsal.py", "tools/macos/rehearsal/AppRehearsal.swift",
+                     "tools/macos/rehearsal/Server.swift", "tools/macos/test_rehearsal.py"):
             self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False, prompt=False), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
                      "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1",
                      "tools/get-windows-app-runtime.ps1", "tools/test-windows-app-runtime.ps1",
                      "tools/test-package-deployment.ps1", ".github/workflows/store-package.yml",
+                     ".github/actions/setup-windows-storage/action.yml",
                      "GHCPSpendTray.slnx"):
             self.assertEqual(classify([path]), dict(windows=True, macos=False, markdown=False, prompt=False), path)
 
     def test_shared_and_unknown(self):
         for path in ("src/GHCPSpendTray.Core/Models.cs", "src/GHCPSpendTray.Application/UiModels.cs",
+                     "tests/GHCPSpendTray.SharedTests/BudgetBridgeTests.cs",
                      "global.json", "Directory.Build.props", ".github/workflows/verify.yml", ".github/workflows/codeql.yml",
                      "tools/ci/changes.py", "tests/GHCPSpendTray.SharedTests/Program.cs", "new-file",
                      "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",

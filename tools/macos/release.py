@@ -122,7 +122,7 @@ def stage(value):
             arguments.append("--prerelease")
         run(*arguments)
     assets = sorted(Path("artifacts/macos-release").iterdir())
-    expected = {f"GHCPSpendTray-macOS-{value}.dmg", "SHA256SUMS", "release-macos.json"}
+    expected = {f"GHCPSpendTray-macOS-{value}.dmg", "SHA256SUMS", "release-macos.json", "appcast.xml"}
     if {asset.name for asset in assets} != expected:
         raise ValueError("Unexpected macOS release assets.")
     run("gh", "release", "upload", tag, *(str(asset) for asset in assets), "--clobber")

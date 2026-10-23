@@ -8,6 +8,128 @@ Only selected platforms build, request environment approval, and publish.
 Shared changes should normally receive a release on both platforms, but their
 numbers need not match.
 
+## Telemetry build configuration
+
+Configure `GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` as a repository or
+environment Actions **variable**, available to both `production` and
+`microsoft-store`. The Windows, macOS, and Store packaging steps pass it to
+MSBuild, which embeds it in the shared application assembly's
+`ApplicationInsightsConnectionString` metadata. It is readable ingestion
+configuration, not an Azure management credential. Do not put the value in
+source, shell profiles, or committed configuration. An omitted/empty value
+disables tracked export; ordinary verification does not need it.
+
+For local builds set the environment variable in the same shell as the build.
+Do not pass a semicolon-separated connection string directly as a `-p:` argument.
+macOS Preview/Stable builds use the native bundle version and `github-release`
+installation source; Development builds never send tracked events. Windows
+reports Microsoft Store, sideload, or unpackaged installation context.
+Demo/smoke/isolated portable modes do not export tracked events by default.
+Windows offers an explicit synthetic verification exception described below.
+
+The independent diagnostic pipeline uses standard `OTEL_EXPORTER_OTLP_*`
+environment settings. For an Aspire dashboard's HTTP/protobuf receiver:
+
+```powershell
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:18890'
+$env:OTEL_EXPORTER_OTLP_PROTOCOL = 'http/protobuf'
+# If the receiver requires an API key, supply OTEL_EXPORTER_OTLP_HEADERS locally.
+```
+
+The app must inherit these variables at launch. macOS apps started by Finder do
+not automatically inherit terminal environment variables; launch the bundle
+executable from the configured terminal for diagnostic sessions.
+Signal-specific endpoint/header/protocol/timeout settings are supported by the
+OTel exporter; only signals with a configured endpoint (or the common endpoint)
+are activated. `OTEL_SDK_DISABLED=true` disables developer diagnostics.
+On macOS, isolated demo and smoke runs also initialize this diagnostic pipeline,
+but never enable tracked Azure export, even when running a Preview/Stable bundle.
+For a synthetic end-to-end check against a local Aspire dashboard:
+
+```bash
+aspire dashboard run --frontend-url http://127.0.0.1:18888 \
+    --otlp-grpc-url http://127.0.0.1:18889 --otlp-http-url http://127.0.0.1:18890 \
+    --allow-anonymous
+# In another terminal, after bash tools/macos/build.sh:
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:18890 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+python3 tools/macos/smoke-test.py artifacts/macos/GHCPSpendTray.app
+aspire otel spans GHCPSpendTray --dashboard-url http://127.0.0.1:18888
+aspire otel logs GHCPSpendTray --dashboard-url http://127.0.0.1:18888
+```
+
+Anonymous dashboard access is for this loopback-only local check, not a shared
+or production endpoint. The smoke runner uses temporary synthetic profiles and
+exits both app instances; stop the dashboard after verification.
+
+Diagnostic sampling, batch options and resource attributes use the OTel SDK's
+supported environment settings. These do not configure the tracked pipeline.
+HTTP spans use .NET 10's native `System.Net.Http` ActivitySource. The transport
+uses a no-output context propagator so collecting spans does not send trace
+headers to GitHub; a null propagator would disable the HTTP spans themselves.
+
+Tracked custom events are `app.started`, `data.refresh` (per account refresh
+completion, including failures), and `app.error` (fixed categories only).
+`account.count` is the number configured, not the number successfully refreshed.
+`enduser.pseudo.id` maps to Application Insights `user_Id`; it is intentionally
+not an authenticated account ID. DAU is distinct app data profiles, not distinct
+people, and excludes opt-outs and lost deliveries. No daily event or sampling
+is applied. A sleeping app or server-directed refresh deferral can delay events;
+the app does not wake a machine or bypass GitHub rate limits for analytics.
+
+Example KQL:
+
+```kusto
+customEvents
+| where timestamp > ago(30d)
+| where name in ("app.started", "data.refresh") and isempty(operation_SyntheticSource)
+| where toint(customDimensions["account.count"]) > 0
+| summarize ActiveProfiles=dcount(user_Id) by bin(timestamp, 1d)
+```
+
+The shared test harness validates the actual Azure exporter payload without
+network access. To opt into a synthetic live ingestion check, set
+`GHCP_TELEMETRY_SMOKE_CONNECTION_STRING` for that harness invocation only.
+It tags events with `operation_SyntheticSource=GHCPSpendTray.TelemetryVerification`;
+exclude synthetic events from usage reports. Never exercise real accounts or
+credentials in telemetry tests.
+
+### Interactive Windows telemetry verification
+
+Build with `GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` set, then launch the
+published app with an isolated absolute data directory and both `--demo` and
+`--verify-telemetry`:
+
+```powershell
+$env:GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING = '<Application Insights connection string>'
+.\tools\publish.ps1 -Runtime win-x64
+Remove-Item Env:\GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING
+$data = Join-Path $PWD 'artifacts\interactive-telemetry'
+& .\artifacts\publish\win-x64\GHCPSpendTray.exe --portable --data-dir $data --demo --verify-telemetry
+```
+
+The switch also supports `--demo-empty` and `--demo-unlimited`, but rejects
+normal-account and smoke-test modes and builds without ingestion configuration.
+Every tracked event uses the synthetic source
+`GHCPSpendTray.TelemetryVerification`, so the DAU query above excludes it.
+Startup emits `app.started`; demo refreshes emit `data.refresh` for each
+synthetic account. No real accounts or consumption APIs are accessed.
+The UUID and saved telemetry preference live under the isolated directory's
+`telemetry-verification` subdirectory. Settings > General > Share basic app
+telemetry still applies when saved; disabling it drops queued events and stops
+new ones. Restarting with the same directory preserves both UUID and opt-out.
+An in-flight request may finish after disabling.
+
+In Application Insights Logs, choose a suitable time range and run:
+
+```kusto
+customEvents
+| where operation_SyntheticSource == "GHCPSpendTray.TelemetryVerification"
+| where customDimensions["installation.source"] == "demo"
+| project timestamp, name, user_Id, customDimensions
+| order by timestamp desc
+```
+
 ## Choose platforms and version bumps
 
 The **Release** workflow has these inputs:
@@ -248,8 +370,9 @@ SDK/build configuration, CI routing, or unrecognized paths run both. Markdown
 changes run the Markdown job without native builds. Manual Verify runs run all
 checks. The stable **Verification** gate requires all applicable jobs to
 succeed and fails if change detection fails. Selected Release jobs check that gate
-on the pinned main commit and rerun their platform's verification before
-publishing, even when its previous main checks were legitimately skipped.
+on the pinned main commit without repeating CI's test suites. Release still
+rebuilds the production-versioned artifacts and validates their identity,
+packaging, signatures, provenance and downloaded assets before publishing.
 
 Verify runs managed/Native AOT tests and packaging/startup smoke on separate
 Windows runners after change detection. Each job caches only NuGet packages,
@@ -546,7 +669,8 @@ users need no .NET installation. macOS 15 is
 the minimum deployment target. Keychain, notifications, and login-item calls
 are implemented natively in Swift; the shared C# application controller handles
 auth, storage, scheduling, accounting, and alert decisions. There is no IPC
-server, web frontend, or helper process.
+server or web frontend. The app also embeds the checksum-pinned Sparkle framework
+and its native updater helpers; all bundled Mach-O files are arm64-only.
 
 `packaging/macos/version.txt` is only the local Mac development default.
 `bash tools/macos/build.sh 0.2.0 Preview` overrides version/channel locally.
@@ -562,6 +686,60 @@ SDKROOT="$(xcrun --sdk macosx26.5 --show-sdk-path)" bash tools/macos/verify.sh
 Use an SDK actually installed on your machine. Local output is **ad-hoc signed
 development software**, not notarized public distribution. Do not change
 Gatekeeper settings or install a local trust certificate to distribute it.
+
+### Local end-to-end update rehearsal
+
+Use a native Apple-silicon Mac with the normal development prerequisites and a
+usable **Developer ID Application** private key in your login Keychain:
+
+```bash
+python3 tools/macos/rehearsal.py \
+  --signing-identity 'Developer ID Application: Your Name (TEAMID)'
+```
+
+A certificate SHA-1 fingerprint can be supplied instead of its display name.
+The command signs only disposable generated bundles; it neither exports the
+Developer ID private key nor changes Keychain access/trust settings. If
+`codesign` cannot access the key, authorize it yourself using Keychain
+Access/a local Terminal. Ad-hoc signatures are insufficient for this rehearsal's
+cross-version Keychain-access check. Signing timestamps contact Apple's service;
+all update downloads are served by a native listener bound only to `127.0.0.1`.
+
+The runner sequentially builds two versions of the actual SwiftUI/Native AOT
+app with compile-only `UPDATE_REHEARSAL` hooks, distinct executable bytes,
+arm64 Sparkle helpers, hardened runtime and Developer ID signatures.
+Each scenario uses a unique disposable bundle identity and data directory,
+ephemeral Ed25519 keys, signed appcasts and signed DMGs. It exercises manual
+download/replacement/relaunch, automatic download followed by Install and
+Relaunch, installation on quit, download/installation cancellation, corrupted
+archives, incorrect archive signatures and truncated downloads. Successful
+updates require exact installed bundle bytes, permissions and framework
+symlinks, a new process at the same path, preserved synthetic files and
+Keychain items, native updater preferences, and signed-downgrade rejection.
+Failure scenarios require specific callbacks and an unchanged, runnable A.
+Pass `--scenario manual` (or another reported scenario name) to run a subset.
+
+Reports, per-scenario events, app logs and the listener log remain under
+`artifacts/macos-rehearsal/<unique-run-id>/` for inspection. Generated private
+Ed25519 seeds are held outside the checkout and removed at exit. The runner
+stops its processes, deletes only its unique synthetic credential/defaults,
+and restores the ordinary development build after execution. Real accounts,
+your installed app, login startup and the production feed are not used.
+There is no release, tag, push, Pages deployment or notarization submission.
+
+The rehearsal uses a supported custom Sparkle user driver to automate choices
+inside the real app and real updater/installer. It does **not** prove the
+standard update dialogs or user interaction with them. Synthetic settings and
+history fixtures prove external-file preservation, not account/schema migration.
+Local HTTP is allowed only in these explicitly compiled rehearsal builds;
+ordinary builds retain their HTTPS-only updater guard. The normal build script
+refuses rehearsal flags with Preview/Stable channels, and production package
+inspection rejects rehearsal markers.
+
+These builds are signed but **not notarized**. Production notarization,
+quarantine/Gatekeeper behavior on a downloaded app, privileged/read-only
+install locations, actual public HTTPS delivery/Pages deployment and macOS 15
+execution of this full replacement exercise remain separate acceptance checks.
 
 ### Apple signing configuration
 
@@ -579,6 +757,9 @@ is no Mac App Store app, entitlement, or submission workflow.
 | Secret `MACOS_NOTARY_KEY` | Contents of a team App Store Connect API `.p8` key authorized for notarization |
 | Secret `MACOS_NOTARY_KEY_ID` | API key ID |
 | Secret `MACOS_NOTARY_ISSUER` | API issuer ID |
+| Variable `SPARKLE_PUBLIC_ED_KEY` | Base64 Ed25519 public key embedded in public app bundles |
+| Secret `SPARKLE_PRIVATE_ED_KEY` | Matching base64 32-byte private seed exported by Sparkle |
+| Variable `MACOS_UPDATE_FEED_URL` | Optional override of `https://damianedwards.github.io/ghcp-spend-tray/appcast.xml`; must match this repository's Pages URL |
 
 These credentials cannot be generated from source or inferred from Windows
 signing configuration. Store them in environment secrets, not workflow files,
@@ -587,7 +768,8 @@ only for the notarization service, not App Store submission.
 
 The workflow imports the certificate into a temporary unlocked Keychain,
 signs the native library and app inside-out with hardened runtime and a secure
-timestamp, and notarizes/staples the app. No JIT or disabled library-validation
+timestamp, including Sparkle's XPC services, Autoupdate, updater app and framework,
+and notarizes/staples the app. No JIT or disabled library-validation
 entitlement is needed for Native AOT. It then creates, signs, notarizes and
 staples a DMG containing the app and an Applications link. Temporary signing
 credentials/Keychain are removed by the script's exit trap.
@@ -633,14 +815,19 @@ and system-default trust, never an **Always Trust** override.
    macOS version components are limited to major `0..9999`, minor/patch
    `0..99`; `0.0.0` is forbidden. A bump exceeding these limits fails rather
    than wrapping to a different component.
-3. The workflow validates source/version, reruns Mac verification, rebuilds with
-   that version, signs/notarizes, exercises the hardened app with synthetic
+3. The workflow validates source/version and the exact commit's successful CI
+   without rerunning its test suites, rebuilds with that version,
+   signs/notarizes, exercises the hardened app with synthetic
    data, attests the DMG, and creates a `macos-v<version>` draft release.
    It downloads the draft assets and verifies their exact bytes, notarization,
    Gatekeeper acceptance and attestation before publishing.
 
 Mac release assets are `GHCPSpendTray-macOS-<version>.dmg`,
-`release-macos.json`, and `SHA256SUMS`. Metadata records platform, version,
+`release-macos.json`, `appcast.xml`, and `SHA256SUMS`. The one-release appcast
+and final, stapled DMG are Ed25519 signed after notarization, before checksums
+and draft upload. The feed references the exact immutable versioned download,
+declares macOS 15 and Apple silicon, and includes a link to the release notes.
+Metadata records platform, version,
 source commit, originating workflow run ID, bundle identifier, architectures,
 and notarization. Current metadata requires `architectures: ["arm64"]`;
 universal/Intel metadata is rejected before draft staging. Mac releases
@@ -662,13 +849,81 @@ Before production acceptance, complete the Mac checklist in
 [VALIDATION.md](VALIDATION.md), including clean install/update, login startup,
 Keychain prompts, notification permissions, and VoiceOver.
 
+### Set up Sparkle updates once
+
+1. In repository **Settings > Pages**, choose **GitHub Actions** as the source.
+   The update workflow deploys the site; do not enable branch-based publishing.
+   Keep the **github-pages** environment restricted to `main`.
+2. Restore the pinned tools with `source tools/macos/sparkle.sh` from the
+   repository root. Generate a dedicated signing key with
+   `"$SPARKLE_ROOT/bin/generate_keys" --account ghcpspendtray`.
+   This stores the private key in your login Keychain and prints the public key.
+   Add the public key as **production** variable `SPARKLE_PUBLIC_ED_KEY`.
+3. Export the seed with
+   `"$SPARKLE_ROOT/bin/generate_keys" --account ghcpspendtray -x /absolute/private/location/sparkle-seed`.
+   Use a private location outside the checkout. Set the file's contents as
+   **production** secret `SPARKLE_PRIVATE_ED_KEY`, keep a secure offline backup,
+   and remove the temporary exported file. Never paste it into issues, logs,
+   source, commands with literal keys, or app bundles.
+4. For a fork/custom Pages hostname, set `MACOS_UPDATE_FEED_URL` to the site's
+   HTTPS URL followed by `/appcast.xml` before the first public build. The feed
+   workflow verifies that this URL matches the configured Actions-based Pages
+   site. The address is embedded in installed apps; keep it stable.
+
+The signing tools require the modern 32-byte seed format, not Sparkle's legacy
+64-byte export. Private/public key mismatch stops signing before notarization.
+Existing Apple credentials remain necessary and are separate from Sparkle keys.
+Do not change both signing systems simultaneously. This publisher verifies
+historical appcasts with the configured Sparkle key; key rotation requires a
+deliberate migration of feed verification and already-installed clients, not
+simply replacing environment settings.
+
+After publishing a stable Mac release, **Release** calls **macOS Update Feed**.
+Generation uses the protected **production** environment, reads public releases
+with pagination, verifies their appcast signatures, and assembles a signed,
+numeric-version-ordered feed. Windows tags, drafts and previews are excluded;
+older compatible updates remain available. Legacy releases without Sparkle are
+ignored only after a newer signed update exists. A latest stable release
+missing its appcast blocks deployment rather than silently advertising an older
+version. GitHub Pages serves only the feed/site; DMGs stay in GitHub Releases.
+
+Feed publication is separate from immutable release publication. If Pages
+deployment fails after the DMG is public, **Re-run all jobs** retains the version
+plan, skips the published Mac build, and retries the feed. Alternatively dispatch
+**macOS Update Feed** from `main`: it rebuilds from current public assets without
+bumping versions, signing/notarizing apps, or changing releases. Feed runs are
+serialized through deployment so an older run cannot overwrite a newer feed.
+Preview-only and Windows-only releases do not publish the feed.
+
+The app retains Sparkle's permission prompt and daily schedule. Automatic
+downloads/install-on-quit are off by default and user-controlled; Sparkle stores
+these preferences in native defaults, separate from shared account settings.
+The popup and About page surface gentle reminders without stealing focus.
+Downloaded updates expose **Install and Relaunch...**, which opens Sparkle's
+standard installation UI. About explicitly shows the update version and whether
+it is available to download, downloading, downloaded but still being prepared,
+ready to install, or installing. It confirms installation on quit only after
+Sparkle schedules it, rather than inferring it from the automatic-download
+preference. Quitting means quitting the app, not closing its Settings window.
+Updates preserve the existing bundle identity,
+external Application Support data and Keychain credential targets. Updating
+from a disk image or other non-writable/translocated installation may require
+moving the app to Applications first.
+
+Development/demo/smoke builds never start Sparkle, access its preferences, or
+contact the update feed. Linking and signing its embedded binaries remains part
+of ordinary local/CI verification. The first Sparkle-enabled release must be
+installed manually by existing users; earlier app versions cannot bootstrap
+an updater they do not contain.
+
 ## Updates
 
-A GitHub-hosted `.appinstaller` feed is possible: a stable HTTPS descriptor can
+A Windows GitHub-hosted `.appinstaller` feed is possible: a stable HTTPS descriptor can
 reference versioned release URLs for the bundle and request App Installer update
 checks. It adds feed publication, identity/version coordination, HTTP behavior and
 long-running-process update testing. It is deliberately not implemented now.
-GitHub releases are manually installed/upgraded; no updater or update prompt runs.
+Windows GitHub releases are manually installed/upgraded; no Windows updater or
+update prompt runs. macOS uses the Sparkle workflow described above.
 
 For Store publishing, the Store signs the submitted MSIX packages and manages
 updates; Azure signing remains for direct GitHub distribution. Store API access

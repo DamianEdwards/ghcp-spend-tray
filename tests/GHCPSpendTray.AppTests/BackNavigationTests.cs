@@ -27,6 +27,17 @@ internal static class BackNavigationTests
         }
 
         var account = session.Dashboard.Accounts[0];
+        var usagePage = SettingsPage.About;
+        session.OpenSettings = page => { usagePage = page; opens++; };
+        session.ViewUsage(account.Key);
+        Check(session.Page == SettingsPage.Usage && usagePage == SettingsPage.Usage &&
+            session.UsageAccountKey == account.Key && session.SelectedAccount is null && !session.ShowAddForm,
+            "popup Details opens Usage and targets the account without entering management");
+        int usageRevision = session.UsageNavigationRevision;
+        session.ViewUsage(account.Key);
+        Check(session.UsageNavigationRevision > usageRevision, "repeated Details can bring the same account back into view");
+        session.Navigate(SettingsPage.General);
+        Check(session.UsageAccountKey is null, "leaving Usage clears its navigation target");
         session.EditAccount(account.Key);
         session.ConfirmRemove = true;
         int presentations = opens;
@@ -192,8 +203,8 @@ internal static class BackNavigationTests
         public Task RefreshAccountAsync(string accountKey) => _demo.RefreshAccountAsync(accountKey);
         public Task SaveSettingsAsync(SettingsView settings) => _demo.SaveSettingsAsync(settings);
         public Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
-            bool? showPeriodEstimate = null) =>
-            _demo.SaveAccountAsync(key, displayName, thresholds, spendIncrementUsd, showPeriodEstimate);
+            bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false) =>
+            _demo.SaveAccountAsync(key, displayName, thresholds, spendIncrementUsd, showPeriodEstimate, customBudgetUsd, updateCustomBudget);
         public (string DisplayName, string Thresholds, decimal? SpendIncrementUsd, bool ShowPeriodEstimate) AccountSettings(string key) =>
             _demo.AccountSettings(key);
         public Task RemoveAsync(string key) => _demo.RemoveAsync(key);

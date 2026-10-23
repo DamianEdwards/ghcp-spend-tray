@@ -33,6 +33,7 @@ internal sealed class IdentityWire
 
 internal sealed class UsageWire
 {
+    [JsonPropertyName("enterprise_list")] public JsonElement EnterpriseList { get; set; }
     [JsonPropertyName("quota_snapshots")] public QuotaWire? QuotaSnapshots { get; set; }
     [JsonPropertyName("quota_reset_date")] public JsonElement QuotaResetDate { get; set; }
     [JsonPropertyName("quota_reset_date_utc")] public JsonElement QuotaResetDateUtc { get; set; }
@@ -58,6 +59,7 @@ internal sealed class PremiumWire
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(TokenSet))]
 [JsonSerializable(typeof(UsageSnapshot))]
+[JsonSerializable(typeof(PeriodEstimate))]
 [JsonSerializable(typeof(AlertLedger))]
 public partial class CoreJsonContext : JsonSerializerContext;
 

@@ -3,18 +3,42 @@ import Security
 
 @main
 enum PlatformTests {
-    @MainActor static func main() async throws {
+    @MainActor static func main() async {
+        do {
+            try await run()
+        } catch {
+            FileHandle.standardError.write(Data("FAIL: native macOS tests: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+
+    @MainActor private static func run() async throws {
         try ModelTests.run()
         try PeriodEstimateTests.run()
+        try DailyConsumptionTests.run()
         try NavigationInteractionTests.run()
+        try SettingsFormTests.run()
         try TrayIconRendererTests.run()
         try PopupSmokeReadinessTests.run()
+        try UpdateTests.run()
+        try await CallbackWaitTests.run()
+        try await SparkleTests.run()
         try await NotificationTests.run()
         func check(_ condition: Bool, _ message: String) throws {
             if !condition { throw AppError.message(message) }
         }
         try check(money(nil) == "Unavailable", "Missing consumption must not display zero.")
         try check(money(Decimal(string: "26.25")) == "$26.25", "Exact USD display.")
+        try check(money(50) == "$50.00", "Observed USD amounts retain zero cents.")
+        try check(trackingTargetMoney(1500) == "$1,500" &&
+                  trackingTargetMoney(Decimal(string: "1500.50")!) == "$1,500.50" &&
+                  trackingTargetMoney(Decimal(string: "1500.05")!) == "$1,500.05",
+                  "Budget display omits only zero cents and keeps grouping.")
+        for (value, expected) in [("0", "0%"), ("0.49", "0%"), ("0.5", "1%"),
+                                  ("33.333333333333333333333333333", "33%"), ("52.5", "53%"),
+                                  ("99.5", "100%"), ("125.6", "126%"), ("1500.5", "1501%")] {
+            try check(percentageText(Decimal(string: value)!) == expected, "Whole percentage display for \(value).")
+        }
         try check(try parseAmount("12.50") == Decimal(string: "12.5"), "Exact cent parsing.")
         try check(try parseAmount("") == nil, "Empty amount inherits.")
         for value in ["-1", "1.001", "NaN", "1,50", "1e2", "12oops"] {
@@ -49,5 +73,6 @@ enum PlatformTests {
             throw error
         }
         print("PASS: macOS formatting, date parsing and synthetic Keychain create/read/update/delete/isolation.")
+        try await UsageTrackTests.run()
     }
 }

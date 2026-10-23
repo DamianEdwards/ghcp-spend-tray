@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
       - name: Restore original versions on a rerun
         if: github.run_attempt > 1
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-plan-${{ github.run_id }}
           path: artifacts/release-plan
@@ -67,7 +67,7 @@ jobs:
         run: python3 tools/release/plan.py
       - name: Preserve release plan before building or signing
         if: github.run_attempt == 1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan-${{ github.run_id }}
           path: artifacts/release-plan/plan.json
@@ -87,6 +87,7 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.windows_version }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       PRERELEASE: ${{ inputs.prerelease }}
       MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
       MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
@@ -97,6 +98,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+
+      - uses: ./.github/actions/setup-windows-storage
 
       - name: Validate source, version, identity and signing configuration
         shell: pwsh
@@ -140,11 +143,10 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Verify release source
-        shell: pwsh
-        run: .\tools\verify.ps1 -NativeTests
       - name: Build native bundle
         shell: pwsh
+        env:
+          GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ vars.GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING }}
         run: |
           .\tools\package.ps1 -Version $env:RELEASE_VERSION `
             -IdentityName $env:MSIX_IDENTITY_NAME -Publisher $env:MSIX_PUBLISHER `
@@ -291,8 +293,11 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.macos_version }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       PRERELEASE: ${{ inputs.prerelease }}
       GH_TOKEN: ${{ github.token }}
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+      MACOS_UPDATE_FEED_URL: ${{ vars.MACOS_UPDATE_FEED_URL }}
     steps:
       - name: Checkout pinned main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -305,9 +310,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Verify shared engine and arm64 native app
-        run: bash tools/macos/verify.sh
       - name: Build release version
+        env:
+          GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ vars.GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING }}
         run: |
           channel=Stable
           if [ "$PRERELEASE" = true ]; then channel=Preview; fi
@@ -321,10 +326,11 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: bash tools/macos/sign-package.sh "$RELEASE_VERSION"
       - name: Retain notarization submission IDs and status
         if: ${{ always() && steps.sign.outcome != 'skipped' && steps.sign.outcome != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-notarization-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/macos-notarization/
@@ -340,3 +346,14 @@ jobs:
         run: |
           python3 tools/macos/release.py publish "$RELEASE_VERSION"
           echo "Published notarized [macOS $RELEASE_VERSION]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/macos-v$RELEASE_VERSION) from [$GITHUB_SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)." >> "$GITHUB_STEP_SUMMARY"
+
+  macos_updates:
+    name: Publish macOS update feed
+    needs: [plan, macos]
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.macos_version != '' && !inputs.prerelease && (needs.macos.result == 'success' || needs.macos.result == 'skipped') }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/macos-updates.yml
+    secrets: inherit

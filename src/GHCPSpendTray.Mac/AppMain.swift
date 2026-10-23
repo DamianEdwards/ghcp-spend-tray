@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Darwin
 import SwiftUI
 import UserNotifications
@@ -8,7 +9,7 @@ import UserNotifications
 #endif
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate {
     private var model: AppModel?
     private var statusItems: [String: NSStatusItem] = [:]
     private let popover = NSPopover()
@@ -18,6 +19,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private var activationObserver: NSObjectProtocol?
     private var smoke = false
     private var empty = false
+    private var usageStates = false
+    private var poweringOff = false
+    private var powerObserver: NSObjectProtocol?
+    private var unsavedAlert: NSAlert?
+    #if UPDATE_REHEARSAL
+    private var rehearsal: UpdateRehearsal?
+    #endif
     private let activationName = Notification.Name("com.damianedwards.GHCPSpendTray.activate")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -25,8 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let arguments = Array(CommandLine.arguments.dropFirst())
             smoke = arguments.contains("--smoke-test")
             empty = arguments.contains("--demo-empty")
-            let demo = smoke || empty || arguments.contains("--demo")
-            let allowed = ["--smoke-test", "--demo", "--demo-empty", "--data-dir"]
+            let unlimited = arguments.contains("--demo-unlimited")
+            usageStates = arguments.contains("--demo-usage-states")
+            var demo = smoke || empty || unlimited || usageStates || arguments.contains("--demo")
+            let allowed = ["--smoke-test", "--demo", "--demo-empty", "--demo-unlimited", "--demo-usage-states", "--data-dir"]
             var dataPath: String?
             var index = 0
             while index < arguments.count {
@@ -38,6 +48,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 }
                 index += 1
             }
+            #if UPDATE_REHEARSAL
+            rehearsal = try UpdateRehearsal.load()
+            if let rehearsal {
+                guard arguments.isEmpty else { throw AppError.message("Rehearsal launches do not accept arguments.") }
+                demo = true
+                dataPath = rehearsal.directory.path
+            }
+            #endif
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             let standard = support.appendingPathComponent("GHCPSpendTray", isDirectory: true)
             let directory: URL
@@ -62,23 +80,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 NSApplication.shared.terminate(nil)
                 return
             }
-            let model = AppModel(directory: directory, demo: demo)
+            var updates = AppUpdates()
+            #if UPDATE_REHEARSAL
+            if let rehearsal { updates = AppUpdates.rehearsal(rehearsal) }
+            #endif
+            let model = AppModel(directory: directory, demo: demo, updates: updates)
             self.model = model
             model.showSettings = { [weak self] in self?.openSettings() }
+            model.unsavedChangesRequested = { [weak self] in self?.confirmLeaving() }
             model.dashboardChanged = { [weak self] dashboard in self?.updateMenuBar(dashboard.tray) }
             setupMenuBar(model)
             UNUserNotificationCenter.current().delegate = self
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak model] _ in
                 MainActor.assumeIsolated { if model?.initialized == true { model?.perform("resume") } }
             }
+            powerObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.poweringOff = true }
+            }
             if !demo {
                 activationObserver = DistributedNotificationCenter.default().addObserver(forName: activationName, object: nil, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.openSettings() }
                 }
             }
-            model.start(empty: empty)
+            model.start(empty: empty, unlimited: unlimited, usageStates: usageStates)
+            model.updates.start(channel: Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development",
+                                isolated: demo && !isUpdateRehearsal)
+            #if UPDATE_REHEARSAL
+            rehearsal?.run(model)
+            #endif
             if smoke { Task { await runSmoke(model) } }
         } catch {
+            #if UPDATE_REHEARSAL
+            if Bundle.main.object(forInfoDictionaryKey: "GHCPUpdateRehearsal") != nil {
+                fputs("FAIL: update rehearsal startup: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+            #endif
             if smoke { fputs("FAIL: macOS startup smoke test.\n", stderr); exit(1) }
             let alert = NSAlert()
             alert.messageText = "GHCPSpendTray could not start"
@@ -87,6 +124,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             alert.runModal()
             NSApplication.shared.terminate(nil)
         }
+    }
+
+    private var isUpdateRehearsal: Bool {
+        #if UPDATE_REHEARSAL
+        return rehearsal != nil && rehearsal?.configuration.scenario != "cleanup"
+        #else
+        return false
+        #endif
     }
 
     private func setupMenuBar(_ model: AppModel) {
@@ -100,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         mainMenu.addItem(applicationItem)
         let applicationMenu = NSMenu()
         applicationMenu.addItem(withTitle: "Settings...", action: #selector(settingsAction), keyEquivalent: ",").target = self
+        applicationMenu.addItem(withTitle: "Check for Updates...", action: #selector(updateAction), keyEquivalent: "").target = self
         applicationMenu.addItem(.separator())
         applicationMenu.addItem(withTitle: "Quit GHCPSpendTray", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         applicationItem.submenu = applicationMenu
@@ -153,6 +199,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             refresh.target = self
             refresh.isEnabled = model?.initialized == true && model?.busy == false
             menu.addItem(withTitle: "Settings...", action: #selector(settingsAction), keyEquivalent: ",").target = self
+            let update = menu.addItem(withTitle: model?.updates.actionTitle ?? "Check for Updates...",
+                                      action: #selector(updateAction), keyEquivalent: "")
+            update.target = self
+            update.isEnabled = model?.updates.enabled == true && model?.updates.state.canCheck == true
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit GHCPSpendTray", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             menu.autoenablesItems = false
@@ -160,8 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             button.performClick(nil)
             item.menu = nil
         } else if let key = statusItems.first(where: { $0.value === item })?.key, key != "rollup" {
-            model?.selectedAccount = key
-            model?.openSettings(.accounts)
+            model?.openSettings(.accounts, accountKey: key)
         } else if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -184,6 +233,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     @objc private func showUsage() { model?.openSettings(.usage) }
     @objc private func settingsAction() { openSettings() }
     @objc private func refreshAction() { model?.perform("refresh") }
+    @objc private func updateAction() {
+        popover.performClose(nil)
+        model?.updates.checkForUpdates()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(updateAction) {
+            menuItem.title = model?.updates.actionTitle ?? "Check for Updates..."
+            return model?.updates.enabled == true && model?.updates.state.canCheck == true
+        }
+        return true
+    }
 
     private func openSettings() {
         guard let model else { return }
@@ -202,12 +263,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
-        if model.initialized && !model.busy && !model.showingSignIn { model.perform("resume") }
+        if model.initialized && !model.busy && !model.showingSignIn && !model.pendingNavigation { model.perform("resume") }
     }
 
     func windowWillClose(_ notification: Notification) {
         model?.cancelSignIn()
         model?.showingSignIn = false
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let model else { return true }
+        return model.requestLeaving { [weak sender] in sender?.close() }
+    }
+
+    private func confirmLeaving() {
+        guard let model else { return }
+        openSettings()
+        guard let window = settingsWindow, window.attachedSheet == nil else {
+            model.resolveUnsavedChanges(.keepEditing)
+            return
+        }
+        let alert = UnsavedChangesAlert.make()
+        unsavedAlert = alert
+        alert.beginSheetModal(for: window) { [weak self] response in
+            self?.unsavedAlert = nil
+            model.resolveUnsavedChanges(UnsavedChangesAlert.choice(response))
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -216,14 +297,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        model?.cancelSignIn()
+        // Logout/restart/shutdown must not wait for an interactive settings sheet.
+        let quitReason = NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue ?? 0
+        if poweringOff || isSystemTermination(quitReason) {
+            model?.cancelSignIn()
+            return .terminateNow
+        }
+        guard let model else { return .terminateNow }
+        guard !model.saving && !model.pendingNavigation else { return .terminateCancel }
+        // Keep the normal event loop running so bridge saves can complete before retrying Quit.
+        if !model.requestLeaving({ sender.terminate(nil) }) {
+            return .terminateCancel
+        }
+        model.cancelSignIn()
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if smoke, let model {
+            do {
+                guard model.settings?.pollMinutes == 20, model.settings?.trackedTelemetryEnabled == true,
+                      !model.hasUnsavedChanges,
+                      !model.saving, !model.pendingNavigation, model.formMessage == nil else {
+                    throw AppError.message("Native Quit did not finish saving the protected preferences draft.")
+                }
+                let result = usageStates ? "PASS: native eight-state usage showcase, menu bar and settings.\n" :
+                    "PASS: native menu bar, settings bridge, protected close and save-before-Quit.\n"
+                try result
+                    .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
+                print("PASS: macOS arm64 \(usageStates ? "usage-state" : empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
+            } catch {
+                fputs("FAIL: macOS synthetic termination smoke: \(error.localizedDescription)\n", stderr)
+                model.shutdown()
+                exit(1)
+            }
+        }
         model?.shutdown()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         if let activationObserver { DistributedNotificationCenter.default().removeObserver(activationObserver) }
+        if let powerObserver { NSWorkspace.shared.notificationCenter.removeObserver(powerObserver) }
         if instanceLock >= 0 { Darwin.close(instanceLock) }
     }
 
@@ -236,8 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let key = response.notification.request.content.userInfo["accountKey"] as? String
         Task { @MainActor [weak self] in
-            self?.model?.selectedAccount = key
-            self?.model?.openSettings(key == nil ? .usage : .accounts)
+            self?.model?.openSettings(key == nil ? .usage : .accounts, accountKey: key)
         }
         completionHandler()
     }
@@ -271,15 +382,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         do {
             progress("waiting for shared initialization")
             try await waitUntil { model.initialized && !model.busy }
+            guard !model.updates.enabled, model.updates.state.availableVersion == nil,
+                  model.updates.state.error == nil else {
+                throw AppError.message("Isolated smoke mode must not start the updater.")
+            }
             // Read-only native callback coverage: no permission prompt, alert, or account access.
             progress("reading native notification settings")
             _ = await NativeNotifications().status()
             print("PASS: native notification settings callback.")
+            if usageStates {
+                guard model.error == nil, let accounts = model.dashboard?.accounts, accounts.count == 8,
+                      accounts.prefix(3).map({ $0.forecast?.band }) == [.under, .near, .over],
+                      accounts[3].actualUsage?.band == .near, accounts[4].actualUsage?.band == .over,
+                      accounts[5].periodEstimate == nil, accounts[6].periodEstimate?.unavailableReason != nil,
+                      accounts[7].details.unlimited, model.settings?.startup == false,
+                      let button = statusItems["rollup"]?.button else {
+                    throw AppError.message("The native usage showcase did not initialize its eight isolated states.")
+                }
+                try await waitForPopupAnchor(button, phase: "usage-state menu-bar placement", presented: false)
+                togglePopover(button)
+                try await waitForPopupAnchor(button, phase: "usage-state popup")
+                try savePopupSnapshot("FlyoutStates")
+                popover.performClose(nil)
+                for (index, account) in accounts.enumerated() {
+                    progress("rendering usage state \(index)")
+                    model.viewUsage(account.key)
+                    try await waitUntil { !model.busy && model.usageAccount == account.key && model.page == .usage }
+                    try await Task.sleep(for: .milliseconds(250))
+                    try saveSettingsSnapshot("UsageState\(index)")
+                }
+                guard model.dashboard?.accounts.count == 8, var settings = model.settings else {
+                    throw AppError.message("Refreshing the native usage showcase lost its states.")
+                }
+                settings.pollMinutes = 20
+                settings.trackedTelemetryEnabled = true
+                model.perform("settings.save", fields: ["settings": try jsonObject(settings)])
+                try await waitUntil { !model.busy }
+                NSApplication.shared.terminate(nil)
+                return
+            }
             guard model.error == nil, let dashboard = model.dashboard,
                   dashboard.accounts.count == (empty ? 0 : 2),
                   dashboard.consumptionUsd == (empty ? nil : Decimal(string: "42.75")),
                   money(dashboard.consumptionUsd) == (empty ? "Unavailable" : "$42.75"),
                   model.settings?.startup == false else { throw AppError.message("Synthetic dashboard contract failed.") }
+            if !empty {
+                guard let daily = dashboard.accounts[0].enterpriseConsumption,
+                      daily.state == .connected, daily.connected, !daily.isLoading,
+                      let bars = daily.bars, !bars.isEmpty,
+                      let maximum = daily.axisTicks?.last, let largest = bars.map(\.amountUsd).max(), maximum >= largest,
+                      let unavailable = dashboard.accounts[1].enterpriseConsumption,
+                      unavailable.connected, unavailable.bars?.isEmpty == true,
+                      unavailable.chartMessage?.contains("no daily reports") == true else {
+                    throw AppError.message("Daily consumption did not cross the native bridge with its chart and no-data status.")
+                }
+            }
             guard statusItems.count == 1, statusItems["rollup"]?.button?.image?.isTemplate == true else {
                 throw AppError.message("Adaptive menu bar indicator was not created.")
             }
@@ -312,7 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             try await waitUntil { !model.busy }
             for page in SettingsPage.allCases {
                 progress("rendering \(page.rawValue)")
-                model.page = page
+                model.selectPage(page)
                 try await Task.sleep(for: .milliseconds(250))
                 try saveSettingsSnapshot(page.rawValue)
             }
@@ -414,8 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 throw AppError.message("Account estimate preference did not round-trip.")
             }
             popover.performClose(nil)
-            model.selectedAccount = example.key
-            model.openSettings(.accounts)
+            model.openSettings(.accounts, accountKey: example.key)
             try await Task.sleep(for: .milliseconds(500))
             guard model.error == nil else { throw AppError.message("Account estimate settings did not load.") }
             try saveSettingsSnapshot("AccountWithEstimate")
@@ -425,6 +581,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             guard model.error == nil, model.dashboard?.accounts.last?.periodEstimate == nil else {
                 throw AppError.message("Disabling an account estimate must remove the forecast.")
             }
+            progress("checking budget editing through the native C ABI")
+            let budgetAccount = model.dashboard?.accounts.first(where: { $0.host == "example.ghe.com" }) ?? example
+            model.openSettings(.accounts, accountKey: budgetAccount.key)
+            try await waitUntil { model.formLoaded && !model.busy }
+            model.accountDraft.useCustomBudget = true
+            model.accountDraft.budget = "50.00"
+            guard model.budgetPreview?.contains("of $50 custom budget") == true else {
+                throw AppError.message("Native budget draft did not use the shared preview.")
+            }
+            let budgetDraft = model.accountDraft
+            model.accountDraft.budget = "invalid"
+            model.saveChanges()
+            guard model.fieldErrors["budget"] != nil, model.accountDraft.budget == "invalid", !model.saving,
+                  model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == nil else {
+                throw AppError.message("Invalid native budget save altered settings or lost the draft.")
+            }
+            model.accountDraft = budgetDraft
+            model.saveChanges()
+            try await waitUntil {
+                !model.saving && model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == 50
+            }
+            guard model.formMessage == nil, !model.hasUnsavedChanges,
+                  let budgetView = model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key }),
+                  budgetView.allocationSummary.contains("custom budget"),
+                  budgetView.details.observedAllocationUsd == budgetAccount.details.observedAllocationUsd,
+                  budgetView.details.observedPercentConsumed == budgetAccount.details.observedPercentConsumed else {
+                throw AppError.message("Native budget save did not preserve diagnostics and establish a clean baseline.")
+            }
+            settingsWindow?.setContentSize(NSSize(width: 730, height: 550))
+            try await Task.sleep(for: .milliseconds(250))
+            try saveSettingsSnapshot("AccountWithBudget")
+            model.accountDraft.showPeriodEstimate.toggle()
+            model.saveChanges()
+            try await waitUntil { !model.saving }
+            guard model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == 50 else {
+                throw AppError.message("Unrelated native account save reset the custom budget.")
+            }
+            model.accountDraft.useCustomBudget = false
+            model.saveChanges()
+            try await waitUntil {
+                !model.saving && model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == nil
+            }
+            guard model.formMessage == nil, !model.hasUnsavedChanges else {
+                throw AppError.message("Explicit native API-allocation reset did not clear the budget.")
+            }
+            progress("rejecting invalid budget through native navigation Save")
+            model.accountDraft.useCustomBudget = true
+            model.accountDraft.budget = "0"
+            model.selectPage(.general)
+            try await chooseUnsavedButton(0)
+            guard model.page == .accounts, model.accountDraft.budget == "0",
+                  model.fieldErrors["budget"] != nil, model.hasUnsavedChanges else {
+                throw AppError.message("Invalid native Save must retain the budget draft and cancel navigation.")
+            }
+            model.accountDraft.budget = "50.00"
+            progress("saving budget before native navigation")
+            model.selectPage(.general)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { model.page == .general && model.formLoaded && !model.busy }
+            guard model.dashboard?.accounts.first(where: { $0.key == budgetAccount.key })?.customBudgetUsd == 50 else {
+                throw AppError.message("Native Save must apply the budget before continuing navigation.")
+            }
+            guard let window = settingsWindow else { throw AppError.message("Settings window missing.") }
+            model.globalDraft.minutes = "18"
+            model.globalDraft.trackedTelemetryEnabled = false
+            progress("saving before native Settings close")
+            window.performClose(nil)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { !window.isVisible && !model.busy }
+            guard model.settings?.pollMinutes == 18, model.settings?.trackedTelemetryEnabled == false,
+                  !model.hasUnsavedChanges else {
+                throw AppError.message("Native close Save must finish saving before closing Settings.")
+            }
+            openSettings()
+            try await waitUntil { !model.busy }
+            model.globalDraft.minutes = "4"
+            progress("keeping dirty Settings open")
+            window.performClose(nil)
+            try await chooseUnsavedButton(2)
+            guard window.isVisible, model.globalDraft.minutes == "4", model.hasUnsavedChanges else {
+                throw AppError.message("Native close Keep Editing must retain the visible dirty form.")
+            }
+            progress("rejecting invalid Save on native Quit")
+            NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(0)
+            guard window.isVisible, model.globalDraft.minutes == "4",
+                  model.fieldErrors["minutes"] != nil, model.hasUnsavedChanges else {
+                throw AppError.message("Invalid native Quit Save must cancel termination and retain the draft.")
+            }
+            progress("keeping draft on native Quit")
+            NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(2)
+            guard window.isVisible, model.hasUnsavedChanges else {
+                throw AppError.message("Native Quit Keep Editing must cancel termination.")
+            }
+            progress("discarding before native Settings close")
+            window.performClose(nil)
+            try await chooseUnsavedButton(1)
+            guard !window.isVisible, !model.hasUnsavedChanges,
+                  model.globalDraft.minutes == String(model.settings!.pollMinutes) else {
+                throw AppError.message("Native close Discard must restore saved values before closing.")
+            }
+            openSettings()
+            try await waitUntil { !model.busy }
             model.addAccount()
             progress("opening onboarding")
             try await Task.sleep(for: .milliseconds(250))
@@ -433,16 +693,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             }
             model.showingSignIn = false
             try await waitUntil { self.settingsWindow?.attachedSheet == nil }
-            try "PASS: native menu bar, five settings pages, synthetic dashboard and settings bridge.\n"
-                .write(to: model.directory.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
-            print("PASS: macOS arm64 \(empty ? "empty" : "populated") Native AOT / SwiftUI smoke test.")
-            progress("terminating")
+            model.selectPage(.general)
+            try await waitUntil { model.formLoaded && !model.busy }
+            model.globalDraft.minutes = "20"
+            model.globalDraft.trackedTelemetryEnabled = true
+            guard model.hasUnsavedChanges else { throw AppError.message("Native Quit must start with an unsaved draft.") }
+            progress("saving before native Quit")
             NSApplication.shared.terminate(nil)
+            try await chooseUnsavedButton(0)
+            try await waitUntil { !model.saving }
+            throw AppError.message("Native Quit returned instead of terminating after Save.")
         } catch {
             fputs("FAIL: macOS synthetic smoke test: \(error.localizedDescription)\n", stderr)
             model.shutdown()
             exit(1)
         }
+    }
+
+    private func chooseUnsavedButton(_ index: Int) async throws {
+        try await waitUntil { self.unsavedAlert != nil }
+        guard let alert = unsavedAlert, alert.buttons.indices.contains(index) else {
+            throw AppError.message("Native unsaved-changes sheet did not contain the expected action.")
+        }
+        alert.buttons[index].performClick(nil)
+        try await waitUntil { self.unsavedAlert == nil && self.settingsWindow?.attachedSheet == nil }
     }
 
     private func waitForPopupAnchor(_ button: NSStatusBarButton, phase: String, presented: Bool = true,

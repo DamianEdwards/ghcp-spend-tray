@@ -8,11 +8,17 @@ try {
     Set-Content -LiteralPath (Join-Path $data 'config.json') -Value 'synthetic account settings must not be copied'
     Set-Content -LiteralPath (Join-Path $data 'native-smoke-progress.txt') -Value @('phase one', 'phase two')
     Set-Content -LiteralPath (Join-Path $logs 'diagnostics.log') -Value 'synthetic diagnostic'
+    Set-Content -LiteralPath (Join-Path $data 'package-smoke-activation.log') -Value 'synthetic activation phase'
+    Set-Content -LiteralPath (Join-Path $data 'package-smoke-activation-error.log') -Value 'synthetic activation error'
+    Set-Content -LiteralPath (Join-Path $data 'package-smoke-activation-pid.txt') -Value '42'
     $timeout = Join-Path $root 'timeout'
     $message = & "$PSScriptRoot\export-smoke-diagnostics.ps1" -DataDirectory $data -Destination $timeout
     if ($message -ne 'Last recorded smoke phase: phase two' -or
         -not (Test-Path -LiteralPath (Join-Path $timeout 'native-smoke-progress.txt')) -or
         -not (Test-Path -LiteralPath (Join-Path $timeout 'logs\diagnostics.log')) -or
+        -not (Test-Path -LiteralPath (Join-Path $timeout 'package-smoke-activation.log')) -or
+        -not (Test-Path -LiteralPath (Join-Path $timeout 'package-smoke-activation-error.log')) -or
+        -not (Test-Path -LiteralPath (Join-Path $timeout 'package-smoke-activation-pid.txt')) -or
         (Test-Path -LiteralPath (Join-Path $timeout 'config.json'))) {
         throw 'Timeout diagnostics must retain the last phase and safe logs, not account settings.'
     }

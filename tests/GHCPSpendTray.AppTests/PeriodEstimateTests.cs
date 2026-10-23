@@ -15,6 +15,52 @@ internal static class PeriodEstimateTests
         session.Initialize();
         await Until(() => session.Initialized && !session.Busy);
         var account = session.Dashboard.Accounts[0];
+        var forecastAccount = account with
+        {
+            ConsumptionUsd = 60, AllocationUsd = 100, Percent = 60,
+            PeriodEstimate = new(EstimatedConsumptionUsd: 95)
+        };
+        Check(forecastAccount.Forecast is { Band: ForecastBand.Near, ForecastFraction: 0.95 },
+            "A finite tracking target enables the projected usage track.");
+        Check((forecastAccount with { CustomBudgetUsd = 90 }).Forecast?.Band == ForecastBand.Over &&
+            (forecastAccount with { CustomBudgetUsd = 200 }).Forecast?.Band == ForecastBand.Under,
+            "Forecast colors are based on the saved custom budget instead of the API limit.");
+        Check((forecastAccount with { Percent = null }).Forecast is null &&
+            (forecastAccount with { PeriodEstimate = null }).Forecast is null,
+            "Unavailable or disabled forecasts keep the existing text-only surfaces.");
+        Check(forecastAccount.ActualUsage is { Band: ForecastBand.Under, Fraction: 0.6 } &&
+            forecastAccount.Forecast!.Band == ForecastBand.Near,
+            "Actual usage status is independent of a near-target forecast.");
+        Check(UI.TrackingTargetAmount(1500) == "$1,500" && UI.TrackingTargetAmount(1500.25m) == "$1,500.25" &&
+            UI.TrackingTargetAmount(0.01m) == "$0.01" && UI.TrackingTargetAmount(25.5m) == "$25.50",
+            "Fixed target amounts retain meaningful fractional dollars without redundant decimal zeroes.");
+        Check(UI.UsageCaption(forecastAccount) == "60% used" && UI.UsagePercentage(forecastAccount).Contains("$100.00"),
+            "The short usage caption avoids repeating the separately displayed target while accessible descriptions retain it.");
+        Check((forecastAccount with { PeriodEstimate = null }).ActualUsage is not null &&
+            (forecastAccount with { ConsumptionUsd = 95m, Percent = 95 }).ActualUsage?.Band == ForecastBand.Near &&
+            (forecastAccount with { ConsumptionUsd = 100m, Percent = 100 }).ActualUsage?.Band == ForecastBand.Over,
+            "Current usage markers remain available with estimates off and use exact actual thresholds.");
+        var recent = new PeriodEstimate(EstimatedConsumptionUsd: 100, AverageDailyConsumptionUsd: 2,
+            AverageStartDate: "2026-10-08", AverageEndDate: "2026-10-14", ReportedDayCount: 7);
+        Check(UI.EstimateContext(recent).Contains("Latest 7 reported days") &&
+            UI.EstimateMethodFor(recent).Contains("time remaining") &&
+            UI.EstimateMethodFor(new()) == UI.EstimateMethod,
+            "Recent and period-to-date forecasts identify their actual calculation method.");
+        var noDaily = account with
+        {
+            EnterpriseConsumption = new(true, "Daily usage connected", Connected: true, Bars: [],
+                ChartMessage: "Daily usage is connected, but no daily reports are available for this account yet.")
+        };
+        Check(UI.DailyConsumption(noDaily) is not null,
+            "Connected accounts without daily reports retain an explicit Usage status.");
+        Check(UI.DailyConsumption(noDaily, compact: true) is null,
+            "Unavailable daily-report status does not expand the compact popup.");
+        Check(UI.DailyConsumption(account with { EnterpriseConsumption = new(true, "Connect work account") }) is null,
+            "Unconnected daily usage does not add a Usage status.");
+        Check(UI.DailyConsumption(noDaily with
+        {
+            EnterpriseConsumption = noDaily.EnterpriseConsumption! with { IsLoading = true }
+        }) is not null, "Connected daily usage shows an in-flight report status.");
         var before = session.Dashboard;
         Check(account.PeriodEstimate is null && UI.EstimateRow(account, "") is null && UI.EstimateDetails(account) is null,
             "Disabled forecast omits all Windows estimate surfaces.");
@@ -36,7 +82,7 @@ internal static class PeriodEstimateTests
             "Actual cents, total, percentage and tray remain observed, not projected.");
         Check(UI.EstimateAmount(account.PeriodEstimate!) == "~$56" && UI.Money(account.ConsumptionUsd) == "$26.25",
             "Estimated dollars are approximate and rounded; actual dollars retain cents.");
-        Check(UI.EstimateContext(account.PeriodEstimate!).Contains("About $31 over allocation") &&
+        Check(UI.EstimateContext(account.PeriodEstimate!).Contains("About $31 over limit") &&
             UI.EstimateContext(account.PeriodEstimate!).Contains("Nov 1, 2026 UTC"),
             "Projected excess uses whole dollars and reset dates explicitly use UTC.");
         Check(UI.UtcTimestamp(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero).ToOffset(TimeSpan.FromHours(-7)))
@@ -45,19 +91,22 @@ internal static class PeriodEstimateTests
         Check(UI.ApproximateMoney(0) == "~$0" && UI.ApproximateMoney(0.01m) == "<$1" &&
             UI.ApproximateMoney(0.99m) == "<$1" && UI.ApproximateMoney(1) == "~$1",
             "Windows matches macOS whole/sub-dollar formatting without turning nonzero forecasts into zero.");
-        Check(UI.EstimateContext(new(OverAllocationUsd: 0.01m)) == "Less than $1 over allocation" &&
-            UI.EstimateContext(new(OverAllocationUsd: 0.99m)) == "Less than $1 over allocation" &&
-            UI.EstimateContext(new(OverAllocationUsd: 1.5m)) == "About $2 over allocation",
+        Check(UI.EstimateContext(new(OverAllocationUsd: 0.01m)) == "Less than $1 over limit" &&
+            UI.EstimateContext(new(OverAllocationUsd: 0.99m)) == "Less than $1 over limit" &&
+            UI.EstimateContext(new(OverAllocationUsd: 1.5m)) == "About $2 over limit",
             "Windows matches macOS's sub-dollar projected-excess warning.");
         Check(UI.EstimateContext(new(IsEarly: true, OverAllocationUsd: 33m,
             ResetAtUtc: new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero))) ==
-            "Early estimate \u00B7 About $33 over allocation \u00B7 Resets Nov 1, 2026 UTC",
+            "Early estimate \u00B7 About $33 over limit \u00B7 Resets Nov 1, 2026 UTC",
             "Compact estimate context matches the macOS information order and separators.");
         session.Navigate(SettingsPage.Usage);
         session.EditAccount(account.Key);
         Check(session.ShowPeriodEstimate, "Returning to account settings reloads saved opt-in.");
         session.ShowPeriodEstimate = false;
         session.EditAccount(session.Dashboard.Accounts[1].Key);
+        Check(session.HasPendingNavigation && session.SelectedAccount == account.Key,
+            "Changing accounts protects the unsaved estimate draft.");
+        session.ResolveUnsavedChanges(UnsavedChangesChoice.Discard);
         Check(!session.ShowPeriodEstimate, "Opening another account does not leak the previous account's draft.");
         session.EditAccount(account.Key);
         Check(session.ShowPeriodEstimate, "Abandoning a draft leaves the saved preference intact.");
@@ -84,6 +133,47 @@ internal static class PeriodEstimateTests
         await Until(() => !session.Busy);
         Check(!controller.AccountSettings(account.Key).ShowPeriodEstimate &&
             session.Dashboard.Accounts[0].PeriodEstimate is null, "Windows Save explicitly disables the forecast.");
+        var work = session.Dashboard.Accounts[1];
+        session.EditAccount(work.Key);
+        Check(!session.UseCustomBudget && session.CustomBudget == "", "Budgets default to the API allocation.");
+        session.UseCustomBudget = true;
+        session.CustomBudget = "50";
+        Check(session.Dashboard.Accounts[1].Percent == 16.5m, "Budget drafts do not change saved usage.");
+        session.SaveAccount();
+        await Until(() => !session.Busy);
+        work = session.Dashboard.Accounts[1];
+        Check(session.Error is null && work.CustomBudgetUsd == 50m && work.AllocationUsd == 50m &&
+            work.Percent == 33m && work.Details.ObservedAllocationUsd == 100m &&
+            work.Details.ObservedPercentConsumed == 16.5m, "Windows Save changes the target, never the observed API values.");
+        Check(UI.UsagePercentage(work) == "33% of $50 custom budget" &&
+            UI.EstimateContext(new(OverAllocationUsd: 2m), true) == "About $2 over custom budget",
+            "Windows percentage and excess labels identify the budget basis.");
+        Check(UI.UsagePercentage(work with { Percent = 52.5m, CustomBudgetUsd = 50.50m }) ==
+            "53% of $50.50 custom budget" &&
+            UI.UsagePercentage(work with { Percent = 33.333333333333333333333333333m }) ==
+            "33% of $50 custom budget", "Windows rounds displayed percentages and retains nonzero budget cents.");
+        Check(UI.UsagePercentage(work with { CustomBudgetUsd = null }) == "33% of $50.00 limit",
+            "API allocation money keeps its existing cent precision.");
+        Check(UI.UsageCaption(work with { Percent = 52.5m }) == "53% used",
+            "The native usage track caption rounds midpoint percentages to whole numbers.");
+        Check(session.Dashboard.Tray!.RollUp.Percent == 57d && session.Dashboard.ConsumptionUsd == 42.75m,
+            "Budget updates the weighted tray immediately without changing dollar totals.");
+        session.EditAccount(account.Key);
+        Check(!session.UseCustomBudget, "Budget settings do not leak between accounts.");
+        session.EditAccount(work.Key);
+        Check(session.UseCustomBudget && session.CustomBudget == "50", "Opening an account reloads its saved budget.");
+        foreach (string invalid in new[] { "", "0", "-1", "12.345", "abc" })
+        {
+            session.CustomBudget = invalid;
+            session.SaveAccount();
+            Check(!session.Busy && session.Error is not null && session.Dashboard.Accounts[1].CustomBudgetUsd == 50m,
+                "Invalid budget input reports an error and preserves the saved target.");
+        }
+        session.UseCustomBudget = false;
+        session.SaveAccount();
+        await Until(() => !session.Busy);
+        Check(session.Error is null && session.Dashboard.Accounts[1].CustomBudgetUsd is null &&
+            session.Dashboard.Accounts[1].Percent == 16.5m, "Choosing API allocation removes the budget override.");
         Check(!Directory.Exists(directory), "Synthetic forecast preferences never write real data.");
         return assertions;
 

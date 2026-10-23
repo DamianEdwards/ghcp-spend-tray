@@ -8,15 +8,16 @@ internal static class TrayTests
     {
         if (size is < 16 or > 64) throw new ArgumentOutOfRangeException(nameof(size));
         int cellWidth = Math.Max(60, size * 2 + 16), cellHeight = size * 3 + 16;
-        int width = cellWidth * 8, height = cellHeight * 4;
+        double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50, null, null, 105];
+        int width = cellWidth * values.Length, height = cellHeight * 4;
         var sheet = new uint[width * height];
         Array.Fill(sheet, 0xFF808080u);
-        double?[] values = [null, 0, .1, 50, 100, 105, 1000, 50];
         for (int row = 0; row < 4; row++)
             for (int col = 0; col < values.Length; col++)
             {
                 var palette = row < 2 ? new TrayPalette(0xFFF3F3F3, 0xFF161616) : new TrayPalette(0xFF202020, 0xFFF5F5F5);
-                var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col == 7 ? 2 : 1, "", "");
+                var indicator = new TrayIndicator(null, "Synthetic", values[col], 1, col is 7 or 9 or 10 ? 2 : 1,
+                    "", "", IsUnlimited: col is 8 or 9);
                 var pixels = TrayIconRenderer.Pixels(indicator, row % 2 == 0 ? TrayIconStyle.Pie : TrayIconStyle.Percentage, size, palette);
                 for (int y = 0; y < cellHeight; y++)
                     Array.Fill(sheet, palette.Background, (row * cellHeight + y) * width + col * cellWidth, cellWidth);
@@ -81,6 +82,21 @@ internal static class TrayTests
             var unknownPixels = TrayIconRenderer.NotificationPixels(unavailable, size, palette);
             check(unknownPixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(null), TrayIconStyle.Pie, size, palette)),
                 "missing allocation renders unavailable, never a zero-percent pie");
+            var update = new NotificationView("store-update", "Update available", "Synthetic update");
+            var updatePixels = TrayIconRenderer.NotificationPixels(update, size, palette, updateAvailable: true);
+            check(updatePixels.Length == size * size && updatePixels.Any(p => p >> 24 > 128) &&
+                updatePixels.Any(p => p >> 24 is > 0 and < 255) && updatePixels[0] == 0 &&
+                !updatePixels.SequenceEqual(unknownPixels),
+                "update notifications use a distinct antialiased download glyph, not unavailable-consumption artwork");
+            var tintedUpdate = TrayIconRenderer.NotificationPixels(update, size,
+                new(0xFF202020, 0xFF19AAE6), updateAvailable: true);
+            check(tintedUpdate.Select(p => p >> 24).SequenceEqual(updatePixels.Select(p => p >> 24)) &&
+                tintedUpdate.All(p => (p >> 16 & 255) == (0x19 * (p >> 24) + 127) / 255 &&
+                    (p >> 8 & 255) == (0xAA * (p >> 24) + 127) / 255 &&
+                    (p & 255) == (0xE6 * (p >> 24) + 127) / 255),
+                "update notification glyph preserves theme and high-contrast tinting at every notification DPI");
+            using (var image = TrayIconRenderer.CreateNotification(update, size, palette, updateAvailable: true))
+                check(!image.IsInvalid, "native update notification HICON created");
             foreach (decimal milestone in new decimal[] { .01m, 50, 100, 1234.56m, 1e28m })
             {
                 var notification = unavailable with { SpendMilestoneUsd = milestone };
@@ -110,12 +126,28 @@ internal static class TrayTests
                 }
         foreach (var style in Enum.GetValues<TrayIconStyle>())
         {
+            foreach (int size in new[] { 16, 20, 24, 32, 48, 64 })
+            {
+                var unlimited = Indicator(null) with { IsUnlimited = true, IncludedAccounts = 1 };
+                var pixels = TrayIconRenderer.Pixels(unlimited, style, size, palette);
+                check(pixels.Length == size * size && pixels[0] == 0 && pixels[^1] == 0 &&
+                    pixels.Any(p => p >> 24 > 128) && pixels.Any(p => p >> 24 is > 0 and < 255),
+                    "infinity has visible antialiased ink and transparent corners at every tray DPI");
+                check(!pixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(null), style, size, palette)) &&
+                    !pixels.SequenceEqual(TrayIconRenderer.Pixels(Indicator(0), style, size, palette)),
+                    "unlimited is distinct from unavailable and zero allocation usage");
+                check(pixels.SequenceEqual(TrayIconRenderer.Pixels(unlimited, TrayIconStyle.Pie, size, palette)) &&
+                    !pixels.SequenceEqual(TrayIconRenderer.Pixels(unlimited with { SelectedAccounts = 2 }, style, size, palette)),
+                    "both styles render infinity and partial unlimited roll-ups retain their warning badge");
+                using var image = TrayIconRenderer.Create(unlimited, style, size, palette);
+                check(!image.IsInvalid, "native infinity HICON created at every tray DPI");
+            }
             var full = TrayIconRenderer.Pixels(Indicator(50), style, 16, palette);
             var partial = TrayIconRenderer.Pixels(Indicator(50, partial: true), style, 16, palette);
             var missing = TrayIconRenderer.Pixels(Indicator(null), style, 16, palette);
             var zero = TrayIconRenderer.Pixels(Indicator(0), style, 16, palette);
             check(!full.SequenceEqual(partial) && !zero.SequenceEqual(missing),
-                "partial and unavailable have distinct monochrome geometry, not just color");
+                "partial and unavailable have distinct warning geometry, not just color");
             var opaqueWhite = TrayIconRenderer.Pixels(Indicator(50), style, 24, palette);
             var color = new TrayPalette(0xFFB02090, 0xFF19AAE6);
             var tinted = TrayIconRenderer.Pixels(Indicator(50), style, 24, color);
@@ -127,11 +159,62 @@ internal static class TrayTests
             check(tinted.SequenceEqual(TrayIconRenderer.Pixels(Indicator(50), style, 24,
                 color with { Background = 0xFF00FFFF })), "tray artwork never bakes in a taskbar background rectangle");
         }
+        foreach (int size in new[] { 16, 20, 24, 32, 48, 64 })
+            foreach (var style in Enum.GetValues<TrayIconStyle>())
+                foreach (var colors in new[]
+                {
+                    new TrayPalette(0xFFF3F3F3, 0xFF161616),
+                    new TrayPalette(0xFF202020, 0xFFF5F5F5)
+                })
+                    foreach (var indicator in new[]
+                    {
+                        Indicator(50, partial: true), Indicator(105, partial: true),
+                        Indicator(null, partial: true) with { IsUnlimited = true, IncludedAccounts = 1 }
+                    })
+                    {
+                        var pixels = TrayIconRenderer.Pixels(indicator, style, size, colors);
+                        uint At(double x, double y) => pixels[(int)(y * size / 16) * size + (int)(x * size / 16)];
+                        static bool Amber(uint pixel) => pixel >> 24 > 160 &&
+                            (pixel >> 16 & 255) > 180 && (pixel >> 8 & 255) > 110 && (pixel & 255) < 80;
+                        int AmberRow(double y) => Enumerable.Range(0, size).Count(x => Amber(pixels[(int)(y * size / 16) * size + x]));
+                        check(pixels.Any(Amber) && AmberRow(14.5) > AmberRow(9.5),
+                            "partial badges use a filled amber triangle that widens toward its base in both taskbar themes and icon styles");
+                        check((At(11.5, 11.5) >> 24) > 200 && (At(11.5, 11.5) >> 16 & 255) < 128 &&
+                            (At(11.5, 14.3) >> 24) > 200 && (At(11.5, 14.3) >> 16 & 255) < 128 &&
+                            Amber(At(11.5, 13.3)),
+                            "warning triangles retain a dark exclamation stem, separate dot, and clear gap at every tray DPI");
+                        check(pixels[0] == 0 && pixels[size - 1] == 0 && pixels[^size] == 0 && pixels[^1] == 0 &&
+                            pixels.All(p => (p >> 16 & 255) <= p >> 24 && (p >> 8 & 255) <= p >> 24 && (p & 255) <= p >> 24),
+                            "colored warning artwork keeps transparent corners and premultiplied alpha without dark fringes");
+                        check(pixels.SequenceEqual(TrayIconRenderer.Pixels(indicator, style, size,
+                            colors with { Background = 0xFF00FFFF })),
+                            "warning isolation stays transparent instead of baking a taskbar background into the icon");
+                        var contrastColors = new TrayPalette(0xFF000000, 0xFF19AAE6, Warning: null);
+                        var contrast = TrayIconRenderer.Pixels(indicator, style, size, contrastColors);
+                        check(!contrast.Any(Amber) && contrast.All(p =>
+                            Math.Abs((long)(p >> 16 & 255) - (0x19 * (p >> 24) + 127) / 255) <= 1 &&
+                            Math.Abs((long)(p >> 8 & 255) - (0xAA * (p >> 24) + 127) / 255) <= 1 &&
+                            Math.Abs((long)(p & 255) - (0xE6 * (p >> 24) + 127) / 255) <= 1),
+                            "High Contrast warning triangles use only the supplied system foreground with a transparent exclamation cutout");
+                        check(contrast[(int)(11.5 * size / 16) * size + (int)(11.5 * size / 16)] >> 24 < 80,
+                            "High Contrast warning glyphs remain distinct through transparent geometry, not color alone");
+                        var monochrome = TrayIconRenderer.Pixels(indicator, style, size, colors with { Warning = null });
+                        int unchanged = size * (int)(7 * size / 16d);
+                        check(pixels.AsSpan(0, unchanged).SequenceEqual(monochrome.AsSpan(0, unchanged)),
+                            "warning colors leave the main usage artwork above the badge unchanged");
+                        if (indicator.IsOverAllocation)
+                        {
+                            int plus = (int)(13 * size / 16d) * size + (int)(3.5 * size / 16d);
+                            check(pixels[plus] == monochrome[plus] && pixels[plus] >> 24 > 200,
+                                "the separate over-allocation plus remains visible beside the partial-data warning");
+                        }
+                    }
         var selected = Presentation(Indicator(25, "github.com:1"), Indicator(null, "example.ghe.com:2"));
         var rollUp = Presentation(Indicator(25, partial: true));
         var callbackShell = new FakeShell();
         using (var host = new TrayHost(root, callbackShell.Call))
         {
+            NativeMenuThemeTests.Run(check, host.Handle);
             List<string?> opened = [];
             int settings = 0, notifications = 0;
             string? notificationAccount = null;
@@ -174,13 +257,18 @@ internal static class TrayTests
             Send(Win32.NIN_BALLOONUSERCLICK, host.Icons.Last().Id);
             check(notifications == 1 && notificationAccount == "example.ghe.com:2",
                 "native notification callback preserves its accepted account");
+            check(host.Notify(new("store-update", "Update available", "Synthetic update"), updateAvailable: true),
+                "host accepts an update notification with dedicated download artwork");
+            Send(Win32.NIN_BALLOONUSERCLICK, host.Icons.First().Id);
+            check(notifications == 2 && notificationAccount == "store-update",
+                "dedicated update artwork preserves notification routing to About");
             host.Update(rollUp);
             opened.Clear();
             Send(Win32.NIN_SELECT, retired);
             Send(Win32.NIN_KEYSELECT, retired);
             Send(0x203, retired);
             Send(Win32.NIN_BALLOONUSERCLICK, retired);
-            check(opened.Count == 0 && notifications == 1 && settings == 0,
+            check(opened.Count == 0 && notifications == 2 && settings == 0,
                 "all retired native callback forms are ignored");
             Win32.SendMessage(host.Handle, Win32.RegisterWindowMessage("TaskbarCreated"), 0, 0);
             Send(Win32.NIN_SELECT);
@@ -197,8 +285,75 @@ internal static class TrayTests
             host.ExecuteMenuCommand(4);
             check(opened.Count == 2 && opened[^1] is null && refreshes == 1 && exits == 1,
                 "context-menu Open, Refresh and Exit retain their routing");
+            bool ending = false;
+            host.SessionEnding += value => ending = value;
+            check(Win32.SendMessage(host.Handle, Win32.WM_QUERYENDSESSION, 0, 1) == 1 && ending,
+                "Restart Manager can close the tray process for package replacement");
+            Win32.SendMessage(host.Handle, Win32.WM_ENDSESSION, 0, 1);
+            check(exits == 1 && !ending, "canceled Restart Manager shutdown leaves the tray running");
+            Win32.SendMessage(host.Handle, Win32.WM_ENDSESSION, 1, 1);
+            check(exits == 2 && ending, "confirmed Restart Manager shutdown routes through application exit");
         }
         check(callbackShell.Registered.Count == 0, "native callback host disposal releases its icons");
+        var recoveryShell = new FakeShell();
+        using (var host = new TrayHost(root, recoveryShell.Call))
+        {
+            int failures = 0, appearances = 0;
+            host.UpdateFailed += () => { failures++; host.Update(rollUp); };
+            host.AppearanceChanged += () => appearances++;
+            void Retry() => Win32.SendMessage(host.Handle, Win32.WM_TIMER, TrayHost.RetryTimerId, 0);
+            uint taskbarCreated = Win32.RegisterWindowMessage("TaskbarCreated");
+            recoveryShell.FailAdd = true;
+            Win32.SendMessage(host.Handle, taskbarCreated, 0, 0);
+            check(failures == 0 && recoveryShell.Registered.Count == 0,
+                "temporary TaskbarCreated failure schedules recovery without a modal Shell callback error");
+            int calls = recoveryShell.AddCalls;
+            host.Update(selected);
+            Win32.SendMessage(host.Handle, 0x7E, 0, 0);
+            check(recoveryShell.AddCalls == calls && appearances == 1,
+                "dashboard and display changes coalesce without restarting the pending recovery");
+            recoveryShell.FailAdd = false;
+            Retry();
+            check(failures == 0 && recoveryShell.Registered.Count == 2 &&
+                host.Icons.Select(icon => icon.AccountKey).SequenceEqual(selected.Icons.Select(icon => icon.AccountKey)) &&
+                recoveryShell.Versions.Values.All(version => version == 4),
+                "timer recovery installs the latest presentation and accessible account callbacks");
+            calls = recoveryShell.AddCalls;
+            Retry();
+            check(recoveryShell.AddCalls == calls, "stale timer callbacks do not repeat a completed recovery");
+            recoveryShell.Registered.Clear();
+            recoveryShell.FailAdd = true;
+            host.Update(Presentation(Indicator(75, "github.com:1"), Indicator(50, "example.ghe.com:2")));
+            host.Update(selected);
+            recoveryShell.FailAdd = false;
+            Retry();
+            check(failures == 0 && recoveryShell.Registered.Count == 2,
+                "failed modify and re-add cannot cache a missing icon when the presentation reverts");
+            recoveryShell.FailAdd = true;
+            Win32.SendMessage(host.Handle, taskbarCreated, 0, 0);
+            calls = recoveryShell.AddCalls;
+            for (int attempt = 0; attempt < TrayHost.RetryLimit; attempt++)
+            {
+                host.Update(selected);
+                Retry();
+                check(failures == (attempt == TrayHost.RetryLimit - 1 ? 1 : 0),
+                    "persistent Shell failures are surfaced once only after the bounded retries");
+            }
+            check(recoveryShell.AddCalls == calls + TrayHost.RetryLimit,
+                "repeated dashboards do not replenish the five-attempt timer retry budget");
+            calls = recoveryShell.AddCalls;
+            Retry();
+            check(recoveryShell.AddCalls == calls && failures == 1,
+                "exhaustion stops the timer and reporting does not recursively restart recovery");
+            recoveryShell.FailAdd = false;
+            host.Update(selected);
+            check(recoveryShell.Registered.Count == 2 && failures == 1,
+                "an explicit later dashboard update can recover after retry exhaustion");
+            recoveryShell.FailAdd = true;
+            Win32.SendMessage(host.Handle, taskbarCreated, 0, 0);
+            host.Dispose();
+            check(recoveryShell.Registered.Count == 0, "disposal cancels pending recovery and removes owned icons");
+        }
         var fake = new FakeShell();
         using (var icons = new TrayIconSet(0, root, fake.Call))
         {
@@ -333,12 +488,14 @@ internal static class TrayTests
         internal bool ThrowNotification;
         internal Win32.NOTIFYICONDATA? LastNotification { get; private set; }
         internal int NotificationCalls { get; private set; }
+        internal int AddCalls { get; private set; }
         internal int MinimumRegisteredAfterFirstAdd { get; private set; } = int.MaxValue;
         internal int Call(uint message, ref Win32.NOTIFYICONDATA data)
         {
             switch (message)
             {
                 case Win32.NIM_ADD:
+                    AddCalls++;
                     if (FailAdd) return 0;
                     Registered.Add(data.uID, data.guidItem);
                     break;

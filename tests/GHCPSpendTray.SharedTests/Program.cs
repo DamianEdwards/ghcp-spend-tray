@@ -11,10 +11,109 @@ Directory.CreateDirectory(root);
 int assertions = 0;
 try
 {
+    await TelemetryTests.RunAsync(Check, root);
     var credentials = new MemoryCredentials();
     var startup = new Startup();
     var handler = new FixtureHttp();
     using var http = new HttpClient(handler);
+    using (var bridge = new BridgeRuntime())
+    {
+        var command = JsonSerializer.Deserialize("""
+            {"id":"unlimited-demo","method":"initialize","directory":"/synthetic-unused","demo":true,"unlimited":true}
+            """, BridgeJsonContext.Default.Command)!;
+        command = command with { Directory = Path.Combine(root, "unlimited-bridge-demo") };
+        DashboardView? preview = null;
+        Check(bridge.Send(command).Error is null, "Generated bridge command accepts unlimited sample mode.");
+        var initialized = await Complete(bridge, command.Id, e => { if (e.Dashboard is not null) preview = e.Dashboard; });
+        Check(initialized.Error is null && preview?.Accounts.Count == 1 &&
+            preview.Accounts[0].Details.Unlimited && preview.ConsumptionUsd == 26.25m &&
+            preview.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" },
+            "Native bridge initializes the unlimited synthetic account and infinity indicator.");
+    }
+    using (var demo = new DemoController(Path.Combine(root, "unlimited-demo"), unlimited: true))
+    {
+        DashboardView? preview = null;
+        demo.Changed += value => preview = value;
+        await demo.InitializeAsync();
+        Check(preview!.Accounts.Count == 1 && preview.Accounts[0].Details.Unlimited &&
+            preview.Accounts[0].Percent is null && preview.Tray!.RollUp.IsUnlimited &&
+            preview.ConsumptionUsd == 26.25m, "Unlimited demo starts with one synthetic unlimited account.");
+        preview.TrayStates!.Single().Snapshot!.Validate();
+        Check(demo.AccountSettings("github.com:1").DisplayName == "Unlimited (demo)",
+            "Unlimited demo account preferences match the displayed account.");
+        await demo.SaveSettingsAsync(demo.Settings with { TrayStyle = TrayIconStyle.Percentage });
+        Check(preview!.Tray!.Style == TrayIconStyle.Percentage && preview.Tray.RollUp.NumericText == "\u221e",
+            "Unlimited demo supports a live percentage-style infinity preview.");
+        await demo.RefreshAsync();
+        Check(preview!.Tray!.RollUp.IsUnlimited, "Refreshing synthetic unlimited data retains infinity.");
+        await demo.AddExampleAccountAsync();
+        Check(preview!.Accounts.Count == 2 && preview.Accounts[1].Key == "github.com:2" &&
+            preview.Tray!.RollUp is { IsUnlimited: false, Percent: 25, IsPartial: true },
+            "Additional finite examples have unique identities and produce a truthful mixed roll-up.");
+    }
+    string usageStatesDirectory = Path.Combine(root, "usage-states-demo");
+    using (var demo = new DemoController(usageStatesDirectory, usageStates: true))
+    {
+        DashboardView? preview = null;
+        demo.Changed += value => preview = value;
+        await demo.InitializeAsync();
+        Check(preview!.Accounts.Count == 8 && preview.Accounts.All(a => a.Name.EndsWith("(sample)", StringComparison.Ordinal)),
+            "Usage showcase has eight explicitly synthetic, labeled accounts.");
+        Check(preview.Accounts.Take(3).Select(a => a.Forecast?.Band)
+                .SequenceEqual(new ForecastBand?[] { ForecastBand.Under, ForecastBand.Near, ForecastBand.Over }) &&
+            preview.Accounts.Take(3).All(a => a.ActualUsage?.Band == ForecastBand.Under),
+            "Usage showcase distinguishes under, near and over forecasts from under-target actual usage.");
+        Check(preview.Accounts[3].ActualUsage?.Band == ForecastBand.Near &&
+            preview.Accounts[4].ActualUsage?.Band == ForecastBand.Over &&
+            preview.Accounts[3].CustomBudgetUsd is null && preview.Accounts[4].CustomBudgetUsd == 100,
+            "Usage showcase includes actual warning/error states and both API limits and custom budgets.");
+        Check(preview.Accounts[5].PeriodEstimate is null && preview.Accounts[5].ActualUsage is not null &&
+            preview.Accounts[6].PeriodEstimate is { EstimatedConsumptionUsd: null, UnavailableReason: not null } &&
+            preview.Accounts[6].Forecast is null && preview.Accounts[7].Details.Unlimited &&
+            preview.Accounts[7].ActualUsage is null && preview.Accounts[7].Forecast is null,
+            "Usage showcase includes estimates off, estimates unavailable, and the unlimited fallback.");
+        Check(preview.Accounts[0].EnterpriseConsumption is { Bars.Length: > 0 } &&
+            preview.Accounts[0].EnterpriseConsumption!.Bars!.Sum(b => b.AmountUsd) == preview.Accounts[0].ConsumptionUsd &&
+            preview.Accounts[1].EnterpriseConsumption is { Connected: true, Bars.Length: 0, ChartMessage: not null },
+            "Usage showcase includes reconciled synthetic daily bars and connected-but-unavailable daily reports.");
+        foreach (var state in preview.TrayStates!)
+            state.Snapshot!.Validate();
+        Check(preview.TrayStates!.All(state => preview.Accounts.Any(a => a.Key == state.Account.Key)) &&
+            preview.Tray!.RollUp.IsPartial, "Showcase snapshots use the displayed account identities and retain unlimited exclusions.");
+        string key = preview.Accounts[0].Key;
+        Check(demo.AccountSettings(key).ShowPeriodEstimate &&
+            !demo.AccountSettings(preview.Accounts[5].Key).ShowPeriodEstimate,
+            "Showcase account preferences match enabled and disabled estimate displays.");
+        await demo.SaveAccountAsync(key, "Changed sample", "", showPeriodEstimate: false);
+        Check(preview!.Accounts[0].PeriodEstimate is null && preview.Accounts[0].CustomBudgetUsd == 100,
+            "Showcase forecasts can be switched off without resetting the sample budget.");
+        await demo.SaveAccountAsync(key, "Changed sample", "", showPeriodEstimate: true,
+            customBudgetUsd: 50, updateCustomBudget: true);
+        Check(preview!.Accounts[0].ConsumptionUsd == 40.25m && preview.Accounts[0].PeriodEstimate is
+            { EstimatedConsumptionUsd: 75, OverAllocationUsd: 25 } &&
+            preview.Accounts[0].Forecast?.Band == ForecastBand.Over,
+            "Showcase custom-budget edits preserve fixed forecast dollars and recalculate risk and excess.");
+        await demo.RefreshAsync();
+        Check(preview!.Accounts.Count == 8 && preview.Accounts[0].Name == "Changed sample" &&
+            preview.Accounts[0].CustomBudgetUsd == 50, "Refresh retains in-memory showcase edits without duplicating accounts.");
+        await demo.AddExampleAccountAsync();
+        Check(preview!.Accounts.Count == 9 && preview.Accounts[^1].Key == "github.com:9" &&
+            preview.TrayStates![^1].Account.Key == "github.com:9", "Extra showcase examples retain unique matching identities.");
+        Check(!Directory.Exists(usageStatesDirectory), "Ordinary showcase data and preferences remain in memory.");
+    }
+    using (var bridge = new BridgeRuntime())
+    {
+        var command = JsonSerializer.Deserialize("""
+            {"id":"usage-states-demo","method":"initialize","demo":true,"usageStates":true}
+            """, BridgeJsonContext.Default.Command)! with { Directory = Path.Combine(root, "usage-states-bridge-demo") };
+        DashboardView? preview = null;
+        Check(bridge.Send(command).Error is null, "Generated bridge command accepts the usage showcase mode.");
+        var initialized = await Complete(bridge, command.Id, e => { if (e.Dashboard is not null) preview = e.Dashboard; });
+        Check(initialized.Error is null && preview?.Accounts.Count == 8 &&
+            preview.Accounts[1].Forecast?.Band == ForecastBand.Near &&
+            preview.Accounts[4].ActualUsage?.Band == ForecastBand.Over,
+            "Native bridge exposes the same synthetic usage and forecast states.");
+    }
     using (var controller = new ApplicationController(root, false, credentials, http, () => Task.FromResult<IStartupRegistration>(startup)))
     {
         DashboardView? dashboard = null;
@@ -70,6 +169,21 @@ try
             "Artwork data uses current consumption rather than rounding down to the crossed allocation threshold.");
         Check(credentials.Values.Count == 1, "Credentials are persisted through injected platform store.");
         Check(dashboard?.Tray?.RollUp.Percent == 105 && dashboard.Tray.RollUp.IsOverAllocation, "Shared dashboard includes truthful tray allocation.");
+        handler.Unlimited = true;
+        await controller.RefreshAsync();
+        Check(dashboard!.IsComplete && dashboard.ConsumptionUsd == 26.25m &&
+            dashboard.Accounts[0].Details.Unlimited && dashboard.Accounts[0].Percent is null &&
+            dashboard.Tray!.RollUp is { IsUnlimited: true, NumericText: "\u221e", IsPartial: false },
+            "Successful unlimited refresh retains observed dollars and exposes infinity rather than unavailable usage.");
+        var unlimitedEvents = new[] { new BridgeEvent { Kind = "changed", Dashboard = dashboard, Tray = dashboard.Tray } };
+        var unlimitedJson = JsonSerializer.Serialize(unlimitedEvents, BridgeJsonContext.Default.BridgeEventArray);
+        var unlimitedRoundTrip = JsonSerializer.Deserialize(unlimitedJson, BridgeJsonContext.Default.BridgeEventArray)!.Single();
+        Check(unlimitedRoundTrip.Tray!.RollUp is { IsUnlimited: true, Percent: null, NumericText: "\u221e" } &&
+            unlimitedRoundTrip.Dashboard!.Tray!.Icons[0].IsUnlimited &&
+            unlimitedRoundTrip.Tray.Accounts[0].IsUnlimited,
+            "Generated bridge JSON preserves unlimited state and infinity in standalone and dashboard tray payloads.");
+        handler.Unlimited = false;
+        await controller.RefreshAsync();
         await controller.SaveAccountAsync("github.com:1", "", "", showPeriodEstimate: true);
         Check(controller.AccountSettings("github.com:1").ShowPeriodEstimate && dashboard!.Accounts[0].PeriodEstimate is not null,
             "Enabling an account estimate updates the shared dashboard.");
@@ -108,6 +222,24 @@ try
             "Explicit disable persists and completely removes the estimate.");
         handler.UserId = "1";
         await controller.RefreshAccountAsync("github.com:1");
+        await controller.SaveAccountAsync("github.com:1", "Example", "", customBudgetUsd: 50m, updateCustomBudget: true);
+        Check(dashboard!.Accounts[0] is { Percent: 52.5m, AllocationUsd: 50m, CustomBudgetUsd: 50m } &&
+            dashboard.Accounts[0].Details is { ObservedAllocationUsd: 25m, ObservedPercentConsumed: 105m },
+            "Shared budget view preserves the original API diagnostics.");
+        Check((await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].CustomBudgetUsd == 50m,
+            "Custom budget persists through the generated settings serializer.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "");
+        await controller.SaveSettingsAsync(controller.Settings);
+        await controller.AddAsync("github.com", false, "github.com:1", _ => { }, () => { }, default);
+        Check(dashboard!.Accounts[0].CustomBudgetUsd == 50m &&
+            (await new JsonStore(root).LoadSettingsAsync()).Value.Accounts[0].CustomBudgetUsd == 50m,
+            "Account saves without budget arguments, global saves and reconnect preserve the budget.");
+        await Reject<AppOperationException>(() => controller.SaveAccountAsync("github.com:1", "Example", "",
+            customBudgetUsd: 0m, updateCustomBudget: true));
+        Check(dashboard!.Accounts[0].CustomBudgetUsd == 50m, "Rejected budgets leave the saved target intact.");
+        await controller.SaveAccountAsync("github.com:1", "Example", "", updateCustomBudget: true);
+        Check(dashboard!.Accounts[0] is { CustomBudgetUsd: null, Percent: 105m },
+            "Explicitly clearing a budget restores API percentages.");
         var persisted = await new JsonStore(root).LoadSettingsAsync();
         Check(persisted.Value.Accounts[0].AvatarUrl is null, "Avatar URLs are not persisted.");
         credentials.FailDelete = true;
@@ -274,6 +406,169 @@ try
         bridge.Dispose();
         Check(bridge.Send(new() { Id = "late", Method = "refresh" }).Error is not null, "Shutdown cancels outstanding native work.");
     }
+    var enterpriseHandler = new FixtureHttp { Eligible = true, CompleteDailyWindow = true };
+    var enterpriseTokens = new FixtureEnterpriseTokens();
+    if (EnterpriseConsumptionEndpoint.BuildTimeBaseUri is null)
+    {
+        using var disabledHttp = new HttpClient(new FixtureHttp { Eligible = true });
+        using var disabledController = new ApplicationController(Path.Combine(root, "enterprise-disabled"), false,
+            new MemoryCredentials(), disabledHttp, enterpriseTokens: enterpriseTokens);
+        DashboardView? disabledView = null;
+        disabledController.Changed += value => disabledView = value;
+        await disabledController.InitializeAsync();
+        await disabledController.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        await disabledController.RefreshAsync();
+        Check(disabledView!.Accounts[0].EnterpriseConsumption is null, "Missing build URL hides corporate integration for eligible accounts.");
+        await Reject<AppOperationException>(() => disabledController.ConnectConsumptionAsync("github.com:1"));
+        Check(enterpriseTokens.Calls == 0, "Missing build URL cannot invoke Azure CLI.");
+    }
+    using (var enterpriseHttp = new HttpClient(enterpriseHandler))
+    using (var controller = new ApplicationController(Path.Combine(root, "enterprise"), false, new MemoryCredentials(), enterpriseHttp,
+        enterpriseTokens: enterpriseTokens,
+        enterpriseApiBaseUri: new Uri("https://usage.example.invalid/api/copilot/consumption/crossEnterprise/")))
+    {
+        DashboardView? view = null;
+        controller.Changed += value => view = value;
+        await controller.InitializeAsync();
+        await controller.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        await controller.RefreshAsync();
+        Check(view!.Accounts[0].EnterpriseConsumption?.Eligible == true, "Enterprise metadata enables per-account setup.");
+        Check(enterpriseTokens.Calls == 0 && enterpriseHandler.DailyRequests == 0, "No corporate access before setup.");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.Ready, "Installed CLI offers only connection, not installation.");
+        enterpriseTokens.IsAvailable = false;
+        enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic missing CLI.", cliMissing: true);
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.CliMissing, "Installation is offered only for missing CLI.");
+        enterpriseTokens.IsAvailable = true;
+        enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic sign-in required.", authenticationFailed: true);
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.SignInRequired, "Installed CLI with no token offers sign-in, not installation.");
+        enterpriseTokens.Failure = null;
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity, "Setup presents a corporate identity.");
+        Check(enterpriseHandler.DailyRequests == 0, "No consumption access before identity confirmation.");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.ConfirmIdentity, "Confirmation replaces initial setup action.");
+        await controller.ConnectConsumptionAsync("github.com:1", true);
+        Check(view!.Accounts[0].EnterpriseConsumption is { Connected: true, PendingIdentity: null }, "Identity confirmation connects consumption.");
+        Check(view.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.Connected, "Successful setup collapses to connected state.");
+        if (DateTimeOffset.UtcNow.Day > 1)
+        {
+            await Until(() => view!.Accounts[0].EnterpriseConsumption is { IsLoading: false, Bars.Length: > 0 });
+            Check(enterpriseHandler.DailyRequests == 1, "Confirmed consumption uses the corporate service.");
+            Check(view.Accounts[0].EnterpriseConsumption?.Bars?.Length > 0, "Reported days reach the shared chart model.");
+            await controller.SaveAccountAsync("github.com:1", "", "", showPeriodEstimate: true);
+            var forecast = view!.Accounts[0].PeriodEstimate!;
+            Check(forecast.ReportedDayCount == Math.Min(7, DateTimeOffset.UtcNow.Day - 1) &&
+                forecast.AverageDailyConsumptionUsd == 0.25m,
+                "Confirmed daily reports drive the controller's recent-usage forecast.");
+            var forecastEvents = new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = view } };
+            var decodedForecast = JsonSerializer.Deserialize(
+                JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
+                BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].PeriodEstimate;
+            Check(decodedForecast == forecast, "Recent forecast method and date range cross the generated native bridge.");
+            var projected = JsonSerializer.Deserialize(
+                JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
+                BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].Forecast;
+            Check(projected == view.Accounts[0].Forecast && projected is not null,
+                "Forecast thresholds and clamped endpoints cross the source-generated native bridge.");
+            var actual = JsonSerializer.Deserialize(
+                JsonSerializer.Serialize(forecastEvents, BridgeJsonContext.Default.BridgeEventArray),
+                BridgeJsonContext.Default.BridgeEventArray)![0].Dashboard!.Accounts[0].ActualUsage;
+            Check(actual == view.Accounts[0].ActualUsage && actual is not null,
+                "Actual usage positions and separate severity cross the generated native bridge.");
+            var chartBeforeBudget = view.Accounts[0].EnterpriseConsumption!.Bars!;
+            await controller.SaveAccountAsync("github.com:1", "", "", customBudgetUsd: 50, updateCustomBudget: true);
+            var budgetView = view!.Accounts[0];
+            Check(budgetView is { CustomBudgetUsd: 50m, AllocationUsd: 50m, Percent: 52.5m, ConsumptionUsd: 26.25m } &&
+                budgetView.Details.ObservedAllocationUsd == 25m &&
+                budgetView.PeriodEstimate!.EstimatedConsumptionUsd == forecast.EstimatedConsumptionUsd &&
+                budgetView.PeriodEstimate.ReportedDayCount == forecast.ReportedDayCount &&
+                budgetView.PeriodEstimate.OverAllocationUsd == Math.Max(0, forecast.EstimatedConsumptionUsd!.Value - 50),
+                "Custom budgets coexist with daily forecasts while preserving observed API limits and usage.");
+            Check(budgetView.EnterpriseConsumption!.Bars!.SequenceEqual(chartBeforeBudget),
+                "Saving a custom budget does not change reported or derived daily chart bars.");
+            await controller.SaveAccountAsync("github.com:1", "", "", updateCustomBudget: true);
+            Check(view!.Accounts[0].PeriodEstimate == forecast && view.Accounts[0].Percent == 105m,
+                "Removing a custom budget restores API-limit comparison without losing daily forecasts.");
+        }
+        var saved = (await new JsonStore(Path.Combine(root, "enterprise")).LoadSettingsAsync()).Value;
+        Check(saved.Accounts[0].ConsumptionIdentity == enterpriseTokens.Identity, "Confirmed identity is persistent.");
+        enterpriseTokens.Identity = enterpriseTokens.Identity with { Username = "fixture@example.invalid" };
+        await controller.RefreshAsync();
+        Check(view!.Accounts[0].EnterpriseConsumption is { State: EnterpriseSetupState.Connected, PendingIdentity: null },
+            "Adding the display username does not invalidate a previously confirmed identity.");
+        enterpriseTokens.Failure = new EnterpriseAccessException("Synthetic reauthentication required.", authenticationFailed: true);
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view!.Accounts[0].EnterpriseConsumption?.State == EnterpriseSetupState.SignInRequired, "Expired login presents sign-in recovery.");
+        enterpriseTokens.Failure = null;
+        await controller.ConnectConsumptionAsync("github.com:1");
+        Check(view!.Accounts[0].EnterpriseConsumption is { State: EnterpriseSetupState.Connected, PendingIdentity: null },
+            "Retrying the previously confirmed identity does not repeat identity confirmation.");
+        enterpriseTokens.Identity = enterpriseTokens.Identity with { ObjectId = "11111111-1111-1111-1111-111111111111" };
+        await controller.RefreshAsync();
+        Check(view!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity, "Changed identity requires confirmation.");
+        Check(view.Accounts[0].EnterpriseConsumption?.Bars is null, "Changed identity removes the old chart.");
+        if (DateTimeOffset.UtcNow.Day > 1)
+            Check(view.Accounts[0].PeriodEstimate?.ReportedDayCount == 0,
+                "Identity reconfirmation removes daily reports from the forecast and restores period-to-date fallback.");
+        var roundtrip = JsonSerializer.Deserialize(JsonSerializer.Serialize(new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = view } },
+            BridgeJsonContext.Default.BridgeEventArray), BridgeJsonContext.Default.BridgeEventArray)!;
+        Check(roundtrip[0].Dashboard!.Accounts[0].EnterpriseConsumption?.PendingIdentity == enterpriseTokens.Identity,
+            "Source-generated bridge serialization carries consumption setup.");
+    }
+    if (DateTimeOffset.UtcNow.Day > 1)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parallelHandler = new FixtureHttp
+        {
+            Eligible = true, UnavailableDaily = true,
+            BeforeDailyResponse = async (number, cancellationToken) =>
+            {
+                if (number != 1) return;
+                entered.TrySetResult();
+                await release.Task.WaitAsync(cancellationToken);
+            }
+        };
+        using var parallelHttp = new HttpClient(parallelHandler);
+        using var parallelController = new ApplicationController(Path.Combine(root, "enterprise-parallel"), false,
+            new MemoryCredentials(), parallelHttp, enterpriseTokens: new FixtureEnterpriseTokens(),
+            enterpriseApiBaseUri: new Uri("https://usage.example.invalid/api/copilot/consumption/crossEnterprise/"));
+        DashboardView? parallelView = null;
+        parallelController.Changed += value => Volatile.Write(ref parallelView, value);
+        await parallelController.InitializeAsync();
+        await parallelController.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        parallelHandler.UserId = "2";
+        await parallelController.AddAsync("github.com", false, null, _ => { }, () => { }, default);
+        await parallelController.RefreshAsync();
+        try
+        {
+            await parallelController.ConnectConsumptionAsync("github.com:1").WaitAsync(TimeSpan.FromSeconds(3));
+            await parallelController.ConnectConsumptionAsync("github.com:1", true).WaitAsync(TimeSpan.FromSeconds(3));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Check(parallelView!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption is
+                { Connected: true, IsLoading: true }, "Setup publishes connected/loading before a slow daily request completes.");
+            await parallelController.ConnectConsumptionAsync("github.com:2").WaitAsync(TimeSpan.FromSeconds(3));
+            await parallelController.ConnectConsumptionAsync("github.com:2", true).WaitAsync(TimeSpan.FromSeconds(3));
+            await Until(() => parallelView!.Accounts.Single(a => a.Key == "github.com:2").EnterpriseConsumption is
+                { Connected: true, IsLoading: false, Bars.Length: 0 });
+            var second = parallelView!.Accounts.Single(a => a.Key == "github.com:2").EnterpriseConsumption!;
+            Check(!release.Task.IsCompleted && parallelHandler.DailyRequests == 2,
+                "A slow account does not block another account's setup or daily report.");
+            Check(second.State == EnterpriseSetupState.Connected &&
+                second.ChartMessage?.Contains("no daily reports") == true,
+                "Successful authentication with unavailable reports explicitly shows connected but no data.");
+            var serialized = JsonSerializer.Serialize(new BridgeEvent[] { new() { Kind = "dashboard", Dashboard = parallelView } },
+                BridgeJsonContext.Default.BridgeEventArray);
+            var decoded = JsonSerializer.Deserialize(serialized, BridgeJsonContext.Default.BridgeEventArray)!;
+            Check(decoded[0].Dashboard!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption!.IsLoading,
+                "In-flight daily report state crosses the generated native bridge.");
+        }
+        finally { release.TrySetResult(); }
+        await Until(() => parallelView!.Accounts.Single(a => a.Key == "github.com:1").EnterpriseConsumption is { IsLoading: false });
+    }
+    assertions += await BudgetBridgeTests.RunAsync(Path.Combine(root, "budget-bridge"));
+    assertions += await BudgetBridgeTests.RunAsync(Path.Combine(root, "budget-bridge-unlimited"), unlimited: true);
     Console.WriteLine($"PASS: {assertions} shared application and native bridge assertions; synthetic data only.");
 }
 finally { Directory.Delete(root, recursive: true); }
@@ -342,16 +637,69 @@ sealed class MemoryCredentials : ICredentialStore
 sealed class FixtureHttp : HttpMessageHandler
 {
     public string UserId { get; set; } = "1";
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    public bool Eligible { get; set; }
+    private int _dailyRequests;
+    public int DailyRequests => Volatile.Read(ref _dailyRequests);
+    public bool UnavailableDaily { get; set; }
+    public bool CompleteDailyWindow { get; init; }
+    public Func<int, CancellationToken, Task>? BeforeDailyResponse { get; init; }
+    public bool Unlimited { get; set; }
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        string json = request.RequestUri!.AbsolutePath switch
+        string json;
+        if (request.RequestUri!.Host == "usage.example.invalid")
+        {
+            int number = Interlocked.Increment(ref _dailyRequests);
+            if (BeforeDailyResponse is not null) await BeforeDailyResponse(number, cancellationToken);
+            var query = request.RequestUri.Query.TrimStart('?').Split('&')
+                .Select(p => p.Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
+            if (request.Headers.Authorization?.Parameter != "synthetic-corporate-token") throw new InvalidOperationException("Wrong token.");
+            string start = query["start-date"], end = query["end-date"];
+            json = $$$"""
+            {"user":{"aadAlias":"fixture"},"groupBy":"day","startDate":"{{{start}}}","endDate":"{{{end}}}",
+            "asOf":"{{{DateTimeOffset.UtcNow:O}}}","coverage":{"measure":"daily-ai-credit-report-usage","timezone":"UTC","currency":"USD"},
+            "days":[{"date":"{{{start}}}","results":[{"enterpriseId":"dotcom:microsoftopensource","status":"available","usage":{"grossAmountUsd":1}}]}]}
+            """;
+            if (CompleteDailyWindow)
+            {
+                var first = DateOnly.ParseExact(start, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                var limit = DateOnly.ParseExact(end, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                string rows = string.Join(",", Enumerable.Range(0, limit.DayNumber - first.DayNumber).Select(i =>
+                    "{\"date\":\"" + first.AddDays(i).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) +
+                    "\",\"results\":[{\"enterpriseId\":\"dotcom:microsoftopensource\",\"status\":\"available\",\"usage\":{\"grossAmountUsd\":0.25}}]}"));
+                int offset = json.IndexOf("\"days\":", StringComparison.Ordinal);
+                json = json[..offset] + "\"days\":[" + rows + "]}";
+            }
+            if (UnavailableDaily)
+                json = json.Replace("\"status\":\"available\",\"usage\":{\"grossAmountUsd\":1}", "\"status\":\"unavailable\",\"usage\":null");
+        }
+        else json = request.RequestUri!.AbsolutePath switch
         {
             "/login/device/code" => """{"device_code":"synthetic-device","user_code":"SYNTHETIC","verification_uri":"https://github.com/login/device","expires_in":60,"interval":1}""",
             "/login/oauth/access_token" => $$"""{"access_token":"synthetic-token-{{UserId}}","token_type":"bearer","scope":"read:user"}""",
             "/user" => $$"""{"id":{{UserId}},"login":"synthetic-user"}""",
-            "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":false}}}""",
+            "/copilot_internal/user" => """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"credits_used":2625,"entitlement":2500,"has_quota":true,"unlimited":""" +
+                Unlimited.ToString().ToLowerInvariant() + "}}}",
             _ => throw new InvalidOperationException("Unexpected synthetic request.")
         };
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        if (Eligible && request.RequestUri.AbsolutePath == "/copilot_internal/user")
+            json = json.Insert(1, "\"enterprise_list\":[{\"id\":1578}],");
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+    }
+
+}
+
+sealed class FixtureEnterpriseTokens : IEnterpriseTokenProvider
+{
+    public bool IsAvailable { get; set; } = true;
+    public EnterpriseAccessException? Failure { get; set; }
+    public EnterpriseIdentity Identity { get; set; } = new("fixture", "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333");
+    public int Calls { get; private set; }
+    public Task<EnterpriseToken> GetAsync(bool forceRefresh, CancellationToken cancellationToken)
+    {
+        Calls++;
+        if (Failure is { } failure) return Task.FromException<EnterpriseToken>(failure);
+        return Task.FromResult(new EnterpriseToken("synthetic-corporate-token", Identity, DateTimeOffset.UtcNow.AddHours(1)));
     }
 }

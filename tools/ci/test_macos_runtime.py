@@ -120,6 +120,24 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn('["/usr/bin/sample", str(process.pid)', launcher)
         self.assertIn("process.kill()", launcher)
 
+    def test_guarded_quit_retains_the_bridge_event_loop_and_real_smoke_coverage(self):
+        source = (ROOT / "src/GHCPSpendTray.Mac/AppMain.swift").read_text()
+        termination = source.split("func applicationShouldTerminate(")[1].split("func applicationWillTerminate(")[0]
+        self.assertIn("model.requestLeaving({ sender.terminate(nil) })", termination)
+        self.assertIn("return .terminateCancel", termination)
+        self.assertNotIn(".terminateLater", termination)
+        smoke = source.split("private func runSmoke(")[1]
+        for phase in ("saving before native Settings close", "rejecting invalid Save on native Quit",
+                      "keeping draft on native Quit", "discarding before native Settings close",
+                      "saving before native Quit"):
+            self.assertIn(phase, smoke)
+        completed = source.split("func applicationWillTerminate(")[1].split("nonisolated func userNotificationCenter(")[0]
+        self.assertIn("model.settings?.pollMinutes == 20", completed)
+        self.assertIn('smoke-result.txt', completed)
+        launcher = (ROOT / "tools/macos/smoke-test.py").read_text()
+        self.assertIn("protected close and save-before-Quit", launcher)
+        self.assertIn('"AccountWithBudget"', launcher)
+
     def test_popup_readiness_checks_effective_window_size_not_cached_request(self):
         source = (ROOT / "src/GHCPSpendTray.Mac/AppMain.swift").read_text()
         wait = source.split("private func waitForPopupAnchor(")[1].split("private func popupSmokeDiagnostic(")[0]
@@ -131,3 +149,25 @@ class MacOSRuntimeTests(unittest.TestCase):
         self.assertIn("static let anchorTolerance: CGFloat = 8", geometry)
         diagnostic = source.split("private func popupSmokeDiagnostic(")[1]
         self.assertIn("contentSize=\\(popover.contentSize)", diagnostic)
+
+    def test_sparkle_fixture_awaits_callbacks_and_retains_failure_diagnostics(self):
+        fixture = (ROOT / "tests/GHCPSpendTray.MacTests/SparkleTests.swift").read_text()
+        self.assertIn("try await server.start()", fixture)
+        self.assertIn("try await probe.completion.value", fixture)
+        self.assertIn("responseData == feedData", fixture)
+        self.assertNotIn("python3", fixture)
+        self.assertNotIn("Task.sleep", fixture)
+        self.assertNotIn("port.txt", fixture)
+        listener = (ROOT / "tests/GHCPSpendTray.MacTests/LoopbackAppcastServer.swift").read_text()
+        self.assertIn('parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)', listener)
+        self.assertIn("case .ready:", listener)
+        self.assertIn("readiness.complete(.success(url))", listener)
+        self.assertIn("connection.cancel()", listener)
+        workflow = (ROOT / ".github/workflows/verify.yml").read_text()
+        macos = workflow.split("\n  macos:\n")[1].split("\n  macos_")[0]
+        self.assertIn("id: native_verify", macos)
+        self.assertIn("always() && steps.native_verify.outcome", macos)
+        self.assertIn("path: artifacts/macos-test-diagnostics/", macos)
+        verify = (ROOT / "tools/macos/verify.sh").read_text()
+        self.assertIn("set -euo pipefail", verify)
+        self.assertIn("2>&1 | tee artifacts/macos-test-diagnostics/platform-tests.log", verify)

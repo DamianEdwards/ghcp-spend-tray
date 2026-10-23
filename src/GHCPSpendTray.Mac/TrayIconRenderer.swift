@@ -5,10 +5,10 @@ enum TrayIconRenderer {
     static func image(_ indicator: TrayIndicator, style: TrayIconStyle) -> NSImage {
         let size = NSSize(width: style == .percentage ? 28 : 22, height: 22)
         let image = NSImage(size: size, flipped: false) { bounds in
-            let unavailablePie = style == .pie && indicator.percent == nil
+            let unavailablePie = style == .pie && indicator.percent == nil && !indicator.isUnlimited
             let badges = indicator.isPartial || indicator.isOverAllocation
             NSColor.black.set()
-            if style == .percentage {
+            if style == .percentage || indicator.isUnlimited {
                 let text = indicator.numericText as NSString
                 let font = NSFont.monospacedDigitSystemFont(ofSize: badges ? 12 : 15, weight: .semibold)
                 let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
@@ -38,7 +38,7 @@ enum TrayIconRenderer {
             if indicator.percent != nil {
                 if indicator.isOverAllocation { badge("+", at: 0, width: bounds.width) }
             }
-            if unavailablePie || (indicator.percent != nil && indicator.isPartial) {
+            if unavailablePie || ((indicator.percent != nil || indicator.isUnlimited) && indicator.isPartial) {
                 warningBadge(at: bounds.width - 10)
             }
             return true

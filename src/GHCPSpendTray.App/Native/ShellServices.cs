@@ -57,6 +57,7 @@ internal sealed unsafe class TrayIcon : IDisposable
     private Win32.NOTIFYICONDATA _data;
     private bool _added;
     private bool _disposed;
+    private bool _updatePending;
     private TrayImage _icon;
     private TrayImage? _notificationIcon;
     private readonly ShellCall _shell;
@@ -119,13 +120,19 @@ internal sealed unsafe class TrayIcon : IDisposable
     {
         _data.uFlags = Win32.NIF_MESSAGE | Win32.NIF_ICON | Win32.NIF_TIP | Win32.NIF_GUID | Win32.NIF_SHOWTIP;
         if (_shell(Win32.NIM_ADD, ref _data) == 0)
-            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Windows rejected the tray icon.");
+        {
+            var failure = new Win32Exception(Marshal.GetLastPInvokeError(), "Windows rejected the tray icon.");
+            Diagnostics.RecordFailure("Shell NIM_ADD rejected", failure);
+            throw failure;
+        }
         _added = true;
         _data.uTimeoutOrVersion = 4;
         if (_shell(Win32.NIM_SETVERSION, ref _data) == 0)
         {
+            var failure = new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot enable keyboard-accessible tray behavior.");
+            Diagnostics.RecordFailure("Shell NIM_SETVERSION rejected", failure);
             Remove();
-            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot enable keyboard-accessible tray behavior.");
+            throw failure;
         }
     }
     internal void Restore()
@@ -133,9 +140,10 @@ internal sealed unsafe class TrayIcon : IDisposable
         Remove();
         Add();
     }
+    internal void Invalidate() => _updatePending = true;
     internal void Update(TrayIndicator indicator, TrayIconStyle style, int size, TrayPalette palette)
     {
-        if (_added && _rendered == (indicator, style, size, palette)) return;
+        if (_added && !_updatePending && _rendered == (indicator, style, size, palette)) return;
         var image = TrayIconRenderer.Create(indicator, style, size, palette);
         var previous = _data;
         bool wasAdded = _added;
@@ -144,20 +152,22 @@ internal sealed unsafe class TrayIcon : IDisposable
             _data.hIcon = image.DangerousGetHandle();
             _data.uFlags = Win32.NIF_ICON | Win32.NIF_TIP | Win32.NIF_GUID | Win32.NIF_SHOWTIP;
             fixed (char* tip = _data.szTip) Set(tip, 128, indicator.Tooltip);
-            if (!_added || _shell(Win32.NIM_MODIFY, ref _data) == 0)
+            if (_added && _shell(Win32.NIM_MODIFY, ref _data) == 0)
             {
+                Diagnostics.Record($"Shell NIM_MODIFY rejected (native error {Marshal.GetLastPInvokeError()}).");
                 _added = false;
-                Add();
             }
+            if (!_added) Add();
         }
-        catch { _data = previous; _added |= wasAdded; image.Dispose(); throw; }
+        catch { _data = previous; _added |= wasAdded; _updatePending = true; image.Dispose(); throw; }
         _icon.Dispose();
         _icon = image;
         _rendered = (indicator, style, size, palette);
+        _updatePending = false;
     }
-    internal bool Notify(NotificationView notification, int size, TrayPalette palette)
+    internal bool Notify(NotificationView notification, int size, TrayPalette palette, bool updateAvailable = false)
     {
-        var image = TrayIconRenderer.CreateNotification(notification, size, palette);
+        var image = TrayIconRenderer.CreateNotification(notification, size, palette, updateAvailable);
         try
         {
             var data = _data;

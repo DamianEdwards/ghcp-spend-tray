@@ -26,6 +26,23 @@ public sealed class BridgeRuntime : IDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (command.Method == "form.validate")
+            {
+                var input = command.Form ?? throw new ArgumentException("Missing preferences form.");
+                var result = FormValidation.Validate(input);
+                if (input.Page == "account" && input.UseCustomBudget)
+                {
+                    AccountView? account;
+                    lock (_stateGate) account = _dashboard?.Accounts.SingleOrDefault(a => a.Key == command.Key);
+                    string text = result.CustomBudgetUsd is not { } budget
+                        ? "Enter a positive USD amount with up to two decimal places."
+                        : account is { Freshness: "Fresh", ConsumptionUsd: { } used } && account.Details.IsCurrentPeriod
+                            ? FormattableString.Invariant($"Preview: ${used:0.00} consumed = {UsageFormatting.Percentage(UsageBudget.Percentage(used, budget))} of {UsageFormatting.BudgetMoney(budget)} custom budget")
+                            : "Preview unavailable until fresh current-period consumption is available.";
+                    result = result with { Text = text };
+                }
+                return result;
+            }
             if (command.Method == "platform.reply")
             {
                 _platform.Complete(Required(command.TargetId), command.Reply ?? throw new ArgumentException("Missing platform reply."));
@@ -66,11 +83,13 @@ public sealed class BridgeRuntime : IDisposable
             {
                 string key = Required(command.Key);
                 var preferences = Controller.AccountSettings(key);
+                decimal? budget;
+                lock (_stateGate) budget = _dashboard?.Accounts.SingleOrDefault(a => a.Key == key)?.CustomBudgetUsd;
                 _events.Enqueue(new()
                 {
                     Kind = "completed", Id = command.Id,
                     Preferences = new(preferences.DisplayName, preferences.Thresholds, preferences.SpendIncrementUsd,
-                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate)
+                        Controller.AccountClientId(key), preferences.ShowPeriodEstimate, budget)
                 });
                 return new();
             }
@@ -89,6 +108,8 @@ public sealed class BridgeRuntime : IDisposable
 
     private async Task ExecuteAsync(Command command)
     {
+        using var activity = command.Method == "initialize" ? null :
+            AppInstrumentation.Activities.StartActivity("ui." + command.Method);
         string? error = null;
         bool cancelled = false;
         try
@@ -98,18 +119,30 @@ public sealed class BridgeRuntime : IDisposable
                 case "initialize":
                     if (_controller is not null) throw new AppOperationException("The application is already initialized.");
                     _directory = Path.GetFullPath(Required(command.Directory));
-                    _controller = command.Demo ? new DemoController(_directory, command.Empty) :
+                    TelemetryConfiguration? telemetry = command.AppVersion is { } version
+                        ? new(version, command.Demo ? "demo" :
+                                command.ReleaseChannel is "Stable" or "Preview" ? "github-release" : "development",
+                            !command.Demo && command.ReleaseChannel is "Stable" or "Preview", command.OsVersion)
+                        : null;
+                    _controller = command.Demo
+                        ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited, telemetry: telemetry,
+                            usageStates: command.UsageStates) :
                         new ApplicationController(_directory, false, _platform,
-                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic);
+                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic,
+                            telemetry: telemetry);
                     _controller.Changed += OnDashboard;
                     _controller.SetNotificationHandler(_platform.NotifyAsync);
-                    await _controller.InitializeAsync();
+                    using (AppInstrumentation.Activities.StartActivity("ui.initialize"))
+                        await _controller.InitializeAsync();
                     break;
                 case "refresh":
                     await Controller.RefreshAsync(command.Key);
                     break;
                 case "account.refresh":
                     await Controller.RefreshAccountAsync(Required(command.Key));
+                    break;
+                case "consumption.connect":
+                    await Controller.ConnectConsumptionAsync(Required(command.Key), command.Confirm);
                     break;
                 case "resume":
                     await Controller.ResumeAsync();
@@ -120,7 +153,8 @@ public sealed class BridgeRuntime : IDisposable
                     break;
                 case "account.save":
                     await Controller.SaveAccountAsync(Required(command.Key), command.DisplayName ?? "",
-                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate);
+                        command.Thresholds ?? "", command.SpendIncrementUsd, command.ShowPeriodEstimate,
+                        command.CustomBudgetUsd, command.UpdateCustomBudget);
                     break;
                 case "account.remove":
                     await Controller.RemoveAsync(Required(command.Key));
@@ -181,6 +215,7 @@ public sealed class BridgeRuntime : IDisposable
 
     private void RecordDiagnostic(string category)
     {
+        System.Diagnostics.Trace.TraceWarning(category);
         lock (_stateGate)
         {
             try

@@ -21,6 +21,9 @@ internal static partial class Program
         try
         {
             await DomainTests();
+            await EnterpriseConsumptionTests();
+            await BudgetTests();
+            await UsageForecastTests();
             await PeriodEstimateTests();
             await TrayTests();
             await HttpTests();
@@ -188,6 +191,76 @@ internal static partial class Program
                 True(!result.RollUp.IsPartial);
             }
         });
+        await Test("fresh unlimited quotas show infinity without inventing percentages", () =>
+        {
+            foreach (var style in Enum.GetValues<TrayIconStyle>())
+                foreach (var mode in Enum.GetValues<TrayDisplayMode>())
+                    foreach (decimal? entitlement in new decimal?[] { null, 0, 10000 })
+                    {
+                        var snapshot = CopilotUsageProvider.ParseJson(Json(5000, entitlement, unlimited: true),
+                            Account.Key, Now);
+                        var state = first with { Snapshot = snapshot };
+                        var result = TrayUsage.Create(Settings(Account) with { TrayStyle = style, TrayMode = mode },
+                            [state], Now);
+                        foreach (var icon in new[] { result.RollUp, result.Icons.Single() })
+                        {
+                            True(icon.IsUnlimited && !icon.IsPartial && !icon.IsOverAllocation);
+                            Equal<double?>(null, icon.Percent);
+                            Equal("\u221e", icon.NumericText);
+                            Equal("Unlimited", icon.ValueText);
+                            Equal(1, icon.IncludedAccounts);
+                            True(icon.Tooltip.Contains("Unlimited") && !icon.Tooltip.Contains("Unavailable"));
+                            True(icon.Details.Contains("Unlimited") && !icon.Details.Contains("Unavailable"));
+                        }
+                        True(result.Accounts.Single().IsUnlimited);
+                        Equal(50m, UsageAggregation.Total([state], Now, TimeSpan.FromMinutes(10)).ConsumptionUsd);
+                    }
+        });
+        await Test("unlimited roll-ups retain selection counts and failure qualifiers", () =>
+        {
+            var unlimited = first with { Snapshot = Sample(unlimited: true) };
+            var unlimited2 = next with { Snapshot = Sample(account: second, unlimited: true) };
+            var result = TrayUsage.Create(settings, [unlimited, unlimited2], Now);
+            True(result.RollUp.IsUnlimited && !result.RollUp.IsPartial);
+            Equal(2, result.RollUp.IncludedAccounts);
+            result = TrayUsage.Create(settings, [unlimited, unlimited2 with { Status = AccountStatus.NetworkError }], Now);
+            True(result.RollUp.IsUnlimited && result.RollUp.IsPartial);
+            Equal(1, result.RollUp.IncludedAccounts);
+            True(result.RollUp.Tooltip.StartsWith("Partial ! | Unlimited") &&
+                result.RollUp.Tooltip.Contains("refresh failed"));
+            result = TrayUsage.Create(settings with { TrayMode = TrayDisplayMode.PerAccount }, [first, unlimited2], Now);
+            Equal<double?>(50, result.RollUp.Percent);
+            True(!result.RollUp.IsUnlimited && result.RollUp.IsPartial);
+            True(result.RollUp.Tooltip.Contains("unlimited allocation"));
+            True(result.Icons[1].IsUnlimited && !result.Icons[1].IsPartial);
+            result = TrayUsage.Create(settings with
+                { Accounts = [Account with { ExcludeFromTray = true }, second] }, [first, unlimited2], Now);
+            True(result.RollUp.IsUnlimited && !result.RollUp.IsPartial);
+            Equal(1, result.RollUp.SelectedAccounts);
+        });
+        await Test("unlimited never masks failures invalid snapshots or expired observations", () =>
+        {
+            var unlimited = first with { Snapshot = Sample(unlimited: true) };
+            foreach (var status in Enum.GetValues<AccountStatus>().Where(s => s != AccountStatus.Fresh))
+            {
+                var icon = TrayUsage.Create(Settings(Account), [unlimited with { Status = status }], Now).RollUp;
+                True(!icon.IsUnlimited && icon.NumericText == "?" && icon.ValueText == "Unavailable");
+            }
+            foreach (var state in new[]
+            {
+                unlimited with { Snapshot = unlimited.Snapshot! with { ConsumptionUsd = -1 } },
+                unlimited with { Snapshot = unlimited.Snapshot! with { AccountKey = second.Key } },
+                unlimited with { Snapshot = null }
+            })
+                True(!TrayUsage.Create(Settings(Account), [state], Now).RollUp.IsUnlimited);
+            foreach (var at in new[] { Now.AddMinutes(10).AddTicks(1), Now.AddMonths(1), Now.AddTicks(-1) })
+                True(!TrayUsage.Create(Settings(Account), [unlimited], at).RollUp.IsUnlimited);
+            var reset = Now.AddMinutes(5);
+            var explicitReset = unlimited with { Snapshot = unlimited.Snapshot! with
+                { ResetAtUtc = reset, PeriodId = BillingPeriods.Resolve(Now, reset) } };
+            True(TrayUsage.Create(Settings(Account), [explicitReset], reset.AddTicks(-1)).RollUp.IsUnlimited);
+            True(!TrayUsage.Create(Settings(Account), [explicitReset], reset).RollUp.IsUnlimited);
+        });
         await Test("tray selection and per-account states never change dollar totals", () =>
         {
             var config = settings with { TrayMode = TrayDisplayMode.PerAccount };
@@ -213,7 +286,17 @@ internal static partial class Program
                 True(result.Tooltip.Contains(result.ValueText));
             }
             var tiny = TrayUsage.Create(Settings(Account), [State(Account, .001m)], Now).RollUp;
-            Equal("<0.01%", tiny.ValueText);
+            Equal("0%", tiny.ValueText);
+            foreach (var (percent, text) in new (double, string)[]
+                { (0, "0%"), (.49, "0%"), (.5, "1%"), (33.333333333333, "33%"),
+                  (52.5, "53%"), (99.5, "100%"), (125.6, "126%"), (1500.5, "1501%") })
+            {
+                Equal(text, TrayIndicator.FormatPercent(percent));
+                Equal(text, UsageFormatting.Percentage((decimal)percent));
+            }
+            Equal("$1,500", UsageFormatting.BudgetMoney(1500.00m));
+            Equal("$1,500.50", UsageFormatting.BudgetMoney(1500.50m));
+            Equal("$1,500.05", UsageFormatting.BudgetMoney(1500.05m));
             var huge = State(Account, decimal.MaxValue, decimal.MaxValue);
             var huge2 = State(second, decimal.MaxValue, decimal.MaxValue);
             Equal<double?>(100, TrayUsage.Create(settings, [huge, huge2], Now).RollUp.Percent);

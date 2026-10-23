@@ -40,11 +40,13 @@ def classify(paths):
             ".github/workflows/release.yml",
         }:
             result.update(windows=True, macos=True, prompt=True)
-        elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/", ".github/actions/setup-macos/")) or path == ".github/workflows/notarization-status.yml":
+        elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/", ".github/actions/setup-macos/")) or path in (
+            ".github/workflows/notarization-status.yml", ".github/workflows/macos-updates.yml",
+        ):
             result["macos"] = True
         elif path.startswith(("src/GHCPSpendTray.App/", "tests/GHCPSpendTray.AppTests/", "tests/GHCPSpendTray.PlatformTests/")) or (
             path.startswith("tools/") and path.endswith(".ps1")
-        ) or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
+        ) or path.startswith(".github/actions/setup-windows-storage/") or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
             result["windows"] = True
         else:
             # Shared sources, CI routing, or an unfamiliar path run every code lane.

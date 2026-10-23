@@ -2,7 +2,16 @@
 
 GHCPSpendTray is a full-trust MSIX desktop app. Windows owns installation,
 upgrades, Start menu registration, startup registration, and removal.
-There is no self-installer, updater, installer handoff, or legacy data migration.
+There is no self-installer, custom package downloader, installer handoff, or
+legacy data migration.
+
+## Microsoft Store updates
+
+Store-signed packages check for updates automatically and offer installation
+from About. Update notifications open that page. Windows handles consent,
+installation and app restart; failures remain visible and retryable.
+Portable, demo, development and GitHub-installed copies do not use Store updates.
+See `docs/VALIDATION.md` for verification coverage and limitations.
 
 ## Bootstrap and lifetime
 

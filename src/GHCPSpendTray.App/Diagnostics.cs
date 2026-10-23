@@ -5,9 +5,17 @@ internal static class Diagnostics
     private static readonly object Gate = new();
     private static string? _directory;
     internal static void Initialize(string dataDirectory) => _directory = Path.Combine(dataDirectory, "logs");
+    internal static void RecordFailure(string category, Exception exception)
+    {
+        var native = exception as System.ComponentModel.Win32Exception ??
+            exception.InnerException as System.ComponentModel.Win32Exception;
+        Record($"{category} ({exception.GetType().Name}, HRESULT 0x{exception.HResult:X8}" +
+            (native is null ? ")." : $", native error {native.NativeErrorCode})."));
+    }
     // Callers provide only fixed diagnostic categories, never server responses or exception messages.
     internal static void Record(string category)
     {
+        System.Diagnostics.Trace.TraceWarning(category);
         lock (Gate)
         {
             try
