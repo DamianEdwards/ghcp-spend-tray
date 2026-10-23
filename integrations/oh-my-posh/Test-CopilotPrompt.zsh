@@ -49,7 +49,7 @@ if [[ ${3-} == --render ]]; then
         rendered=$(oh-my-posh print primary --config "$temporary/theme.omp.json" --shell zsh --escape=false)
         case $scenario in
             green) expected='166;227;161' ;; yellow) expected='249;226;175' ;; red) expected='243;139;168' ;;
-            in_progress) expected='' ;; not_connected) expected='' ;;
+            in_progress) expected='' ;; not_connected) expected='' ;;
         esac
         equal "$([[ $rendered == *"$expected"* ]] && print yes || print no)" yes 'Actual color/connection glyph'
         equal "$([[ $rendered == *'󱖶'* ]] && print yes || print no)" yes 'Actual chart glyph'

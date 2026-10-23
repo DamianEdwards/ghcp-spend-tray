@@ -65,7 +65,7 @@ try {
         @{ version = 4; blocks = @(@{ type = 'prompt'; alignment = 'left'; segments = @($segment) }) } |
             ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $theme -Encoding utf8
         foreach ($case in @(@('green','166;227;161'), @('yellow','249;226;175'), @('red','243;139;168'),
-            @('in_progress','ec4c'), @('not_connected','ec3e'))) {
+            @('in_progress','ec4c'), @('not_connected','ec42'))) {
             & $fixture --prepare-cache $directory $case[0]
             Initialize-CopilotPrompt -AppExecutable $helper -DataDirectory $directory
             Update-CopilotPrompt

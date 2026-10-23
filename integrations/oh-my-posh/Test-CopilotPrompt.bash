@@ -59,10 +59,10 @@ if [ "${3-}" = --render ]; then
         rendered=$(oh-my-posh print primary --config "$temporary/theme.omp.json" --shell bash --escape=false)
         case $scenario in
             green) expected='166;227;161' ;; yellow) expected='249;226;175' ;; red) expected='243;139;168' ;;
-            in_progress) expected=$'\uEC4C' ;; not_connected) expected=$'\uEC3E' ;;
+            in_progress) expected=$'\uEC4C' ;; not_connected) expected=$'\uEC42' ;;
         esac
         # Bash 3.2 lacks \u expansion: use the literal UTF-8 glyph from its protocol-independent segment.
-        case $scenario in in_progress) expected='' ;; not_connected) expected='' ;; esac
+        case $scenario in in_progress) expected='' ;; not_connected) expected='' ;; esac
         equal "$([[ $rendered = *"$expected"* ]] && printf yes || printf no)" yes 'Actual color/connection glyph'
         equal "$([[ $rendered = *'󱖶'* ]] && printf yes || printf no)" yes 'Actual chart glyph'
         equal "$([[ $rendered = *"$COPILOT_SPEND"* ]] && printf yes || printf no)" yes 'Actual native spend'

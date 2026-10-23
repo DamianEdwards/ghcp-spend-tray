@@ -109,7 +109,7 @@ Dollars and percentages are rounded; thousands use `K` with at most one decimal.
 `unavailable`, and an unavailable forecast is `?`.
 
 The leading glyph is `nf-cod-copilot`, `nf-cod-copilot_in_progress`, or
-`nf-cod-copilot_not_connected`. Here "connected" means the selected saved app
+`nf-cod-copilot_unavailable` (U+EC42). Here "connected" means the selected saved app
 observations are fresh and complete, not that a query opened a network connection.
 The projection separator is `nf-md-chart_timeline_variant_shimmer`.
 
