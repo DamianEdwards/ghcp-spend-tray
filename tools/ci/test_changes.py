@@ -13,14 +13,16 @@ class ChangesTests(unittest.TestCase):
                      ".github/workflows/macos-updates.yml", "packaging/macos/sparkle.json", "tools/macos/updates.py",
                      "tools/macos/rehearsal.py", "tools/macos/rehearsal/AppRehearsal.swift",
                      "tools/macos/rehearsal/Server.swift", "tools/macos/test_rehearsal.py"):
-            self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False, prompt=False), path)
+            self.assertEqual(classify([path]), dict(windows=False, macos=True, markdown=False,
+                                                   prompt=path == "tools/macos/build.sh"), path)
         for path in ("src/GHCPSpendTray.App/Program.cs", "tests/GHCPSpendTray.AppTests/Program.cs",
                      "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1",
                      "tools/get-windows-app-runtime.ps1", "tools/test-windows-app-runtime.ps1",
                      "tools/test-package-deployment.ps1", ".github/workflows/store-package.yml",
                      ".github/actions/setup-windows-storage/action.yml",
                      "GHCPSpendTray.slnx"):
-            self.assertEqual(classify([path]), dict(windows=True, macos=False, markdown=False, prompt=False), path)
+            self.assertEqual(classify([path]), dict(windows=True, macos=False, markdown=False,
+                prompt=path in {"src/GHCPSpendTray.App/Program.cs", "packaging/AppxManifest.xml", "tools/publish.ps1"}), path)
 
     def test_shared_and_unknown(self):
         for path in ("src/GHCPSpendTray.Core/Models.cs", "src/GHCPSpendTray.Application/UiModels.cs",
@@ -37,7 +39,7 @@ class ChangesTests(unittest.TestCase):
         self.assertEqual(classify(["README.md", "docs/RELEASING.md"]), dict(windows=False, macos=False, markdown=True, prompt=False))
         self.assertEqual(classify([".markdownlint.jsonc"]), dict(windows=False, macos=False, markdown=True, prompt=False))
         self.assertEqual(classify([]), dict(windows=False, macos=False, markdown=False, prompt=False))
-        self.assertEqual(classify(["README.md", "tools/macos/build.sh"]), dict(windows=False, macos=True, markdown=True, prompt=False))
+        self.assertEqual(classify(["README.md", "tools/macos/build.sh"]), dict(windows=False, macos=True, markdown=True, prompt=True))
 
     def test_prompt_integration_does_not_build_apps(self):
         for name in ("CopilotPrompt.ps1", "copilot.segment.json", "demo.ps1", "Test-CopilotPrompt.ps1",
@@ -46,8 +48,7 @@ class ChangesTests(unittest.TestCase):
             self.assertEqual(classify([path]), dict(windows=False, macos=False, markdown=False, prompt=True), path)
         self.assertEqual(classify(["integrations/oh-my-posh/README.md"]),
                          dict(windows=False, macos=False, markdown=True, prompt=False))
-        for path in ("src/GHCPSpendTray.Prompt/Program.cs", "tests/GHCPSpendTray.PromptTests/Program.cs",
-                     "tools/prompt/publish.ps1", "tools/prompt/publish.sh"):
+        for path in ("tests/GHCPSpendTray.PromptTests/Program.cs", "tools/prompt/verify.ps1", "tools/prompt/verify.sh"):
             self.assertEqual(classify([path]), dict(windows=False, macos=False, markdown=False, prompt=True), path)
         self.assertEqual(classify(["integrations/oh-my-posh/CopilotPrompt.ps1", "README.md"]),
                          dict(windows=False, macos=False, markdown=True, prompt=True))
@@ -71,9 +72,9 @@ class ChangesTests(unittest.TestCase):
                 self.assertEqual(classify(["docs/images/screenshot.png", path]),
                                  dict(windows=True, macos=True, markdown=False, prompt=True))
         self.assertEqual(classify(["docs/images/screenshot.png", "src/GHCPSpendTray.App/Program.cs"]),
-                         dict(windows=True, macos=False, markdown=False, prompt=False))
+                         dict(windows=True, macos=False, markdown=False, prompt=True))
         self.assertEqual(classify(["docs/images/screenshot.png", "tools/macos/build.sh"]),
-                         dict(windows=False, macos=True, markdown=False, prompt=False))
+                         dict(windows=False, macos=True, markdown=False, prompt=True))
 
 
 if __name__ == "__main__":

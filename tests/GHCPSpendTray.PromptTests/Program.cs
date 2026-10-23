@@ -1,333 +1,203 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Net;
-using System.Text;
 using System.Text.Json;
 using GHCPSpendTray.Core;
-using GHCPSpendTray.Prompt;
+using GHCPSpendTray.Shared;
 
-int assertions = 0;
-if (args.FirstOrDefault() == "auth")
+if (UsageCommands.Handles(args))
 {
-    if (Environment.GetEnvironmentVariable("GHCP_TEST_GH") == "timeout") Thread.Sleep(10000);
-    return 1;
-}
-if (args.FirstOrDefault() == "--hold-gate")
-{
-    using RefreshGate? gate = RefreshGate.TryAcquire(args[1], args[2]);
-    if (gate is null) return 2;
-    File.WriteAllText(args[3], "ready");
-    Thread.Sleep(30000);
-    return 0;
+    var command = UsageCommands.Run(args, "");
+    if (command.Output.Length > 0) Console.WriteLine(command.Output);
+    if (command.Error is not null) Console.Error.WriteLine(command.Error);
+    return command.ExitCode;
 }
 if (args.FirstOrDefault() == "--prepare-cache")
 {
-    var prepared = new PromptOptions { CacheDirectory = args[1], GhExecutable = args[2] }.Validate();
-    DateTimeOffset instant = DateTimeOffset.UtcNow;
-    string preparedKey = CredentialContext.Key(prepared);
-    var observation = CopilotUsageClient.ParseJson(
-        """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"has_quota":true,"unlimited":false,"credits_used":4000,"entitlement":10000}}}""",
-        "github.com:123", instant);
-    new PromptStore(prepared, preparedKey).Save(new()
+    var state = Fixture(DateTimeOffset.UtcNow);
+    if (args.Length > 2)
     {
-        ContextKey = preparedKey, Hostname = "github.com", AccountId = "123", Status = AccountStatus.Fresh,
-        Snapshot = observation, AttemptedAtUtc = instant, NextAttemptUtc = instant.AddHours(1)
-    });
+        var account = state.Accounts[0];
+        account = args[2] switch
+        {
+            "green" => account with { Estimate = account.Estimate! with { EstimatedConsumptionUsd = 45m } },
+            "yellow" => account with { Estimate = account.Estimate! with { EstimatedConsumptionUsd = 48m } },
+            "red" => account,
+            "in_progress" => account with { Refreshing = true },
+            "not_connected" => account with { Status = AccountStatus.SignInRequired },
+            _ => throw new ArgumentException("Unknown synthetic scenario.")
+        };
+        state = state with { Accounts = [account] };
+    }
+    AppUsageStore.Save(args[1], state);
     return 0;
 }
-string root = Path.Combine(Path.GetTempPath(), "GHCPPrompt-tests-" + Guid.NewGuid().ToString("N"));
-Directory.CreateDirectory(root);
-DateTimeOffset now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
-var clock = new Clock(now);
-string key = new('a', 64);
-var options = new PromptOptions { CacheDirectory = root }.Validate();
-var store = new PromptStore(options, key);
-var service = new PromptService(options, clock, _ => key);
-string quota = """{"quota_snapshots":{"premium_interactions":{"token_based_billing":true,"has_quota":true,"unlimited":false,"credits_used":4000,"entitlement":10000}},"quota_reset_date":"2026-11-01"}""";
-var snapshot = CopilotUsageClient.ParseJson(quota, "github.com:123", now);
-PromptCache Sample(decimal projected = 80)
-{
-    decimal used = projected / 2, credits = used * 100;
-    return new()
-    {
-        ContextKey = key, Hostname = "github.com", AccountId = "123", Status = AccountStatus.Fresh,
-        AttemptedAtUtc = now, NextAttemptUtc = now.AddHours(1),
-        Snapshot = snapshot with
-        {
-            CreditsUsed = credits, ConsumptionUsd = used,
-            PercentConsumed = CreditPolicy.Percentage(credits, snapshot.Entitlement, false)
-        }
-    };
-}
+int checks = 0;
 void Check(bool condition, string label)
 {
     if (!condition) throw new InvalidOperationException("FAIL: " + label);
-    assertions++;
+    checks++;
 }
 void Equal<T>(T actual, T expected, string label) => Check(EqualityComparer<T>.Default.Equals(actual, expected), label);
-void Throws(Action action, string label)
-{
-    bool thrown = false;
-    try { action(); } catch (Exception error) when (error is ArgumentException or IOException or InvalidDataException or JsonException or OverflowException or ServiceException) { thrown = true; }
-    Check(thrown, label);
-}
+DateTimeOffset now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
+string root = Path.Combine(Path.GetTempPath(), "GHCPAppUsage-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(root);
 try
 {
-    foreach (var sample in new[] { (0m, "$0"), (.49m, "$0"), (.5m, "$1"), (246.55m, "$247"),
-        (999.5m, "$1K"), (1000m, "$1K"), (1050m, "$1.1K"), (4426m, "$4.4K"), (10000m, "$10K") })
-        Equal(PromptState.FormatUsd(sample.Item1), sample.Item2, "compact dollars");
-    foreach (var sample in new[] { (79.99m, "green"), (80m, "green"), (80.01m, "yellow"), (100m, "yellow"), (100.01m, "red") })
-        Equal(PromptState.Create(Sample(sample.Item1), now, options.Freshness, false).ForecastState, sample.Item2, "unrounded threshold");
-    Equal(PromptState.Create(Sample(), now, options.Freshness, false).Spend, "$40 (~40%)", "spend-first protocol");
-    Equal(PromptState.Create(Sample(), now.AddHours(1), options.Freshness, false).Spend, "unavailable", "exact expiry");
-    Equal(PromptState.Create(Sample(), now.AddSeconds(-1), options.Freshness, false).Spend, "unavailable", "future fetch");
-    Equal(PromptState.Create(null, now, options.Freshness, true).ConnectionState, "in_progress", "initial fetch");
-    var unknown = Sample() with { Snapshot = snapshot with { Entitlement = null, AllocationUsd = null, PercentConsumed = null } };
-    Equal(PromptState.Create(unknown, now, options.Freshness, false).Spend, "$40", "unknown allocation retains dollars");
-    Equal(PromptState.Create(unknown, now, options.Freshness, false).Forecast, "?", "unknown allocation no estimate");
-    var unlimited = Sample() with { Snapshot = snapshot with { Unlimited = true, PercentConsumed = null } };
-    Equal(PromptState.Create(unlimited, now, options.Freshness, false).ForecastState, "unknown", "unlimited no forecast");
-    var staleSource = Sample() with { Snapshot = snapshot with { SourceTimestampUtc = now.AddMinutes(-61) } };
-    Equal(PromptState.Create(staleSource, now, options.Freshness, false).Forecast, "?", "stale source");
-    var nonCalendar = Sample() with { Snapshot = snapshot with
+    var saved = Fixture(now);
+    string initializationDirectory = Path.Combine(root, "not-created ' $()");
+    string quotedApp = Path.Combine(root, "app ' $()\\GHCPSpendTray.exe");
+    foreach (string shell in new[] { "pwsh", "bash", "zsh" })
     {
-        ResetAtUtc = now.AddDays(2), PeriodId = BillingPeriods.Resolve(now, now.AddDays(2))
-    } };
-    Equal(PromptState.Create(nonCalendar, now, options.Freshness, false).Forecast, "?", "non-calendar period");
-    DateTimeOffset firstDay = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
-    var early = Sample() with { Snapshot = snapshot with { FetchedAtUtc = firstDay } };
-    Equal(PromptState.Create(early, firstDay, options.Freshness, false).Forecast, "?", "first 24 hours");
-    var rollover = Sample() with { Snapshot = snapshot with { FetchedAtUtc = new(2026, 10, 31, 23, 59, 0, TimeSpan.Zero) } };
-    Equal(PromptState.Create(rollover, new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), options.Freshness, false).Spend, "unavailable", "billing rollover");
-    Throws(() => CopilotUsageClient.ParseJson(quota.Replace("4000", "-1"), "github.com:123", now), "negative quota rejected");
-    bool unsupported = false;
-    try { CopilotUsageClient.ParseJson(quota.Replace("\"token_based_billing\":true", "\"token_based_billing\":false"), "github.com:123", now); }
-    catch (ServiceException error) { unsupported = error.Status == AccountStatus.Unsupported; }
-    Check(unsupported, "request billing unsupported");
-    Throws(() => new PromptOptions { CacheDirectory = Path.GetPathRoot(root)! }.Validate(), "dedicated directory");
-    Throws(() => PromptOptions.Parse(["prompt", "--refresh-minutes", "0"]), "interval validation");
-    Throws(() => PromptOptions.Parse(["prompt", "--hostname", "https://evil.test/path"]), "host validation");
-    Throws(() => (PromptState.Unavailable with { Spend = "$(touch sentinel)\nextra" }).ToProtocol(), "data protocol controls rejected");
-
-    var environment = new Dictionary<string, string?> { ["GH_CONFIG_DIR"] = root, ["GH_TOKEN"] = "synthetic-a" };
-    string contextA = CredentialContext.Key(options, name => environment.GetValueOrDefault(name));
-    environment["GH_TOKEN"] = "synthetic-b";
-    Check(CredentialContext.Key(options, name => environment.GetValueOrDefault(name)) != contextA, "credential isolation");
-    Check(CredentialContext.Key(options with { Hostname = "tenant.ghe.com" }, name => environment.GetValueOrDefault(name)) != contextA, "host isolation");
-    environment["GH_TOKEN"] = null;
-    environment["GITHUB_TOKEN"] = "cloud";
-    environment["GH_ENTERPRISE_TOKEN"] = "server";
-    Equal(CredentialContext.EnvironmentToken("tenant.ghe.com", name => environment.GetValueOrDefault(name)), "cloud", "cloud precedence");
-    Equal(CredentialContext.EnvironmentToken("enterprise.example", name => environment.GetValueOrDefault(name)), "server", "server precedence");
-    string metadataKey = CredentialContext.Key(options, name => environment.GetValueOrDefault(name));
-    File.WriteAllText(Path.Combine(root, "hosts.yml"), "synthetic metadata");
-    Check(CredentialContext.Key(options, name => environment.GetValueOrDefault(name)) != metadataKey, "config metadata isolation");
-    store.Save(Sample());
-    Equal(store.Read()!.Snapshot!.ConsumptionUsd, 40m, "validated cache roundtrip");
-    Throws(() => store.Save(Sample() with { Hostname = "wrong.test" }), "cache host verification");
-    Throws(() => store.Save(Sample() with { AccountId = "456" }), "cache account verification");
-    File.WriteAllText(store.CachePath, "{");
-    Throws(() => store.Read(), "truncated cache rejected");
-    string missingVersion = JsonSerializer.Serialize(Sample(), PromptJsonContext.Default.PromptCache)
-        .Replace("\"version\":1,", "", StringComparison.Ordinal);
-    File.WriteAllText(store.CachePath, missingVersion);
-    Throws(() => store.Read(), "missing native schema version rejected");
-    File.WriteAllText(store.CachePath, new string('x', 65537));
-    Throws(() => store.Read(), "oversized cache rejected");
-    store.Save(Sample());
-    int launches = 0;
-    Equal(service.ReadPrompt(_ => { }, (_, _) => launches++).Spend, "$40 (~40%)", "cache-only prompt");
-    Equal(launches, 0, "fresh prompt has no worker/discovery/HTTP");
-    clock.Now = now.AddHours(1);
-    Equal(service.ReadPrompt(_ => { }, (_, _) => launches++).ConnectionState, "in_progress", "due prompt schedules");
-    Equal(launches, 1, "single scheduled worker");
-    service.ReadPrompt(_ => { }, (_, _) => launches++);
-    Equal(launches, 1, "active lease excludes second scheduling");
-    var lease = store.ReadLease()!;
-    Check(lease.IsActive(key, clock.Now), "lease active");
-    Check(!lease.IsActive(key, clock.Now + options.WorkerLifetime), "abandoned lease expires");
-    Check(!lease.IsActive(new string('b', 64), clock.Now), "lease scope");
-    store.ClearLease(lease.Nonce);
-    clock.Now = now;
-    File.Delete(store.CachePath);
-    Task? handoffWorker = null;
-    using (var workerStarted = new ManualResetEventSlim())
-    {
-        service.ReadPrompt(_ => { }, (_, workerNonce) =>
-        {
-            handoffWorker = Task.Run(() =>
-            {
-                workerStarted.Set();
-                service.Refresh(key, workerNonce, (_, _) =>
-                    throw new ServiceException(AccountStatus.SignInRequired, "Synthetic credential failure."));
-            });
-            Check(workerStarted.Wait(TimeSpan.FromSeconds(5)), "worker starts before scheduler releases gate");
-            using RefreshGate? competing = store.TryLock();
-            Check(competing is null, "scheduler holds gate during worker handoff");
-            Check(!handoffWorker.Wait(TimeSpan.FromMilliseconds(100)), "worker waits while scheduler holds gate");
-        });
-        Check(handoffWorker!.Wait(TimeSpan.FromSeconds(10)), "worker handoff completes after scheduler releases gate");
+        var initialization = UsageCommands.Run(["init", shell, "--data-dir", initializationDirectory,
+            "--account", "github.com:123"], initializationDirectory, now, quotedApp);
+        Equal(initialization.ExitCode, 0, "embedded initialization available");
+        Check(initialization.Output.Contains(shell == "pwsh" ? "function Initialize-CopilotPrompt" : "initialize_copilot_prompt()",
+            StringComparison.Ordinal), "embedded canonical shell function");
+        Check(initialization.Output.TrimEnd().EndsWith(shell == "pwsh" ? "-InstallHook" : "--install-hook", StringComparison.Ordinal),
+            "initialization includes hook installation");
+        Check(initialization.Output.Contains(shell == "pwsh" ? "app '' $()" : "app '\"'\"' $()", StringComparison.Ordinal),
+            "app path is quoted for the selected shell");
+        Check(!Directory.Exists(initializationDirectory), "init does not read or create app data");
     }
-    Equal(store.Read()!.Diagnostic, PromptDiagnostic.Authentication, "handoff worker publishes its result");
-    Check(store.ReadLease() is null, "handoff worker clears its lease");
-    File.Delete(store.CachePath);
-    string nonce = Guid.NewGuid().ToString("N");
-    store.SaveLease(new(key, nonce, now, now + options.WorkerLifetime));
-    int httpCalls = 0, discoveries = 0;
-    service.Refresh(key, nonce, (_, _) => { discoveries++; return Task.FromResult(new TokenSet { AccessToken = "synthetic-token" }); },
-        () => new HttpClient(new Handler(request =>
-        {
-            httpCalls++;
-            Equal(request.Headers.Authorization!.Parameter, "synthetic-token", "captured credential boundary");
-            return new(HttpStatusCode.OK) { Content = new StringContent(request.RequestUri!.AbsolutePath == "/user"
-                ? """{"id":123,"login":"synthetic-account"}""" : quota) };
-        })));
-    Equal(httpCalls, 2, "identity and quota through .NET HTTP");
-    Equal(discoveries, 1, "background-only discovery");
-    Equal(store.Read()!.Status, AccountStatus.Fresh, "refresh cache fresh");
-    Check(store.ReadLease() is null, "lease released");
-    Check(!File.ReadAllText(store.CachePath).Contains("synthetic-token", StringComparison.Ordinal), "token never persisted");
-    Check(!File.ReadAllText(store.CachePath).Contains("synthetic-account", StringComparison.Ordinal), "login never persisted");
-    clock.Now = now.AddHours(1);
-    store.SaveLease(new(key, nonce, clock.Now, clock.Now + options.WorkerLifetime));
-    service.Refresh(key, nonce, (_, _) => Task.FromResult(new TokenSet { AccessToken = "synthetic-token" }),
-        () => new HttpClient(new Handler(_ =>
-        {
-            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("SYNTHETIC-PRIVATE-BODY") };
-            response.Headers.RetryAfter = new(System.TimeSpan.FromHours(2));
-            return response;
-        })));
-    var failed = store.Read()!;
-    Equal(failed.Diagnostic, PromptDiagnostic.RateLimited, "rate-limit diagnostic");
-    Equal(failed.NextAttemptUtc, clock.Now.AddHours(2), "server deadline persisted");
-    Check(failed.Snapshot is null, "failure not stale/zero observation");
-    Check(!File.ReadAllText(store.CachePath).Contains("SYNTHETIC-PRIVATE", StringComparison.Ordinal), "raw error body not persisted");
-    launches = 0;
-    service.ReadPrompt(_ => { }, (_, _) => launches++);
-    service.ReadPrompt(_ => { }, (_, _) => launches++);
-    Equal(launches, 0, "cooldown no worker");
-    store.Report(PromptDiagnostic.None, _ => { });
-    int warnings = 0;
-    store.Report(PromptDiagnostic.Authentication, _ => warnings++);
-    store.Report(PromptDiagnostic.Authentication, _ => warnings++);
-    Equal(warnings, 1, "safe diagnostic change reporting");
-    store.Save(Sample());
+    var segmentExport = UsageCommands.Run(["integration", "oh-my-posh", "segment"], initializationDirectory);
+    Equal(segmentExport.ExitCode, 0, "embedded segment available without app state");
+    using (var segment = JsonDocument.Parse(segmentExport.Output))
+        Equal(segment.RootElement.GetProperty("type").GetString(), "text", "canonical text segment exported");
+    Equal(UsageCommands.Run(["init", "fish"], root).ExitCode, 2, "unknown shell rejected");
+    Equal(UsageCommands.Run(["init", "pwsh", "--account"], root).ExitCode, 2, "missing init option rejected");
+    Equal(UsageCommands.Run(["init", "bash", "--account", "bad\nvalue"], root).ExitCode, 2, "control character initialization rejected");
+    Equal(UsageCommands.Run(["init", "pwsh", "--data-dir", "relative"], root).ExitCode, 2, "relative initialization directory rejected");
+    Equal(UsageCommands.Run(["integration", "oh-my-posh", "unknown"], root).ExitCode, 2, "unknown integration export rejected");
+    AppUsageStore.Save(root, saved);
     var writer = Task.Run(() =>
     {
-        for (int index = 0; index < 50; index++) store.Save(Sample(index % 2 == 0 ? 80 : 100));
+        for (int index = 0; index < 25; index++) AppUsageStore.Save(root, saved);
     });
-    for (int index = 0; index < 50; index++)
-    {
-        var observation = store.Read()!;
-        Check(observation.Snapshot is not null && observation.Status == AccountStatus.Fresh, "atomic publication cannot expose partial JSON");
-    }
+    for (int index = 0; index < 25; index++)
+        Check(AppUsageStore.Read(root) is not null, "concurrent reader sees complete snapshot");
     writer.GetAwaiter().GetResult();
-    File.Delete(store.CachePath);
-    store.SaveLease(new(key, nonce, clock.Now, clock.Now + options.WorkerLifetime));
-    string activeKey = key;
-    new PromptService(options, clock, _ => activeKey).Refresh(key, nonce,
-        (_, _) => Task.FromResult(new TokenSet { AccessToken = "synthetic-token" }),
-        () => new HttpClient(new Handler(request =>
-        {
-            if (request.RequestUri!.AbsolutePath != "/user") activeKey = new string('b', 64);
-            return new(HttpStatusCode.OK) { Content = new StringContent(request.RequestUri.AbsolutePath == "/user"
-                ? """{"id":123,"login":"synthetic-account"}""" : quota) };
-        })));
-    Equal(store.Read()!.Diagnostic, PromptDiagnostic.CredentialsChanged, "changed credential context rejects successful HTTP result");
-    Check(store.Read()!.Snapshot is null, "changed context publishes no consumption");
-
-    if (args.Length >= 2 && args[0] == "--helper")
+    var result = UsageCommands.Query(AppUsageStore.Read(root), now);
+    Equal(result.ConsumptionUsd, 40m, "selected consumption");
+    Equal(result.EffectiveBudgetUsd, 50m, "custom budget overrides allocation");
+    Equal(result.PercentConsumed, 80m, "custom budget percentage");
+    Equal(result.ForecastState, "red", "custom budget forecast");
+    Equal(UsageCommands.Prompt(result), "GHCP-SPEND/1\t$40 (~80%)\t$80\tred\tconnected", "prompt TSV");
+    Equal(UsageCommands.Query(saved, now.AddMinutes(10)).Status, "fresh", "exact freshness boundary agrees with app");
+    foreach (var pair in new[] { (94.99m, "green"), (95m, "yellow"), (99.99m, "yellow"), (100m, "red"), (101m, "red") })
     {
-        string helper = Path.GetFullPath(args[1]);
-        var childEnvironment = new Dictionary<string, string?>
+        var account = saved.Accounts[0] with
         {
-            ["GH_CONFIG_DIR"] = root, ["GH_TOKEN"] = null, ["GITHUB_TOKEN"] = null,
-            ["GH_ENTERPRISE_TOKEN"] = null, ["GITHUB_ENTERPRISE_TOKEN"] = null
+            CustomBudgetUsd = 100,
+            Estimate = saved.Accounts[0].Estimate! with { EstimatedConsumptionUsd = pair.Item1 }
         };
-        string rootProcess = Environment.ProcessPath!;
-        var nativeOptions = options with { GhExecutable = rootProcess, RequestTimeoutSeconds = 1 };
-        string nativeKey = CredentialContext.Key(nativeOptions, name => childEnvironment.GetValueOrDefault(name));
-        var nativeStore = new PromptStore(nativeOptions, nativeKey);
-        DateTimeOffset current = DateTimeOffset.UtcNow;
-        var currentSnapshot = snapshot with
-        {
-            FetchedAtUtc = current, ResetAtUtc = null, PeriodId = BillingPeriods.Resolve(current, null)
-        };
-        nativeStore.Save(new()
-        {
-            ContextKey = nativeKey, Hostname = nativeOptions.Hostname, AccountId = "123", Status = AccountStatus.Fresh,
-            AttemptedAtUtc = current, NextAttemptUtc = current.AddHours(1), Snapshot = currentSnapshot
-        });
-        var first = Stopwatch.StartNew();
-        var data = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
-        first.Stop();
-        Equal(data.ExitCode, 0, "published cache-only exit");
-        Check(data.Output.StartsWith("GHCP-SPEND/1\t$40 (~40%)\t", StringComparison.Ordinal), "published snapshot protocol");
-        Check(nativeStore.ReadLease() is null, "published cached process launches no gh");
-        foreach (string state in new[] { "green", "yellow", "red", "in_progress", "not_connected" })
-            Equal(Run(helper, ["demo", state], childEnvironment).Output.Trim(), PromptState.Demo(state).ToProtocol(), "published synthetic demo");
-        string ready = Path.Combine(root, "holder-ready");
-        using (var holder = Start(rootProcess, ["--hold-gate", root, nativeKey, ready], childEnvironment))
-        {
-            WaitUntil(() => File.Exists(ready), "gate holder readiness");
-            using (RefreshGate? competing = nativeStore.TryLock())
-                Check(competing is null, "portable native gate contention returns null");
-            using (RefreshGate? otherContext = RefreshGate.TryAcquire(root, new string('c', 64)))
-                Check(otherContext is not null, "held native gate does not block another context");
-            using (RefreshGate? waited = nativeStore.TryLock(TimeSpan.FromMilliseconds(30)))
-                Check(waited is null, "portable native gate bounded wait expires under contention");
-            var due = nativeStore.Read()! with { NextAttemptUtc = current.AddSeconds(-1), AttemptedAtUtc = current.AddMinutes(-1) };
-            nativeStore.Save(due);
-            var locked = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
-            Equal(locked.ExitCode, 0, "held native gate is normal contention, not a helper error");
-            Check(locked.Output.Trim().EndsWith("\tin_progress", StringComparison.Ordinal), "portable cross-process exclusion");
-            Check(nativeStore.ReadLease() is null, "held native gate must not schedule another worker");
-            Equal(nativeStore.Read()!.Status, AccountStatus.Fresh, "held native gate cannot change observation");
-            holder.Kill(entireProcessTree: true);
-            holder.WaitForExit();
-        }
-        using (RefreshGate? recovered = nativeStore.TryLock())
-            Check(recovered is not null, "abandoned native gate recovers");
-        nativeStore.SaveLease(new(nativeKey, nonce, DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-1)));
-        var launched = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
-        Check(launched.Output.Contains("\tin_progress", StringComparison.Ordinal),
-            "published process schedules bounded worker: " + launched.Output.Trim() + " / " + launched.Error.Trim());
-        WaitUntil(() => nativeStore.Read()?.Status != AccountStatus.Fresh, "published credential failure cache");
-        Equal(nativeStore.Read()!.Diagnostic, PromptDiagnostic.Authentication, "native gh exit failure, no HTTP");
-        int errorReports = 0;
-        nativeStore.Report(PromptDiagnostic.Authentication, _ => errorReports++);
-        var nativeFailure = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
-        Check(nativeFailure.Output.Trim().EndsWith("\tnot_connected", StringComparison.Ordinal), "published failed state");
-        Check(nativeStore.ReadLease() is null, "published failure cooldown has no lease");
-        nativeStore.Save(nativeStore.Read()! with
-        {
-            AttemptedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
-            NextAttemptUtc = DateTimeOffset.UtcNow.AddSeconds(-1)
-        });
-        childEnvironment["GHCP_TEST_GH"] = "timeout";
-        var timeoutLaunch = Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
-        Check(timeoutLaunch.Output.Contains("\tin_progress", StringComparison.Ordinal), "credential timeout runs only in background");
-        WaitUntil(() => nativeStore.Read()?.Diagnostic == PromptDiagnostic.Timeout, "native gh timeout");
-        Equal(nativeStore.Read()!.Diagnostic, PromptDiagnostic.Timeout, "bounded credential-discovery timeout is persisted");
-        Check(nativeStore.ReadLease() is null, "timed-out worker releases marker");
-        childEnvironment.Remove("GHCP_TEST_GH");
-
+        Equal(UsageCommands.Query(saved with { Accounts = [account] }, now).ForecastState, pair.Item2, "shared 95/100 forecast bands");
+    }
+    var excluded = saved.Accounts[0] with
+    {
+        Key = "github.com:456", UserId = "456", Name = "excluded", Selected = false,
+        Observation = saved.Accounts[0].Observation! with { AccountKey = "github.com:456" }
+    };
+    saved = saved with { Accounts = [saved.Accounts[0], excluded] };
+    Equal(UsageCommands.Query(saved, now).SelectedAccounts, 1, "tray selection default");
+    Equal(UsageCommands.Query(saved, now, excluded.Key).SelectedAccounts, 1, "account override selects excluded");
+    Equal(UsageCommands.Query(saved, now, excluded.Key).Accounts[0].Key, excluded.Key, "immutable key override");
+    var excludedRefreshing = saved with { Accounts = [excluded with { Refreshing = true }] };
+    Check(!UsageCommands.Query(excludedRefreshing, now).IsRefreshing, "excluded refresh does not affect default command");
+    Check(UsageCommands.Query(excludedRefreshing, now, excluded.Key).IsRefreshing, "explicit excluded account can show its refresh");
+    Check(UsageCommands.Run(["usage","--account","github.com:999"], root, now).ExitCode != 0, "unknown account error");
+    var stale = UsageCommands.Query(saved, now.AddMinutes(11));
+    Equal(stale.ConsumptionUsd, null, "stale total unavailable");
+    Equal(stale.Accounts[0].ConsumptionUsd, 40m, "JSON retains explicit last-known dollars");
+    Equal(stale.Accounts[0].Status, "stale", "JSON identifies stale");
+    Equal(stale.Accounts[0].PercentConsumed, null, "stale percentage unavailable");
+    Equal(stale.EstimatedConsumptionUsd, null, "stale forecast unavailable");
+    Equal(UsageCommands.Query(saved, now.AddSeconds(-1)).Status, "unavailable", "future publication unavailable");
+    var monthEnd = saved with { PublishedAtUtc = new(2026,10,31,23,59,0,TimeSpan.Zero), Accounts = [
+        saved.Accounts[0] with { Observation = saved.Accounts[0].Observation! with
+        { FetchedAtUtc = new(2026,10,31,23,59,0,TimeSpan.Zero) } }] };
+    Equal(UsageCommands.Query(monthEnd, new(2026,11,1,0,0,0,TimeSpan.Zero)).Accounts[0].Status, "expired", "billing rollover");
+    var unlimited = saved.Accounts[0] with
+    {
+        Observation = saved.Accounts[0].Observation! with { Unlimited = true, PercentConsumed = null }
+    };
+    Equal(UsageCommands.Query(saved with { Accounts = [unlimited] }, now).PercentConsumed, 80m, "custom budget applies to unlimited");
+    unlimited = unlimited with { CustomBudgetUsd = null };
+    var noBudget = UsageCommands.Query(saved with { Accounts = [unlimited] }, now);
+    Equal(noBudget.ConsumptionUsd, 40m, "unlimited dollars retained");
+    Equal(noBudget.PercentConsumed, null, "unlimited without budget no percentage");
+    Equal(noBudget.ForecastState, "unknown", "unlimited without budget no risk color");
+    var failed = saved.Accounts[0] with { Status = AccountStatus.SignInRequired };
+    var partial = UsageCommands.Query(saved with { Accounts = [saved.Accounts[0], excluded with { Selected = true, Status = AccountStatus.NetworkError }] }, now);
+    Check(!partial.IsComplete && partial.Status == "partial", "partial selection explicit");
+    Check(UsageCommands.Prompt(partial).Contains("!$40", StringComparison.Ordinal), "partial prompt marker");
+    Equal(partial.EstimatedConsumptionUsd, null, "partial forecast never invented");
+    Equal(UsageCommands.Query(saved with { Accounts = [failed] }, now).ConsumptionUsd, null, "auth failure not zero");
+    var off = saved.Accounts[0] with { Estimate = null };
+    Equal(UsageCommands.Query(saved with { Accounts = [off] }, now).ForecastState, "unknown", "estimate setting off respected");
+    var oldSource = saved.Accounts[0] with
+    { Estimate = saved.Accounts[0].Estimate! with { ObservedAtUtc = now.AddMinutes(-11) } };
+    Equal(UsageCommands.Query(saved with { Accounts = [oldSource] }, now).EstimatedConsumptionUsd, null, "saved stale-source forecast unavailable");
+    var invalidPeriod = saved.Accounts[0] with
+    { Estimate = saved.Accounts[0].Estimate! with { ResetAtUtc = now.AddDays(1) } };
+    Equal(UsageCommands.Query(saved with { Accounts = [invalidPeriod] }, now).EstimatedConsumptionUsd, null, "saved non-calendar forecast unavailable");
+    var daily = saved.Accounts[0] with
+    { Estimate = saved.Accounts[0].Estimate! with { EstimatedConsumptionUsd = 47m, ReportedDayCount = 7 } };
+    Equal(UsageCommands.Query(saved with { Accounts = [daily] }, now).EstimatedConsumptionUsd, 47m, "app daily-derived estimate is not replaced");
+    Equal(UsageCommands.Query(null, now).Status, "unavailable", "no app snapshot unavailable");
+    var empty = Fixture(now) with { Accounts = [] };
+    Equal(UsageCommands.Query(empty, now).Status, "no-accounts", "no selected accounts explicit");
+    var refreshing = Fixture(now) with { Accounts = [Fixture(now).Accounts[0] with { Refreshing = true }] };
+    Check(UsageCommands.Prompt(UsageCommands.Query(refreshing, now)).EndsWith("\tin_progress", StringComparison.Ordinal), "recent refresh state");
+    Check(!UsageCommands.Prompt(UsageCommands.Query(refreshing, now.AddSeconds(96))).EndsWith("\tin_progress", StringComparison.Ordinal), "stopped worker marker expires");
+    string before = File.ReadAllText(Path.Combine(root, AppUsageStore.FileName));
+    var json = UsageCommands.Run(["usage","--format","json"], root, now);
+    Equal(json.ExitCode, 0, "JSON command success");
+    using (var document = JsonDocument.Parse(json.Output))
+    {
+        Equal(document.RootElement.GetProperty("accounts")[0].GetProperty("customBudgetUsd").GetDecimal(), 50m, "numeric JSON budget");
+        Equal(document.RootElement.GetProperty("version").GetInt32(), 1, "versioned JSON output");
+    }
+    Equal(File.ReadAllText(Path.Combine(root, AppUsageStore.FileName)), before, "query never writes state");
+    Equal(UsageCommands.Run(["usage","--format","shell"], root, now).ExitCode, 2, "invalid format error");
+    Equal(UsageCommands.Run(["usage","--data-dir","relative"], root, now).ExitCode, 2, "relative path rejected");
+    var missing = Path.Combine(root, "does-not-exist");
+    Equal(UsageCommands.Run(["usage"], missing, now).ExitCode, 0, "missing saved state is queryable");
+    Check(!Directory.Exists(missing), "query does not create directory");
+    File.WriteAllText(Path.Combine(root, AppUsageStore.FileName), "{");
+    Equal(UsageCommands.Run(["usage"], root, now).ExitCode, 1, "corrupt state error");
+    AppUsageStore.Save(root, Fixture(now));
+    File.WriteAllText(Path.Combine(root, AppUsageStore.FileName), before.Replace("\"version\":1,", "", StringComparison.Ordinal));
+    Equal(UsageCommands.Run(["usage"], root, now).ExitCode, 1, "missing version error");
+    AppUsageStore.Save(root, Fixture(DateTimeOffset.UtcNow));
+    if (args.Length >= 2 && args[0] == "--app")
+    {
+        string executable = Path.GetFullPath(args[1]);
+        var appInit = Execute(executable, ["init", "pwsh", "--data-dir", root]);
+        Equal(appInit.Code, 0, "actual app initialization exit");
+        Check(appInit.Output.Contains("Initialize-CopilotPrompt -AppExecutable", StringComparison.Ordinal), "actual app embedded PowerShell init");
+        var appSegment = Execute(executable, ["integration", "oh-my-posh", "segment"]);
+        Equal(appSegment.Code, 0, "actual app embedded segment exit");
+        Equal(appSegment.Output.Trim(), segmentExport.Output.Trim(), "actual executable ships canonical segment");
+        Equal(Execute(executable, ["init", "unknown"]).Code, 2, "actual executable rejects unsupported init shell");
         var samples = new List<double>();
-        nativeStore.Save(new()
-        {
-            ContextKey = nativeKey, Hostname = nativeOptions.Hostname, AccountId = "123", Status = AccountStatus.Fresh,
-            AttemptedAtUtc = current, NextAttemptUtc = current.AddHours(1), Snapshot = currentSnapshot
-        });
-        for (int index = 0; index < 30; index++)
+        for (int index = 0; index < 15; index++)
         {
             var timer = Stopwatch.StartNew();
-            Run(helper, ["prompt", .. nativeOptions.Arguments()], childEnvironment);
+            var child = Execute(executable, ["prompt", "--data-dir", root]);
+            Equal(child.Code, 0, "actual app CLI exit");
+            Check(child.Output.Trim().StartsWith("GHCP-SPEND/1\t$40 (~80%)\t", StringComparison.Ordinal), "actual app piped TSV");
             samples.Add(timer.Elapsed.TotalMilliseconds);
         }
+        var childJson = Execute(executable, ["usage", "--data-dir", root, "--format", "json"]);
+        Equal(childJson.Code, 0, "actual app JSON exit");
+        using var document = JsonDocument.Parse(childJson.Output);
+        Equal(document.RootElement.GetProperty("effectiveBudgetUsd").GetDecimal(), 50m, "actual app JSON budget");
+        var invalid = Execute(executable, ["usage", "--data-dir", root, "--account", "missing"]);
+        Equal(invalid.Code, 2, "actual app propagates usage exit codes");
+        Check(invalid.Error.Length > 0 && invalid.Output.Length == 0, "actual app diagnostics on stderr");
         samples.Sort();
-        Console.WriteLine($"Native process: first cached read {first.Elapsed.TotalMilliseconds:F3} ms; warm median {samples[14]:F3} ms, p95 {samples[28]:F3} ms (30 processes, rendering excluded).");
+        Console.WriteLine($"App cached query median {samples[7]:F2} ms, p95 {samples[14]:F2} ms; no UI/network.");
     }
-    Console.WriteLine($"PASS: {assertions} shared native prompt assertions; synthetic HTTP/credentials only.");
+    Console.WriteLine($"PASS: {checks} app usage/query assertions; synthetic saved state only.");
     return 0;
 }
 finally
@@ -336,46 +206,39 @@ finally
     Directory.Delete(root);
 }
 
-static Process Start(string executable, IEnumerable<string> arguments, Dictionary<string, string?> environment)
+static SavedUsage Fixture(DateTimeOffset now)
+{
+    var reset = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1);
+    var observation = new UsageSnapshot
+    {
+        AccountKey = "github.com:123", FetchedAtUtc = now, SourceTimestampUtc = now,
+        PeriodId = BillingPeriods.Resolve(now, reset), ResetAtUtc = reset,
+        CreditsUsed = 4000, Entitlement = 10000, ConsumptionUsd = 40,
+        AllocationUsd = 100, PercentConsumed = 40
+    };
+    return new SavedUsage
+    {
+        PublishedAtUtc = now, PollMinutes = 10, Accounts = [new()
+        {
+            Key = "github.com:123", Host = "github.com", UserId = "123", Name = "Synthetic account",
+            Selected = true, CustomBudgetUsd = 50, Status = AccountStatus.Fresh, Refreshing = false,
+            Observation = observation, Estimate = new(EstimatedConsumptionUsd: 80, ObservedAtUtc: now,
+                ResetAtUtc: reset, PeriodStartUtc: reset.AddMonths(-1))
+        }]
+    };
+}
+static (int Code, string Output, string Error) Execute(string executable, string[] arguments)
 {
     var info = new ProcessStartInfo(executable)
-    {
-        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
-    };
+    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
     foreach (string argument in arguments) info.ArgumentList.Add(argument);
-    foreach ((string name, string? value) in environment)
+    using var process = Process.Start(info) ?? throw new InvalidOperationException("Could not launch app CLI.");
+    var output = process.StandardOutput.ReadToEndAsync();
+    var error = process.StandardError.ReadToEndAsync();
+    if (!process.WaitForExit(10000))
     {
-        if (value is null) info.Environment.Remove(name);
-        else info.Environment[name] = value;
+        process.Kill(entireProcessTree: true);
+        throw new TimeoutException("App CLI started UI or did not exit.");
     }
-    foreach (string name in new[] { "GH_DEBUG", "DEBUG" }) info.Environment.Remove(name);
-    return Process.Start(info) ?? throw new InvalidOperationException("Could not launch synthetic child.");
-}
-static (int ExitCode, string Output, string Error) Run(string executable, IEnumerable<string> arguments,
-    Dictionary<string, string?> environment)
-{
-    using var process = Start(executable, arguments, environment);
-    Task<string> output = process.StandardOutput.ReadToEndAsync();
-    Task<string> error = process.StandardError.ReadToEndAsync();
-    if (!process.WaitForExit(15000)) { process.Kill(entireProcessTree: true); throw new TimeoutException("Synthetic helper timed out."); }
     return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
-}
-static void WaitUntil(Func<bool> condition, string label)
-{
-    var timer = Stopwatch.StartNew();
-    while (!condition())
-    {
-        if (timer.Elapsed > TimeSpan.FromSeconds(15)) throw new TimeoutException(label);
-        Thread.Sleep(20);
-    }
-}
-sealed class Clock(DateTimeOffset now) : TimeProvider
-{
-    public DateTimeOffset Now { get; set; } = now;
-    public override DateTimeOffset GetUtcNow() => Now;
-}
-sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
-{
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-        Task.FromResult(response(request));
 }

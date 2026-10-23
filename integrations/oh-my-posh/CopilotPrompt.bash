@@ -1,23 +1,23 @@
 #!/bin/bash
-# Compatible with macOS system Bash 3.2. Helper output is data, never shell code.
+# Compatible with macOS system Bash 3.2. App output is data, never shell code.
 
 initialize_copilot_prompt() {
-    local helper=ghcp-spend-prompt install_hook=false option
+    local helper=/Applications/GHCPSpendTray.app/Contents/MacOS/GHCPSpendTray install_hook=false option
     local arguments=(prompt)
     while [ "$#" -gt 0 ]; do
         option=$1; shift
         case $option in
             --install-hook) install_hook=true ;;
-            --helper-executable)
+            --app-executable)
                 [ "$#" -gt 0 ] || return 1
                 helper=$1; shift ;;
-            --hostname|--cache-dir|--refresh-minutes|--request-timeout|--gh-executable)
+            --account|--data-dir)
                 [ "$#" -gt 0 ] || return 1
                 arguments+=("$option" "$1"); shift ;;
             *) printf 'Unknown Copilot adapter option: %s\n' "$option" >&2; return 1 ;;
         esac
     done
-    helper=$(type -P "$helper") || { printf '%s\n' 'Install ghcp-spend-prompt or pass --helper-executable.' >&2; return 1; }
+    helper=$(type -P "$helper") || { printf '%s\n' 'Install GHCPSpendTray or pass --app-executable.' >&2; return 1; }
     [ "${_ghcp_initialized-false}" != true ] || disable_copilot_prompt
     _ghcp_helper=$helper; _ghcp_arguments=("${arguments[@]}")
     _ghcp_initialized=true; _ghcp_hook_installed=false; _ghcp_previous=
@@ -51,7 +51,7 @@ update_copilot_prompt() {
     else
         export COPILOT_SPEND=unavailable COPILOT_FORECAST='?'
         export COPILOT_FORECAST_STATE=unknown COPILOT_CONNECTION_STATE=not_connected
-        printf '%s\n' 'Copilot adapter failed. Check the native helper and options.' >&2
+        printf '%s\n' 'Copilot adapter failed. Check the installed GHCPSpendTray command and options.' >&2
         return 1
     fi
 }

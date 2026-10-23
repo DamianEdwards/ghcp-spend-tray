@@ -74,6 +74,8 @@ python3 tools/macos/updates.py configure "$app/Contents/Info.plist" "$channel"
 cp "$SPARKLE_ROOT/LICENSE" "$app/Contents/Resources/Sparkle-LICENSE.txt"
 cp LICENSE "$app/Contents/Resources/LICENSE.txt"
 cp PRIVACY.md "$app/Contents/Resources/PRIVACY.md"
+# Adapters are embedded in the bridge; do not retain an old loose-script copy.
+rm -rf "$app/Contents/Resources/ShellIntegration"
 
 iconset="$PWD/artifacts/macos/AppIcon.iconset"
 mkdir -p "$iconset"

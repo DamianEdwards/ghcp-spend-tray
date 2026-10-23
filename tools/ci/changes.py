@@ -17,7 +17,7 @@ def classify(paths):
             ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
         }:
             continue
-        elif path.startswith(("src/GHCPSpendTray.Prompt/", "tests/GHCPSpendTray.PromptTests/", "tools/prompt/")):
+        elif path.startswith(("tests/GHCPSpendTray.PromptTests/", "tools/prompt/")):
             result["prompt"] = True
         elif path in {
             "integrations/oh-my-posh/CopilotPrompt.ps1",
@@ -44,10 +44,17 @@ def classify(paths):
             ".github/workflows/notarization-status.yml", ".github/workflows/macos-updates.yml",
         ):
             result["macos"] = True
+            if path in {"src/GHCPSpendTray.Mac/AppMain.swift", "src/GHCPSpendTray.Mac/Bridge.h",
+                        "src/GHCPSpendTray.MacBridge/UsageExports.cs", "tools/macos/build.sh"}:
+                result["prompt"] = True
         elif path.startswith(("src/GHCPSpendTray.App/", "tests/GHCPSpendTray.AppTests/", "tests/GHCPSpendTray.PlatformTests/")) or (
             path.startswith("tools/") and path.endswith(".ps1")
         ) or path.startswith(".github/actions/setup-windows-storage/") or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
             result["windows"] = True
+            if path in {"src/GHCPSpendTray.App/Program.cs", "src/GHCPSpendTray.App/Native/CommandLine.cs",
+                        "src/GHCPSpendTray.App/Platform/PackageContext.cs", "packaging/AppxManifest.xml",
+                        "tools/publish.ps1"}:
+                result["prompt"] = True
         else:
             # Shared sources, CI routing, or an unfamiliar path run every code lane.
             result.update(windows=True, macos=True, prompt=True)

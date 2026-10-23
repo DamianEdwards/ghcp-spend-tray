@@ -54,19 +54,21 @@ jobs:
           globs: "**/*.{md,markdown}"
 
   prompt:
-    name: Standalone Copilot prompt (${{ matrix.os }})
+    name: App shell usage (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.prompt == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, ubuntu-24.04, macos-26]
+        os: [windows-2025, macos-26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-windows-storage
+        if: runner.os == 'Windows'
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
@@ -89,43 +91,18 @@ jobs:
           if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $digest) { throw 'Renderer digest mismatch.' }
           if (!$IsWindows) { chmod 700 $binary }
           $directory | Out-File $env:GITHUB_PATH -Append -Encoding utf8
-      - name: Publish and verify Windows native helper
+      - name: Publish and verify Windows app commands
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          .\tools\prompt\publish.ps1 -Tests
-          .\artifacts\tests\prompt\win-x64\GHCPSpendTray.PromptTests.exe --helper .\artifacts\prompt\win-x64\ghcp-spend-prompt.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Native helper fixtures failed.' }
-          .\integrations\oh-my-posh\Test-CopilotPrompt.ps1 `
-            -HelperExecutable .\artifacts\prompt\win-x64\ghcp-spend-prompt.exe `
-            -FixtureExecutable .\artifacts\tests\prompt\win-x64\GHCPSpendTray.PromptTests.exe -Render
-          .\tools\prompt\publish.ps1 -RuntimeIdentifier win-arm64
-      - name: Publish and verify Unix native helper and system shells
-        if: runner.os != 'Windows'
+          .\tools\publish.ps1 -Runtime win-x64
+          .\tools\prompt\verify.ps1 -AppExecutable .\artifacts\publish\win-x64\GHCPSpendTray.exe -Render
+      - name: Publish and verify macOS app commands and system shells
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          bash tools/prompt/publish.sh --tests
-          if [[ "$RUNNER_OS" == macOS ]]; then rid=osx-arm64; else rid=linux-x64; fi
-          helper="$PWD/artifacts/prompt/$rid/ghcp-spend-prompt"
-          fixtures="$PWD/artifacts/tests/prompt/$rid/GHCPSpendTray.PromptTests"
-          "$fixtures" --helper "$helper"
-          /bin/bash integrations/oh-my-posh/Test-CopilotPrompt.bash "$helper" "$fixtures" --render
-          if [[ "$RUNNER_OS" == macOS ]]; then
-            /bin/zsh integrations/oh-my-posh/Test-CopilotPrompt.zsh "$helper" "$fixtures" --render
-          fi
-      - name: Retain standalone development bundles
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: copilot-prompt-${{ runner.os }}-${{ runner.arch }}
-          path: |
-            artifacts/prompt/*/ghcp-spend-prompt*
-            artifacts/prompt/*/CopilotPrompt.*
-            artifacts/prompt/*/copilot.segment.json
-            artifacts/prompt/*/demo.*
-            artifacts/prompt/*/README.md
-            artifacts/prompt/*/LICENSE
-          if-no-files-found: error
-          retention-days: 7
+          bash tools/macos/build.sh
+          bash tools/prompt/verify.sh "$PWD/artifacts/macos/GHCPSpendTray.app/Contents/MacOS/GHCPSpendTray" --render
 
   tests:
     name: Windows managed and Native AOT tests (${{ matrix.shard }})

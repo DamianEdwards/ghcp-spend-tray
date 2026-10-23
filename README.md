@@ -415,10 +415,14 @@ history, or private consumption details in public issues.
 ## Oh My Posh integration
 
 You can display Copilot spend and a colored period forecast directly in a
-PowerShell, Bash, or zsh prompt, without installing or running the tray app. The
+PowerShell (Windows) or Bash/zsh (macOS) prompt using the installed app. The
 [Oh My Posh integration](integrations/oh-my-posh/README.md) includes a reusable
-segment and standalone Native AOT helper, cached background refresh using your existing `gh` authentication,
-an isolated demo, and offline tests.
+segment and thin shell adapters. The app's `usage --format json` and `prompt`
+commands query saved usage with the same custom budgets, selected accounts,
+forecast bands and refresh interval as the app. Commands never start the UI or
+fetch data; saved values have explicit freshness/status. The installed app
+embeds its shell adapters: `ghcp-spend-tray.exe init pwsh | Invoke-Expression`
+loads the Windows integration directly from the app, without a script download.
 
 ## Build and contribute
 

@@ -3,16 +3,14 @@
 function Initialize-CopilotPrompt {
     [CmdletBinding()]
     param(
-        [string]$HelperExecutable = 'ghcp-spend-prompt',
-        [string]$Hostname = 'github.com', [string]$CacheDirectory,
-        [int]$RefreshMinutes = 60, [int]$RequestTimeoutSeconds = 15,
-        [string]$GhExecutable = 'gh', [switch]$InstallHook
+        [string]$AppExecutable = 'ghcp-spend-tray.exe',
+        [string]$Account, [string]$DataDirectory, [switch]$InstallHook
     )
-    $helper = Get-Command $HelperExecutable -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $helper = Get-Command $AppExecutable -CommandType Application -ErrorAction Stop | Select-Object -First 1
     if (Get-Variable CopilotPromptAdapter -Scope Script -ErrorAction SilentlyContinue) { Disable-CopilotPrompt }
-    $arguments = @('prompt', '--hostname', $Hostname, '--refresh-minutes', "$RefreshMinutes",
-        '--request-timeout', "$RequestTimeoutSeconds", '--gh-executable', $GhExecutable)
-    if ($CacheDirectory) { $arguments += @('--cache-dir', $CacheDirectory) }
+    $arguments = @('prompt')
+    if ($Account) { $arguments += @('--account', $Account) }
+    if ($DataDirectory) { $arguments += @('--data-dir', $DataDirectory) }
     $script:CopilotPromptAdapter = @{
         Helper = $helper.Source; Arguments = $arguments
         HookInstalled = $false; PreviousHook = $null; PreviousAlias = $null
@@ -33,11 +31,28 @@ function Initialize-CopilotPrompt {
 
 function Update-CopilotPrompt {
     $savedExitCode = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $process = $null
     try {
         $state = Get-Variable CopilotPromptAdapter -Scope Script -ValueOnly -ErrorAction Stop
-        $output = @(& $state.Helper @($state.Arguments))
-        if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) { throw 'Native helper failed.' }
-        $fields = $output[0] -split "`t"
+        # Explicit pipes also work for the GUI-subsystem app executable.
+        $info = [Diagnostics.ProcessStartInfo]::new($state.Helper)
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        foreach ($argument in $state.Arguments) { $info.ArgumentList.Add($argument) }
+        $process = [Diagnostics.Process]::Start($info)
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (!$process.WaitForExit(5000)) {
+            $process.Kill()
+            throw 'App usage command timed out.'
+        }
+        $output = $stdout.GetAwaiter().GetResult().TrimEnd("`r", "`n")
+        $errorText = $stderr.GetAwaiter().GetResult()
+        if ($errorText) { Write-Warning $errorText.TrimEnd() }
+        if ($process.ExitCode -ne 0 -or $output.Length -gt 2048) { throw 'App usage command failed.' }
+        $fields = $output -split "`t"
         if ($fields.Count -ne 5 -or $fields[0] -cne 'GHCP-SPEND/1' -or
             $fields[3] -cnotin @('green', 'yellow', 'red', 'unknown') -or
             $fields[4] -cnotin @('connected', 'in_progress', 'not_connected') -or
@@ -49,9 +64,12 @@ function Update-CopilotPrompt {
     catch {
         $env:COPILOT_SPEND = 'unavailable'; $env:COPILOT_FORECAST = '?'
         $env:COPILOT_FORECAST_STATE = 'unknown'; $env:COPILOT_CONNECTION_STATE = 'not_connected'
-        Write-Warning 'Copilot prompt adapter failed. Check the native helper installation and options.'
+        Write-Warning 'Copilot prompt adapter failed. Check the installed GHCPSpendTray command and options.'
     }
-    finally { $global:LASTEXITCODE = $savedExitCode }
+    finally {
+        if ($process) { $process.Dispose() }
+        $global:LASTEXITCODE = $savedExitCode
+    }
 }
 
 function Invoke-CopilotPromptContext {

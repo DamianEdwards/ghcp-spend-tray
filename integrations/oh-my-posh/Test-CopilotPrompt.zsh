@@ -3,17 +3,18 @@ set -eu
 directory=${0:A:h}
 helper=$1 fixture=$2
 source "$directory/CopilotPrompt.zsh"
-temporary=$(mktemp -d)
+temporary_root=$(mktemp -d)
+temporary="$temporary_root/state ' \$()"
+mkdir -- "$temporary"
 cleanup() {
     disable_copilot_prompt
     local file
     for file in "$temporary"/*(N); do [[ ! -f $file ]] || rm -f -- "$file"; done
     rmdir -- "$temporary"
+    rmdir -- "$temporary_root"
 }
 trap cleanup EXIT
-export GH_CONFIG_DIR=$temporary GH_TOKEN=synthetic-token
-unset GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
-"$fixture" --prepare-cache "$temporary" "$helper"
+"$fixture" --prepare-cache "$temporary"
 checks=0
 equal() {
     [[ $1 == $2 ]] || { print -u2 -- "$3: expected [$2], got [$1]"; exit 1; }
@@ -22,25 +23,27 @@ equal() {
 previous_calls=0
 set_poshcontext() { previous_calls=$((previous_calls + 1)); }
 previous=$functions[set_poshcontext]
-initialize_copilot_prompt --helper-executable "$helper" --gh-executable "$helper" --cache-dir "$temporary" --install-hook
+eval "$("$helper" init zsh --data-dir "$temporary")"
 if (exit 42); then exit 1
 else
     if set_poshcontext; then original=0; else original=$?; fi
 fi
 equal "$original" 42 'Previous status preserved'
 equal "$previous_calls" 1 'Existing hook composed'
-equal "$COPILOT_SPEND" '$40 (~40%)' 'Published helper data'
+equal "$COPILOT_SPEND" '$40 (~80%)' 'App custom budget data'
 equal "$COPILOT_CONNECTION_STATE" connected 'Connected state'
-initialize_copilot_prompt --helper-executable "$helper" --gh-executable "$helper" --cache-dir "$temporary" --install-hook
+eval "$("$helper" init zsh --data-dir "$temporary")"
 set_poshcontext
 equal "$previous_calls" 2 'Repeatable initialization'
 disable_copilot_prompt
 equal "$functions[set_poshcontext]" "$previous" 'Previous hook restored'
 equal "${COPILOT_SPEND-unset}" unset 'Exports removed'
 if [[ ${3-} == --render ]]; then
-    "$helper" demo-theme "$directory/copilot.segment.json" "$temporary/theme.omp.json"
+    { printf '{"version":4,"blocks":[{"type":"prompt","alignment":"left","segments":['
+      cat "$directory/copilot.segment.json"; printf ']}]}\n'; } > "$temporary/theme.omp.json"
     for scenario in green yellow red in_progress not_connected; do
-        output=$("$helper" demo "$scenario")
+        "$fixture" --prepare-cache "$temporary" "$scenario"
+        output=$("$helper" prompt --data-dir "$temporary")
         IFS=$'\t' read -r schema COPILOT_SPEND COPILOT_FORECAST COPILOT_FORECAST_STATE COPILOT_CONNECTION_STATE <<< "$output"
         export COPILOT_SPEND COPILOT_FORECAST COPILOT_FORECAST_STATE COPILOT_CONNECTION_STATE
         rendered=$(oh-my-posh print primary --config "$temporary/theme.omp.json" --shell zsh --escape=false)
@@ -52,4 +55,4 @@ if [[ ${3-} == --render ]]; then
         equal "$([[ $rendered == *'󱖶'* ]] && print yes || print no)" yes 'Actual chart glyph'
     done
 fi
-print -- "PASS: $checks zsh adapter assertions against published helper (zsh $ZSH_VERSION)."
+print -- "PASS: $checks zsh adapter assertions against app usage (zsh $ZSH_VERSION)."

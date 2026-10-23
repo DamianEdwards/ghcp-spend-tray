@@ -6,6 +6,6 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\GHCPSpendTray.Prompt\GHCPSpendTray.Prompt.csproj" />
+    <ProjectReference Include="..\..\src\GHCPSpendTray.Application\GHCPSpendTray.Application.csproj" />
   </ItemGroup>
 </Project>

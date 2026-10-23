@@ -6,6 +6,9 @@ try {
     $env:LOCALAPPDATA = $root
     $layout = Join-Path $root 'layout'
     New-Item -ItemType Directory -Path $layout -Force | Out-Null
+    $alias = Join-Path $root 'Microsoft\WindowsApps\ghcp-spend-tray.exe'
+    New-Item -ItemType Directory -Path (Split-Path $alias -Parent) -Force | Out-Null
+    Set-Content -LiteralPath $alias -Value 'synthetic execution alias'
     Set-Content -LiteralPath (Join-Path $layout 'AppxManifest.xml') -Value '<Package><Identity Name="GHCPSpendTray.Development" /></Package>'
     $script = Join-Path $root 'smoke-test-package.ps1'
     Copy-Item -LiteralPath "$PSScriptRoot\smoke-test-package.ps1" -Destination $script
@@ -14,6 +17,7 @@ try {
         Registered = $false; Launches = 0; ActivationLaunches = 0; FailAt = 0; FailKind = 'assertion'; Layout = $layout
         Processes = [Collections.Generic.List[object]]::new()
         Workers = [Collections.Generic.List[object]]::new()
+        Queries = [Collections.Generic.List[object]]::new()
         Stopped = [Collections.Generic.List[int]]::new()
     }
     function Add-AppxPackage { $global:PackageSmokeTestState.Registered = $true }
@@ -21,6 +25,41 @@ try {
     function Start-Process {
         param($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, [switch] $PassThru)
         $state = $global:PackageSmokeTestState
+        if ($FilePath -ceq $alias -or $FilePath -ceq 'pwsh') {
+            $profileInit = $FilePath -ceq 'pwsh'
+            if ($profileInit) {
+                if ($ArgumentList.Count -ne 4 -or $ArgumentList[2] -cne '-EncodedCommand' -or
+                    [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ArgumentList[3])) -notmatch
+                    'init pwsh \| Invoke-Expression') {
+                    throw 'Packaged initialization must test the direct PowerShell profile pipeline.'
+                }
+            }
+            elseif (($ArgumentList -join ',') -cne 'usage,--format,json' -or -not $PassThru) {
+                throw 'Usage alias must receive read-only JSON arguments.'
+            }
+            $queryJson = if ($profileInit -and $state.FailKind -eq 'init-missing') { '' }
+                elseif ($profileInit) { 'PASS: bundled shell initialization.' }
+                elseif ($state.FailKind -eq 'query-invalid') { '{"version":99}' } else { '{"version":1,"status":"unavailable"}' }
+            Set-Content -LiteralPath $RedirectStandardOutput -Value $queryJson
+            Set-Content -LiteralPath $RedirectStandardError -Value ''
+            $query = [pscustomobject]@{
+                Id = $(if ($profileInit) { 901 } else { 900 }); Handle = 1
+                ExitCode = $(if ($state.FailKind -eq 'query-error' -or ($profileInit -and $state.FailKind -eq 'init-error')) { 1 } else { 0 })
+                HasExited = $false; Disposed = $false
+                Failure = $state.FailKind; IsProfileInit = $profileInit
+            }
+            $query | Add-Member ScriptMethod WaitForExit {
+                param($milliseconds)
+                if ($milliseconds -ne 10000) { throw 'Usage CLI must have a bounded 10-second smoke timeout.' }
+                if ($this.Failure -eq 'query-timeout' -or
+                    ($this.IsProfileInit -and $this.Failure -eq 'init-timeout')) { return $false }
+                $this.HasExited = $true
+                return $true
+            }
+            $query | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
+            $state.Queries.Add($query)
+            return $query
+        }
         $state.ActivationLaunches++
         $data = Join-Path $env:LOCALAPPDATA 'Packages\Synthetic\LocalState\Data'
         $pidPath = Join-Path $data 'package-smoke-activation-pid.txt'
@@ -83,7 +122,8 @@ try {
         $global:PackageSmokeTestState.Stopped.Add($Id)
         if ($Id -eq 85) { throw 'An unrelated app must never be terminated.' }
         $owned = @(
-            (@($global:PackageSmokeTestState.Processes) + @($global:PackageSmokeTestState.Workers)) |
+            (@($global:PackageSmokeTestState.Processes) + @($global:PackageSmokeTestState.Workers) +
+                @($global:PackageSmokeTestState.Queries)) |
                 Where-Object { $_.Id -eq $Id }
         )
         if (-not $owned -or -not $Force) { throw "Unexpected process termination: $Id" }
@@ -207,7 +247,8 @@ try {
                 throw 'Activation errors must retain the helper error output.'
             }
             if ($failure.kind -like '*timeout') {
-                if ($messages[0] -notmatch 'preparing activation') {
+                if ($messages[0] -notmatch 'installed execution alias' -or
+                    $messages[1] -notmatch 'preparing activation') {
                     throw 'A hung activation must be announced before launch.'
                 }
                 $pidFile = Join-Path $last 'package-smoke-activation-pid.txt'
@@ -234,6 +275,22 @@ try {
             ($worker.Waits -join ',') -cne $expectedWaits -or
             $global:PackageSmokeTestState.Stopped.Contains($worker.Id) -ne $hung) {
             throw "Activation helper $($worker.Id) must observe exact timeout, termination and disposal semantics."
+        }
+    }
+    if ($global:PackageSmokeTestState.Queries.Count -ne 20 -or
+        @($global:PackageSmokeTestState.Queries | Where-Object { -not $_.HasExited -or -not $_.Disposed }).Count) {
+        throw 'Every registered smoke run must verify and dispose the read-only execution alias query.'
+    }
+    foreach ($queryFailure in @('query-invalid', 'query-error', 'query-timeout', 'init-error', 'init-timeout', 'init-missing')) {
+        $launches = $global:PackageSmokeTestState.ActivationLaunches
+        $global:PackageSmokeTestState.FailKind = $queryFailure
+        $rejected = $false
+        try { & $script -Layout $layout | Out-Null }
+        catch { $rejected = $true }
+        if (-not $rejected -or $global:PackageSmokeTestState.Registered -or
+            $global:PackageSmokeTestState.ActivationLaunches -ne $launches -or
+            -not $global:PackageSmokeTestState.Queries[-1].Disposed) {
+            throw 'An invalid, failed or hung usage alias must fail before UI activation and clean its registration.'
         }
     }
     $global:PackageSmokeTestState.Registered = $true

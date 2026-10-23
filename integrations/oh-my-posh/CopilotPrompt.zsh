@@ -1,23 +1,23 @@
-# Helper output is data. This adapter does not own precmd, PS1 or refresh work.
+# App output is data. This adapter does not own precmd, PS1 or refresh work.
 
 initialize_copilot_prompt() {
-    local helper=ghcp-spend-prompt install_hook=false option
+    local helper=/Applications/GHCPSpendTray.app/Contents/MacOS/GHCPSpendTray install_hook=false option
     local -a arguments=()
     while (( $# )); do
         option=$1; shift
         case $option in
             --install-hook) install_hook=true ;;
-            --helper-executable)
+            --app-executable)
                 (( $# )) || return 1
                 helper=$1; shift ;;
-            --hostname|--cache-dir|--refresh-minutes|--request-timeout|--gh-executable)
+            --account|--data-dir)
                 (( $# )) || return 1
                 arguments+=("$option" "$1"); shift ;;
             *) print -u2 -- "Unknown Copilot adapter option: $option"; return 1 ;;
         esac
     done
     helper=${commands[$helper]:-$helper}
-    [[ -x $helper ]] || { print -u2 -- 'Install ghcp-spend-prompt or pass --helper-executable.'; return 1; }
+    [[ -x $helper ]] || { print -u2 -- 'Install GHCPSpendTray or pass --app-executable.'; return 1; }
     [[ ${_ghcp_initialized-false} != true ]] || disable_copilot_prompt
     typeset -g _ghcp_helper=$helper _ghcp_initialized=true _ghcp_hook_installed=false _ghcp_previous=''
     typeset -ga _ghcp_arguments=("${arguments[@]}")
@@ -50,7 +50,7 @@ update_copilot_prompt() {
     else
         export COPILOT_SPEND=unavailable COPILOT_FORECAST='?'
         export COPILOT_FORECAST_STATE=unknown COPILOT_CONNECTION_STATE=not_connected
-        print -u2 -- 'Copilot adapter failed. Check the native helper and options.'
+        print -u2 -- 'Copilot adapter failed. Check the installed GHCPSpendTray command and options.'
         return 1
     fi
 }

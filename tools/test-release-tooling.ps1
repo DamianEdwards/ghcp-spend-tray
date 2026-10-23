@@ -20,6 +20,12 @@ if ($manifest.Package.Identity.Name -cne 'GHCPSpendTray.Development' -or
     $manifest.Package.Applications.Application.Executable -cne 'GHCPSpendTray.exe') {
     throw 'Local packaging must default to the development identity and GHCPSpendTray executable.'
 }
+$alias = $manifest.SelectSingleNode("//*[local-name()='AppExecutionAlias']")
+if ($null -eq $alias -or $alias.GetAttribute('Subsystem', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/4') -cne 'console' -or
+    $alias.SelectSingleNode("*[local-name()='ExecutionAlias']").GetAttribute('Alias') -cne 'ghcp-spend-tray.exe' -or
+    $manifest.Package.Applications.Application.GetAttribute('SupportsMultipleInstances', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/4') -cne 'true') {
+    throw 'The packaged app must expose its console usage command alias.'
+}
 $errors = @()
 Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' | ForEach-Object {
     $tokens = $null

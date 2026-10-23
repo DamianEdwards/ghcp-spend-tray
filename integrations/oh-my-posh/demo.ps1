@@ -1,34 +1,20 @@
 #Requires -Version 7.2
-param([string]$HelperExecutable = 'ghcp-spend-prompt', [switch]$Live, [string]$Hostname = 'github.com')
+param([string]$AppExecutable = 'ghcp-spend-tray.exe', [string]$Account)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'CopilotPrompt.ps1')
-$helper = (Get-Command $HelperExecutable -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-$directory = Join-Path ([IO.Path]::GetTempPath()) ('GHCPPrompt-demo-' + [guid]::NewGuid().ToString('N'))
+$directory = Join-Path ([IO.Path]::GetTempPath()) ('GHCPAppPrompt-demo-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($directory)
-$script:CopilotDemoTheme = Join-Path $directory 'theme.omp.json'
-& $helper demo-theme (Join-Path $PSScriptRoot 'copilot.segment.json') $script:CopilotDemoTheme
-if ($LASTEXITCODE -ne 0) { throw 'Native demo theme generation failed.' }
-function Show-CopilotPromptExamples {
-    foreach ($state in @('green','yellow','red','in_progress','not_connected')) {
-        $fields = (& $helper demo $state) -split "`t"
-        if ($LASTEXITCODE -ne 0 -or $fields.Count -ne 5) { throw 'Native demo failed.' }
-        $env:COPILOT_SPEND, $env:COPILOT_FORECAST, $env:COPILOT_FORECAST_STATE, $env:COPILOT_CONNECTION_STATE = $fields[1..4]
-        Write-Host "Synthetic $state"
-        oh-my-posh print primary --config $script:CopilotDemoTheme --shell pwsh
-        if ($LASTEXITCODE -ne 0) { throw 'Oh My Posh rendering failed.' }
-        Write-Host ''
-    }
+$theme = Join-Path $directory 'theme.omp.json'
+$segment = Get-Content (Join-Path $PSScriptRoot 'copilot.segment.json') -Raw | ConvertFrom-Json
+@{ version = 4; blocks = @(@{ type = 'prompt'; alignment = 'left'; segments = @($segment) }) } |
+    ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $theme -Encoding utf8
+try {
+    Initialize-CopilotPrompt -AppExecutable $AppExecutable -Account $Account
+    Update-CopilotPrompt
+    oh-my-posh print primary --config $theme --shell pwsh
 }
-if ($Live) {
-    oh-my-posh init pwsh --config $script:CopilotDemoTheme | Invoke-Expression
-    Initialize-CopilotPrompt -HelperExecutable $helper -Hostname $Hostname -CacheDirectory (Join-Path $directory 'cache') -InstallHook
-    Write-Host 'Isolated native helper demo. No profile was modified; press Enter after the background fetch.'
-    Write-Host "Demo theme/cache directory: $directory"
-}
-else {
-    try { Show-CopilotPromptExamples }
-    finally {
-        [IO.File]::Delete($script:CopilotDemoTheme)
-        [IO.Directory]::Delete($directory)
-    }
+finally {
+    Disable-CopilotPrompt
+    [IO.File]::Delete($theme)
+    [IO.Directory]::Delete($directory)
 }

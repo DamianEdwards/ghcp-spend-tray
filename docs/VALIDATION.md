@@ -152,6 +152,33 @@ the real completion-handler threading path. Render snapshots can omit
 GPU-composited SwiftUI text and do not establish pixel-perfect layout or VoiceOver
 correctness; screenshot/accessibility permissions are not changed by the tests.
 
+### Read-only app shell commands
+
+The native Windows/macOS executables dispatch `usage` and `prompt` before UI,
+single-instance activation, telemetry or credential initialization. Exercise
+the actual built executable with isolated synthetic app-owned snapshots:
+
+```powershell
+.\tools\prompt\verify.ps1 -AppExecutable .\artifacts\publish\win-x64\GHCPSpendTray.exe -Render
+```
+
+```bash
+bash tools/prompt/verify.sh "$PWD/artifacts/macos/GHCPSpendTray.app/Contents/MacOS/GHCPSpendTray" --render
+```
+
+These checks cover stdout/stderr capture, exit codes, budget overrides,
+tray-selected/explicit accounts, saved-state freshness and billing rollover,
+forecast bands and adapter hook ownership. They do not fetch live data or start
+the UI. Packaged Windows smoke additionally invokes the installed console
+execution alias and its `init pwsh | Invoke-Expression` profile pipeline before UI activation.
+App initialization output is executable shell code; cached usage output remains
+data-only. Emitted-code tests check quoting, repeated initialization, and hook
+restoration against the same scripts embedded as assembly resources.
+The manifest permits separate query
+processes; the app's own coordinator still enforces one GUI instance.
+Do not treat an unpackaged executable test as proof of alias activation.
+Do not treat WSL shell tests as native macOS execution evidence.
+
 ### CI and release tooling
 
 For changes to platform routing or release orchestration:
