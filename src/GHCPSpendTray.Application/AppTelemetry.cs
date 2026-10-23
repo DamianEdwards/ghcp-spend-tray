@@ -101,6 +101,8 @@ internal sealed class AppTelemetry : IDisposable
     {
         // Exporter SDK diagnostics are not part of our tracked data contract.
         Environment.SetEnvironmentVariable("APPLICATIONINSIGHTS_STATSBEAT_DISABLED", "true");
+        // Customer SDK stats independently probe link-local Azure VM metadata.
+        Environment.SetEnvironmentVariable("APPLICATIONINSIGHTS_SDKSTATS_DISABLED", "true");
         return new AzureMonitorLogExporter(new()
         {
             ConnectionString = TelemetryConfiguration.ConnectionString,
