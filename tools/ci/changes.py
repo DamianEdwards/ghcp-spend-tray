@@ -7,7 +7,7 @@ import subprocess
 
 
 def classify(paths):
-    result = dict(windows=False, macos=False, markdown=False)
+    result = dict(windows=False, macos=False, markdown=False, prompt=False)
     for path in paths:
         if path.endswith((".md", ".markdown")):
             result["markdown"] = True
@@ -17,6 +17,20 @@ def classify(paths):
             ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif",
         }:
             continue
+        elif path.startswith(("tests/GHCPSpendTray.PromptTests/", "tools/prompt/")):
+            result["prompt"] = True
+        elif path in {
+            "integrations/oh-my-posh/CopilotPrompt.ps1",
+            "integrations/oh-my-posh/copilot.segment.json",
+            "integrations/oh-my-posh/demo.ps1",
+            "integrations/oh-my-posh/Test-CopilotPrompt.ps1",
+            "integrations/oh-my-posh/CopilotPrompt.bash",
+            "integrations/oh-my-posh/demo.bash",
+            "integrations/oh-my-posh/Test-CopilotPrompt.bash",
+            "integrations/oh-my-posh/CopilotPrompt.zsh",
+            "integrations/oh-my-posh/Test-CopilotPrompt.zsh",
+        }:
+            result["prompt"] = True
         elif path in {
             "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.png",
             "src/GHCPSpendTray.App/Assets/ghcpspendtray-logo.svg",
@@ -25,18 +39,25 @@ def classify(paths):
             "tools/assert-verification.ps1",
             ".github/workflows/release.yml",
         }:
-            result.update(windows=True, macos=True)
+            result.update(windows=True, macos=True, prompt=True)
         elif path.startswith(("src/GHCPSpendTray.Mac/", "src/GHCPSpendTray.MacBridge/", "tests/GHCPSpendTray.MacTests/", "tools/macos/", "packaging/macos/", ".github/actions/setup-macos/")) or path in (
             ".github/workflows/notarization-status.yml", ".github/workflows/macos-updates.yml",
         ):
             result["macos"] = True
+            if path in {"src/GHCPSpendTray.Mac/AppMain.swift", "src/GHCPSpendTray.Mac/Bridge.h",
+                        "src/GHCPSpendTray.MacBridge/UsageExports.cs", "tools/macos/build.sh"}:
+                result["prompt"] = True
         elif path.startswith(("src/GHCPSpendTray.App/", "tests/GHCPSpendTray.AppTests/", "tests/GHCPSpendTray.PlatformTests/")) or (
             path.startswith("tools/") and path.endswith(".ps1")
         ) or path.startswith(".github/actions/setup-windows-storage/") or path in ("packaging/AppxManifest.xml", "packaging/priconfig.xml", ".github/workflows/store-package.yml", "GHCPSpendTray.slnx"):
             result["windows"] = True
+            if path in {"src/GHCPSpendTray.App/Program.cs", "src/GHCPSpendTray.App/Native/CommandLine.cs",
+                        "src/GHCPSpendTray.App/Platform/PackageContext.cs", "packaging/AppxManifest.xml",
+                        "tools/publish.ps1"}:
+                result["prompt"] = True
         else:
-            # Shared sources, tests, SDK, CI routing, or an unfamiliar path run both.
-            result.update(windows=True, macos=True)
+            # Shared sources, CI routing, or an unfamiliar path run every code lane.
+            result.update(windows=True, macos=True, prompt=True)
     return result
 
 
@@ -47,7 +68,7 @@ def git(*arguments):
 if __name__ == "__main__":
     event = os.environ["EVENT_NAME"]
     if event == "workflow_dispatch":
-        result = dict(windows=True, macos=True, markdown=True)
+        result = dict(windows=True, macos=True, markdown=True, prompt=True)
     else:
         base, head = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
         if base == "0" * 40:

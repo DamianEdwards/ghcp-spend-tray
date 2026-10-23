@@ -9,6 +9,11 @@ packaging).
 - `src\GHCPSpendTray.Core` contains testable domain, HTTP, and storage code.
 - `src\GHCPSpendTray.Application` contains the shared application controller,
   platform interfaces, and view models; do not introduce OS dependencies there.
+- `src\GHCPSpendTray.Application\UsageCommands.cs` owns app-backed read-only shell
+  queries. Keep adapters in `integrations\oh-my-posh` thin; reuse app budgets,
+  selection, freshness and forecasts. CLI invocations must not start UI or fetch.
+  Canonical adapters and the segment are embedded by the Application project;
+  `init` emits trusted shell code while usage/prompt output remains data-only.
 - `src\GHCPSpendTray.App` contains the UI and Windows integration. Keep native
   Shell interop in `Native` and Windows services in `Platform`.
 - `src/GHCPSpendTray.MacBridge` exposes the shared controller through an
@@ -18,7 +23,7 @@ packaging).
   packaging, and smoke-test scripts.
 
 Run `.\tools\verify.ps1` from the repository root for release-tooling checks,
-a Release build, and all four .NET test harnesses. For changes to interop,
+a Release build, and the .NET test harnesses. For changes to interop,
 serialization, or AOT-sensitive code, also run
 `.\tools\verify.ps1 -NativeTests`. Run build and publish commands sequentially:
 they share intermediate directories.
@@ -54,6 +59,10 @@ Production Mac signing also requires Xcode's
 `notarytool` and configured Apple credentials.
 Mac versions live in `packaging/macos/version.txt` for development and
 `macos-v*` release tags; Windows keeps `v*` tags. Preserve independent versioning.
+The Windows/macOS app executables expose `usage` JSON and compact `prompt`
+commands, distributed with app updates. Native Linux/WSL support is out of scope.
+Test real app stdout/exit behavior with `tools\prompt\verify.ps1` on Windows or
+`tools/prompt/verify.sh` on macOS, supplying the built app executable.
 The unified Release workflow selects independent bumps from stable releases
 and persists its version plan across retries. Test changes with
 `python3 -m unittest discover -s tools/release`.

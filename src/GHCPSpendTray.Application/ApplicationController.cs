@@ -743,6 +743,15 @@ public class ApplicationController : IApplicationController, INotificationSink
                 var tooltip = $"GHCPSpendTray | {qualification}MTD {amount} | {total.IncludedAccounts}/{total.TotalAccounts} accounts";
                 var last = states.Where(s => s.Snapshot is not null).Select(s => s.Snapshot!.FetchedAtUtc).DefaultIfEmpty().Min();
                 if (last != default) tooltip += $"\nOldest update {last.ToLocalTime():HH:mm}";
+                try
+                {
+                    AppUsageStore.Save(DataDirectory, AppUsageStore.Create(_settings, states, accountViews, now));
+                }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+                {
+                    _recordDiagnostic($"Shell usage publication failed ({error.GetType().Name}).");
+                    status += " Shell usage could not be saved.";
+                }
                 Changed?.Invoke(new(title, status, tooltip, accountViews,
                     total.IncludedAccounts == 0 ? null : total.ConsumptionUsd, total.IsComplete, total.IsLastKnown,
                     TrayUsage.Create(_settings, states, now), states));

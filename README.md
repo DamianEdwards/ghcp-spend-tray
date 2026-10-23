@@ -412,6 +412,18 @@ error, your organization's policy, and the app's bounded `logs` directory in
 the data folder. Do not post tokens, device codes, unredacted configuration or
 history, or private consumption details in public issues.
 
+## Oh My Posh integration
+
+You can display Copilot spend and a colored period forecast directly in a
+PowerShell (Windows) or Bash/zsh (macOS) prompt using the installed app. The
+[Oh My Posh integration](integrations/oh-my-posh/README.md) includes a reusable
+segment and thin shell adapters. The app's `usage --format json` and `prompt`
+commands query saved usage with the same custom budgets, selected accounts,
+forecast bands and refresh interval as the app. Commands never start the UI or
+fetch data; saved values have explicit freshness/status. The installed app
+embeds its shell adapters: `ghcp-spend-tray.exe init pwsh | Invoke-Expression`
+loads the Windows integration directly from the app, without a script download.
+
 ## Build and contribute
 
 ### Windows development
@@ -429,7 +441,7 @@ Set-Location ghcp-spend-tray
 `verify.ps1 -NativeTests` also runs the test suites under executed x64 Native
 AOT. Run build and publish commands sequentially because they share
 intermediates. CI runs `-TestShard Application` and `-TestShard CorePlatformShared`
-on separate runners; together they retain all four harnesses and the full
+on separate runners; together they retain all harnesses and the full
 solution build. Omitting `-TestShard` still runs all checks locally.
 Self-contained and Store packaging also run independently, each publishing
 and validating both architectures and exercising populated/empty packaged x64

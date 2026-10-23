@@ -26,6 +26,57 @@ try {
     $registered = $true
     $package = Get-AppxPackage -Name GHCPSpendTray.Development
     if (-not $package) { throw 'Registration did not produce a development package.' }
+    $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\ghcp-spend-tray.exe'
+    if (-not (Test-Path -LiteralPath $alias)) { throw 'The app execution alias was not registered.' }
+    $queryDirectory = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalState\Data"
+    New-Item -ItemType Directory -Path $queryDirectory -Force | Out-Null
+    $queryOutput = Join-Path $queryDirectory 'shell-cli-smoke-output.txt'
+    $queryError = Join-Path $queryDirectory 'shell-cli-smoke-error.txt'
+    $query = Start-Process -FilePath $alias -ArgumentList @('usage', '--format', 'json') `
+        -RedirectStandardOutput $queryOutput -RedirectStandardError $queryError -PassThru
+    try {
+        $null = $query.Handle
+        if (-not $query.WaitForExit(10000)) {
+            Stop-Process -Id $query.Id -Force
+            throw 'Packaged usage alias did not exit before UI startup.'
+        }
+        $queryDocument = Get-Content -LiteralPath $queryOutput -Raw | ConvertFrom-Json
+        if ($query.ExitCode -ne 0 -or $queryDocument.version -ne 1 -or
+            [IO.File]::ReadAllText($queryError).Trim()) {
+            throw 'Packaged usage alias did not return versioned JSON on stdout.'
+        }
+        Write-Output 'PASS: installed execution alias returns JSON and exits without starting the tray UI.'
+    }
+    finally { $query.Dispose() }
+    $profileCode = "`$ErrorActionPreference = 'Stop'; & '" + $alias.Replace("'", "''") + "' init pwsh | Invoke-Expression; " +
+        "if ((Get-Alias Set-PoshContext -ErrorAction Stop).Definition -ne 'Invoke-CopilotPromptContext') { throw 'Init hook missing.' }; " +
+        "Disable-CopilotPrompt; Write-Output 'PASS: bundled shell initialization.'"
+    $encodedProfile = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($profileCode))
+    $initOutput = Join-Path $queryDirectory 'shell-init-smoke-output.txt'
+    $initError = Join-Path $queryDirectory 'shell-init-smoke-error.txt'
+    $init = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedProfile) `
+        -RedirectStandardOutput $initOutput -RedirectStandardError $initError -PassThru
+    try {
+        $null = $init.Handle
+        if (-not $init.WaitForExit(10000)) {
+            Stop-Process -Id $init.Id -Force
+            throw 'Packaged shell initialization pipeline did not exit.'
+        }
+        if ($init.ExitCode -ne 0 -or
+            [IO.File]::ReadAllText($initOutput).Trim() -cne 'PASS: bundled shell initialization.' -or
+            [IO.File]::ReadAllText($initError).Trim()) {
+            Write-Output ([IO.File]::ReadAllText($initOutput))
+            Write-Output ([IO.File]::ReadAllText($initError))
+            throw "Packaged shell initialization pipeline failed (exit code $($init.ExitCode))."
+        }
+    }
+    finally {
+        $init.Dispose()
+        if ($DiagnosticsDirectory) {
+            & "$PSScriptRoot\export-smoke-diagnostics.ps1" -DataDirectory $queryDirectory `
+                -Destination (Join-Path $DiagnosticsDirectory 'shell-init') | Out-Null
+        }
+    }
     $result = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalState\Data\native-smoke-result.txt"
     for ($iteration = 1; $iteration -le $Iterations; $iteration++) {
         foreach ($arguments in @('--package-smoke-test', '--package-smoke-test --demo-empty')) {

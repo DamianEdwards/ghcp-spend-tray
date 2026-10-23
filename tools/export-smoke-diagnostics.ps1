@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 foreach ($relative in @('native-smoke-result.txt', 'native-smoke-progress.txt',
     'package-smoke-activation.log', 'package-smoke-activation-error.log', 'package-smoke-activation-pid.txt',
+    'shell-init-smoke-output.txt', 'shell-init-smoke-error.txt',
     'logs\diagnostics.log', 'logs\diagnostics.previous.log')) {
     $source = Join-Path $DataDirectory $relative
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { continue }

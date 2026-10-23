@@ -223,7 +223,7 @@ public sealed class MonitorService : IAsyncDisposable
             AppSettings settings;
             lock (_sync) { account = entry.State.Account; settings = _settings; }
             DateTimeOffset now = _time.GetUtcNow();
-            SetState(entry, s => s with { LastAttemptUtc = now });
+            SetState(entry, s => s with { LastAttemptUtc = now, IsRefreshing = true });
             if (!entry.HistoryLoaded)
             {
                 StoreLoadResult<UsageSnapshot[]> loaded = await _store.LoadHistoryAsync(account.Key,
@@ -308,6 +308,7 @@ public sealed class MonitorService : IAsyncDisposable
         }
         finally
         {
+            if (entered) SetState(entry, state => state with { IsRefreshing = false });
             if (entered && !removed.IsCancellationRequested)
             {
                 try { RefreshCompleted?.Invoke(CopyState(entry.State)); }

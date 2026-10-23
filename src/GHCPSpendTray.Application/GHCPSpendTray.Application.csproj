@@ -11,4 +11,10 @@
     <InternalsVisibleTo Include="GHCPSpendTray.SharedTests" />
     <AssemblyMetadata Include="ApplicationInsightsConnectionString" Value="$(GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING)" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\integrations\oh-my-posh\CopilotPrompt.ps1" LogicalName="GHCPSpendTray.ShellIntegration.pwsh" />
+    <EmbeddedResource Include="..\..\integrations\oh-my-posh\CopilotPrompt.bash" LogicalName="GHCPSpendTray.ShellIntegration.bash" />
+    <EmbeddedResource Include="..\..\integrations\oh-my-posh\CopilotPrompt.zsh" LogicalName="GHCPSpendTray.ShellIntegration.zsh" />
+    <EmbeddedResource Include="..\..\integrations\oh-my-posh\copilot.segment.json" LogicalName="GHCPSpendTray.ShellIntegration.segment" />
+  </ItemGroup>
 </Project>

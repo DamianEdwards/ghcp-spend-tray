@@ -12,6 +12,7 @@ int assertions = 0;
 try
 {
     await TelemetryTests.RunAsync(Check, root);
+    await UsageExportTests.RunAsync(Check, root);
     var credentials = new MemoryCredentials();
     var startup = new Startup();
     var handler = new FixtureHttp();

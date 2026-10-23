@@ -22,6 +22,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (UsageCommands.Handles(args)) return CommandLine.Run(args);
         bool packageSmoke = args.Contains("--package-smoke-test", StringComparer.Ordinal);
         bool smoke = packageSmoke || args.Contains("--smoke-test", StringComparer.Ordinal);
         bool emptyDemo = args.Contains("--demo-empty", StringComparer.Ordinal);
