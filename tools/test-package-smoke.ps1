@@ -40,8 +40,11 @@ try {
             $queryJson = if ($profileInit -and $state.FailKind -eq 'init-missing') { '' }
                 elseif ($profileInit) { 'PASS: bundled shell initialization.' }
                 elseif ($state.FailKind -eq 'query-invalid') { '{"version":99}' } else { '{"version":1,"status":"unavailable"}' }
-            Set-Content -LiteralPath $RedirectStandardOutput -Value $queryJson
-            Set-Content -LiteralPath $RedirectStandardError -Value ''
+            # Redirected successful stderr is zero bytes, not the newline Set-Content adds.
+            [IO.File]::WriteAllText($RedirectStandardOutput, $queryJson)
+            $queryError = if ($state.FailKind -eq 'query-stderr' -or
+                ($profileInit -and $state.FailKind -eq 'init-stderr')) { 'synthetic stderr' } else { '' }
+            [IO.File]::WriteAllText($RedirectStandardError, $queryError)
             $query = [pscustomobject]@{
                 Id = $(if ($profileInit) { 901 } else { 900 }); Handle = 1
                 ExitCode = $(if ($state.FailKind -eq 'query-error' -or ($profileInit -and $state.FailKind -eq 'init-error')) { 1 } else { 0 })
@@ -281,12 +284,18 @@ try {
         @($global:PackageSmokeTestState.Queries | Where-Object { -not $_.HasExited -or -not $_.Disposed }).Count) {
         throw 'Every registered smoke run must verify and dispose the read-only execution alias query.'
     }
-    foreach ($queryFailure in @('query-invalid', 'query-error', 'query-timeout', 'init-error', 'init-timeout', 'init-missing')) {
+    foreach ($queryFailure in @('query-invalid', 'query-error', 'query-timeout', 'query-stderr',
+        'init-error', 'init-timeout', 'init-missing', 'init-stderr')) {
         $launches = $global:PackageSmokeTestState.ActivationLaunches
         $global:PackageSmokeTestState.FailKind = $queryFailure
         $rejected = $false
         try { & $script -Layout $layout | Out-Null }
-        catch { $rejected = $true }
+        catch {
+            $expectedMessage = if ($queryFailure -like 'init-*') { 'Packaged shell initialization pipeline' }
+                else { 'Packaged usage alias' }
+            if ($_.Exception.Message -notlike "$expectedMessage*") { throw }
+            $rejected = $true
+        }
         if (-not $rejected -or $global:PackageSmokeTestState.Registered -or
             $global:PackageSmokeTestState.ActivationLaunches -ne $launches -or
             -not $global:PackageSmokeTestState.Queries[-1].Disposed) {

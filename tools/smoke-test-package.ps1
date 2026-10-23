@@ -42,7 +42,7 @@ try {
         }
         $queryDocument = Get-Content -LiteralPath $queryOutput -Raw | ConvertFrom-Json
         if ($query.ExitCode -ne 0 -or $queryDocument.version -ne 1 -or
-            ([string](Get-Content -LiteralPath $queryError -Raw)).Trim()) {
+            [IO.File]::ReadAllText($queryError).Trim()) {
             throw 'Packaged usage alias did not return versioned JSON on stdout.'
         }
         Write-Output 'PASS: installed execution alias returns JSON and exits without starting the tray UI.'
@@ -63,8 +63,8 @@ try {
             throw 'Packaged shell initialization pipeline did not exit.'
         }
         if ($init.ExitCode -ne 0 -or
-            ([string](Get-Content -LiteralPath $initOutput -Raw)).Trim() -cne 'PASS: bundled shell initialization.' -or
-            ([string](Get-Content -LiteralPath $initError -Raw)).Trim()) {
+            [IO.File]::ReadAllText($initOutput).Trim() -cne 'PASS: bundled shell initialization.' -or
+            [IO.File]::ReadAllText($initError).Trim()) {
             throw 'Packaged shell initialization pipeline failed.'
         }
     }
