@@ -22,6 +22,7 @@ jobs:
       windows: ${{ steps.changes.outputs.windows }}
       macos: ${{ steps.changes.outputs.macos }}
       markdown: ${{ steps.changes.outputs.markdown }}
+      prompt: ${{ steps.changes.outputs.prompt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -51,6 +52,57 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
         with:
           globs: "**/*.{md,markdown}"
+
+  prompt:
+    name: App shell usage (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.prompt == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows-storage
+        if: runner.os == 'Windows'
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - uses: ./.github/actions/setup-macos
+        if: runner.os == 'macOS'
+      - name: Fetch digest-verified native renderer for synthetic tests
+        shell: pwsh
+        run: |
+          $asset, $digest = switch ($env:RUNNER_OS) {
+            'Windows' { 'posh-windows-amd64.exe'; '8e7077ac1f4fb34daf62b1a25a84bf28f338f4533f13feed9b10ca6f675993b0' }
+            'Linux' { 'posh-linux-amd64'; '7f345282675ab5e93edea15975642b55f3639ce5e0f0f39dfdb9fecb4c025e02' }
+            'macOS' { 'posh-darwin-arm64'; '26175b7d4be75987f242cda829ff996c2da0f834ac916844251d5be646be4d6a' }
+            default { throw 'Unknown renderer platform.' }
+          }
+          $directory = Join-Path $env:RUNNER_TEMP 'prompt-renderer'
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          $name = if ($IsWindows) { 'oh-my-posh.exe' } else { 'oh-my-posh' }
+          $binary = Join-Path $directory $name
+          Invoke-WebRequest "https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v29.14.0/$asset" -OutFile $binary
+          if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $digest) { throw 'Renderer digest mismatch.' }
+          if (!$IsWindows) { chmod 700 $binary }
+          $directory | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Publish and verify Windows app commands
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\tools\publish.ps1 -Runtime win-x64
+          .\tools\prompt\verify.ps1 -AppExecutable .\artifacts\publish\win-x64\GHCPSpendTray.exe -Render
+      - name: Publish and verify macOS app commands and system shells
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash tools/macos/build.sh
+          bash tools/prompt/verify.sh "$PWD/artifacts/macos/GHCPSpendTray.app/Contents/MacOS/GHCPSpendTray" --render
 
   tests:
     name: Windows managed and Native AOT tests (${{ matrix.shard }})
@@ -294,7 +346,7 @@ jobs:
 
   verify:
     name: Verification
-    needs: [changes, markdown, tests, package, macos_tests, macos, macos_runtime]
+    needs: [changes, markdown, prompt, tests, package, macos_tests, macos, macos_runtime]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

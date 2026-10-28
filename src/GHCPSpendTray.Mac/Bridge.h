@@ -8,4 +8,7 @@ char *ghcp_poll(void);
 void ghcp_free(char *json);
 void ghcp_shutdown(void);
 
+// Read-only CLI entry point; does not initialize the controller or AppKit.
+int ghcp_cli(const char *directory, int argc, const char * const *argv);
+
 #endif

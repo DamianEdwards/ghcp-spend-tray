@@ -3,8 +3,10 @@
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
          xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap uap10 desktop rescap">
+         IgnorableNamespaces="uap uap10 desktop desktop4 uap5 rescap">
   <Identity Name="GHCPSpendTray.Development" Publisher="CN=GHCPSpendTray Development"
             Version="0.1.0.0" ProcessorArchitecture="x64" />
   <Properties>
@@ -21,13 +23,20 @@
   </Resources>
   <Applications>
     <Application Id="App" Executable="GHCPSpendTray.exe" EntryPoint="Windows.FullTrustApplication"
-                 uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+                 uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL"
+                 desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements DisplayName="GHCPSpendTray"
                           Description="GitHub Copilot AI-credit consumption, at a glance."
                           BackgroundColor="transparent"
                           Square150x150Logo="Assets\Square150x150Logo.png"
                           Square44x44Logo="Assets\Square44x44Logo.png" />
       <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="GHCPSpendTray.exe"
+                        EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="ghcp-spend-tray.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
         <desktop:Extension Category="windows.startupTask" Executable="GHCPSpendTray.exe"
                            EntryPoint="Windows.FullTrustApplication" uap10:Parameters="--startup">
           <desktop:StartupTask TaskId="GHCPSpendTrayStartup" Enabled="false" DisplayName="GHCPSpendTray" />

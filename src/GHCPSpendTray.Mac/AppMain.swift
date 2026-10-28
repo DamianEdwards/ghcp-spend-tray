@@ -826,6 +826,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 @main
 enum Main {
     @MainActor static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if ["usage", "prompt", "init", "integration"].contains(arguments.first ?? "") {
+            let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("GHCPSpendTray", isDirectory: true).path
+            let allocated = arguments.map { strdup($0) }
+            defer { allocated.forEach { free($0) } }
+            let pointers = allocated.map { UnsafePointer<CChar>($0) }
+            let code = directory.withCString { path in
+                pointers.withUnsafeBufferPointer { buffer in
+                    ghcp_cli(path, Int32(buffer.count), buffer.baseAddress)
+                }
+            }
+            exit(code)
+        }
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate

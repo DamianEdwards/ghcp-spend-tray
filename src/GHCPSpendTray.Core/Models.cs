@@ -248,6 +248,7 @@ public sealed record AccountState
     public string? Diagnostic { get; init; }
     public DateTimeOffset? NextRefreshUtc { get; init; }
     public DateTimeOffset? LastAttemptUtc { get; init; }
+    public bool IsRefreshing { get; init; }
 }
 
 public sealed class ServiceException : Exception

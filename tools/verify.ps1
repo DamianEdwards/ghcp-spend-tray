@@ -18,8 +18,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Build failed: $buildTarget" }
     $names = switch ($TestShard) {
         'Application' { @('GHCPSpendTray.AppTests') }
-        'CorePlatformShared' { @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.SharedTests') }
-        'All' { @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.AppTests', 'GHCPSpendTray.SharedTests') }
+        'CorePlatformShared' { @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.SharedTests', 'GHCPSpendTray.PromptTests') }
+        'All' { @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.AppTests', 'GHCPSpendTray.SharedTests', 'GHCPSpendTray.PromptTests') }
     }
     foreach ($name in $names) {
         $project = "tests\$name\$name.csproj"
