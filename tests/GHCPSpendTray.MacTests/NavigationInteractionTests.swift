@@ -23,7 +23,7 @@ enum NavigationInteractionTests {
         let details = NSHostingView(rootView: AccountDiagnosticsView(account: account).frame(width: 352))
         let accounts = NSHostingView(rootView: AccountManagementRow(account: account) {
             model.selectedAccount = account.key
-        }.frame(width: 352))
+        }.frame(width: 352).background(Color(nsColor: .windowBackgroundColor)))
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 352, height: 300),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -54,9 +54,22 @@ enum NavigationInteractionTests {
 
         window.contentView = accounts
         window.setContentSize(accounts.fittingSize)
-        try waitForLayout(accounts, phase: "account-management card") { $0.width == 352 && $0.height > 100 }
-        try check(accounts.fittingSize.width == 352 && accounts.fittingSize.height > 100,
-                  "Account management is a full-width shaded group with its management action.")
+        try waitForLayout(accounts, phase: "account-management card") { $0.width == 352 && $0.height > 60 && $0.height < 100 }
+        let identitySize = accounts.fittingSize
+        let identityImage = try snapshot(accounts)
+        var richAccount = try PeriodEstimateTests.account(estimate: ["estimatedConsumptionUsd": 200, "isEarly": false], used: 99)
+        richAccount.customBudgetUsd = 1000
+        let richManagement = NSHostingView(rootView: AccountManagementRow(account: richAccount) {}
+            .frame(width: 352).background(Color(nsColor: .windowBackgroundColor)))
+        window.contentView = richManagement
+        window.setContentSize(richManagement.fittingSize)
+        try waitForLayout(richManagement, phase: "usage-independent account-management card") { $0 == identitySize }
+        try check(try snapshot(richManagement) == identityImage,
+                  "Accounts list cards render only identity and management: amounts, percentages, budgets and forecasts cannot change their pixels.")
+        try identityImage.write(to: URL(fileURLWithPath: "artifacts/macos-test-diagnostics/AccountManagement.png"))
+        window.contentView = accounts
+        window.setContentSize(identitySize)
+        try waitForLayout(accounts, phase: "identity-only management navigation") { $0 == identitySize }
         try click(window, view: accounts, x: 90, fromTop: 20)
         try waitForLayout(accounts, phase: "account-information navigation") { _ in model.selectedAccount == account.key }
         try check(model.selectedAccount == account.key, "Clicking account information opens its management page.")
@@ -64,7 +77,83 @@ enum NavigationInteractionTests {
         try click(window, view: accounts, x: 300, fromTop: accounts.bounds.height - 14)
         try waitForLayout(accounts, phase: "explicit management navigation") { _ in model.selectedAccount == account.key }
         try check(model.selectedAccount == account.key, "The visible Manage account action also opens account management.")
-        print("PASS: title/whole-row/chevron disclosure clicks and explicit/full-row account management clicks.")
+        let popup = NSHostingView(rootView: FlyoutView(model: model))
+        window.contentView = popup
+        window.setContentSize(popup.fittingSize)
+        try waitForLayout(popup, phase: "popup Usage navigation") { $0.width == 400 && $0.height > 150 }
+        var opened = 0
+        model.showSettings = { opened += 1 }
+        for _ in 0..<2 {
+            model.page = .accounts
+            model.selectedAccount = account.key
+            let revision = model.usageNavigationRevision
+            try click(window, view: popup, x: 100, fromTop: 75)
+            try waitForLayout(popup, phase: "popup account Usage action") { _ in model.usageNavigationRevision > revision }
+            try check(model.page == .usage && model.selectedAccount == nil && model.usageAccount == account.key &&
+                      model.usageNavigationRevision == revision + 1,
+                      "Popup account clicks open Usage and repeat its scroll request rather than opening management.")
+        }
+        try check(opened == 2, "Every popup account click opens the settings window.")
+        model.viewUsage("github.com:removed")
+        try check(opened == 2 && model.error != nil, "Removed accounts fail explicitly instead of navigating.")
+        model.error = nil
+        try usageManagement(model, window: window, first: account)
+        print("PASS: identity-only Accounts cards, per-account Usage management clicks, disclosures and repeated popup-to-Usage navigation.")
+    }
+
+    private static func usageManagement(_ model: AppModel, window: NSWindow, first: AccountData) throws {
+        let second = try JSONDecoder().decode(AccountData.self, from: Data("""
+        {"key":"example.ghe.com:2","name":"Other synthetic","login":"other-fixture","host":"example.ghe.com",
+         "details":{"unlimited":false,"isCurrentPeriod":true},"freshness":"Fresh","consumptionUsd":25}
+        """.utf8))
+        model.dashboard = Dashboard(total: "Synthetic", status: "Synthetic", tooltip: "Synthetic",
+                                    accounts: [first, second], consumptionUsd: 37.5,
+                                    isComplete: true, isLastKnown: false, tray: nil)
+        model.selectPage(.usage)
+        model.usageAccount = nil
+        let probe = ManagementLayout()
+        let usage = NSHostingView(rootView: UsageView(model: model).frame(width: 650, height: 900)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlayPreferenceValue(PreferenceBounds.self) { anchors in
+                GeometryReader { geometry in
+                    let frames = anchors.mapValues { geometry[$0] }
+                    Color.clear.onAppear { probe.frames = frames }
+                        .onChange(of: frames) { _, value in probe.frames = value }
+                }.allowsHitTesting(false)
+            })
+        window.contentView = usage
+        window.setContentSize(usage.fittingSize)
+        try waitForLayout(usage, phase: "per-account Usage management actions") { _ in
+            [first, second].allSatisfy { probe.frames[$0.key + "_UsageManageAccount"] != nil }
+        }
+        try snapshot(usage).write(to: URL(fileURLWithPath: "artifacts/macos-test-diagnostics/UsageManagement.png"))
+        for account in [second, first] {
+            model.selectPage(.usage)
+            guard let bounds = probe.frames[account.key + "_UsageManageAccount"],
+                  usage.bounds.contains(bounds) else {
+                throw AppError.message("The account's Manage action is missing or outside the Usage viewport.")
+            }
+            try click(window, view: usage, x: bounds.midX, fromTop: bounds.midY)
+            try waitForLayout(usage, phase: "Usage-to-account-management navigation") { _ in
+                model.page == .accounts && model.selectedAccount == account.key
+            }
+        }
+    }
+
+    private static func snapshot(_ view: NSView) throws -> Data {
+        view.layoutSubtreeIfNeeded()
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw AppError.message("Account navigation view did not render.")
+        }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]), data.count > 1000 else {
+            throw AppError.message("Account navigation render was empty.")
+        }
+        return data
+    }
+
+    private final class ManagementLayout {
+        var frames: [String: CGRect] = [:]
     }
 
     private static func waitForLayout(_ view: NSView, phase: String, ready: (NSSize) -> Bool) throws {

@@ -72,6 +72,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('release_metadata(os.environ["GHCP_MAC_VERSION"], os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"])', signing)
         self.assertIn("releaseRunId=run_id", (ROOT / "tools/macos/release.py").read_text())
 
+    def test_release_uses_verified_source_without_repeating_ci_tests(self):
+        windows = self.job("windows")
+        macos = self.job("macos")
+        self.assertLess(windows.index("test-release-source.ps1"), windows.index("tools\\package.ps1"))
+        self.assertLess(macos.index("release.py validate"), macos.index("tools/macos/build.sh"))
+        self.assertNotIn("tools\\verify.ps1", windows)
+        self.assertNotIn("tools/macos/verify.sh", macos)
+        self.assertNotIn("native_verify", macos)
+        self.assertNotIn("macos-test-diagnostics", macos)
+        self.assertIn("test-package.ps1", windows)
+        self.assertIn("sign-package.sh", macos)
+        signing = (ROOT / "tools/macos/sign-package.sh").read_text()
+        self.assertIn('python3 tools/macos/smoke-test.py "$app"', signing)
+
     def test_update_feed_is_retryable_after_mac_release_already_published(self):
         job = self.job("macos_updates")
         self.assertIn("needs: [plan, macos]", job)

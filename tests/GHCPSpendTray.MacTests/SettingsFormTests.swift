@@ -14,17 +14,24 @@ enum SettingsFormTests {
         model.initialized = true
         model.settings = try JSONDecoder().decode(SettingsData.self, from: Data("""
         {"pollMinutes":10,"thresholds":"50, 80, 100","notifications":true,"startup":false,
-         "canChangeStartup":false,"startupDescription":"Synthetic","trayStyle":0,"trayMode":0}
+         "canChangeStartup":false,"startupDescription":"Synthetic","trayStyle":0,"trayMode":0,"trackedTelemetryEnabled":true}
         """.utf8))
         model.dashboard = try JSONDecoder().decode(Dashboard.self, from: Data("""
         {"total":"Synthetic","status":"Synthetic","tooltip":"Synthetic","isComplete":true,"isLastKnown":false,
          "accounts":[{"key":"github.com:1","name":"Synthetic","login":"fixture","host":"github.com",
           "details":{"unlimited":true,"isCurrentPeriod":true},"freshness":"Fresh","consumptionUsd":16.5,
-          "customBudgetUsd":50,"allocationUsd":50,"percent":33}]}
+          "customBudgetUsd":50,"allocationUsd":50,"percent":33.333333333333333333333333333}]}
         """.utf8))
         let account = model.dashboard!.accounts[0]
-        try check(account.allocationSummary == "33% of $50.00 custom budget",
-                  "Finite custom budgets must label usage even with unlimited API allocation.")
+        try check(account.allocationSummary == "33% of $50 custom budget",
+                  "Custom budget usage rounds repeating percentages and omits zero cents even with unlimited API allocation.")
+        let fractionalBudget = try JSONDecoder().decode(AccountData.self, from: Data("""
+        {"key":"github.com:5","name":"Synthetic","login":"fixture","host":"github.com",
+         "details":{"unlimited":false,"isCurrentPeriod":true},"freshness":"Fresh",
+         "consumptionUsd":26.25,"customBudgetUsd":50.50,"allocationUsd":50.50,"percent":52.5}
+        """.utf8))
+        try check(fractionalBudget.allocationSummary == "53% of $50.50 custom budget",
+                  "Custom budget usage rounds midpoints up and preserves nonzero cents.")
         let unknown = try JSONDecoder().decode(AccountData.self, from: Data("""
         {"key":"github.com:2","name":"Synthetic","login":"fixture","host":"github.com",
          "details":{"unlimited":false,"isCurrentPeriod":true},"freshness":"Fresh",
@@ -36,13 +43,13 @@ enum SettingsFormTests {
         {"key":"github.com:3","name":"Synthetic","login":"fixture","host":"github.com",
          "details":{"unlimited":true,"isCurrentPeriod":true},"freshness":"Fresh","consumptionUsd":16.5}
         """.utf8))
-        try check(unlimited.allocationSummary == "Unlimited API allocation",
+        try check(unlimited.allocationSummary == "Unlimited API limit",
                   "Unlimited API allocation without a custom target must not look like zero percent.")
         let unavailable = try JSONDecoder().decode(AccountData.self, from: Data("""
         {"key":"github.com:4","name":"Synthetic","login":"fixture","host":"github.com",
          "details":{"unlimited":false,"isCurrentPeriod":false},"freshness":"Stale","customBudgetUsd":50}
         """.utf8))
-        try check(unavailable.allocationSummary.contains("Consumption unavailable"),
+        try check(unavailable.allocationSummary == "$50 custom budget · Consumption unavailable",
                   "Saved budgets do not fabricate unavailable consumption.")
         model.selectAccount(account.key)
         model.loadAccountDraft(account.key)
@@ -147,12 +154,29 @@ enum SettingsFormTests {
                   model.settings?.pollMinutes == 10, "General validation does not mutate persisted preferences.")
         model.globalDraft.minutes = "10"
         try check(!model.hasUnsavedChanges && model.fieldErrors.isEmpty, "Returning text inputs to their baseline is clean.")
+        model.globalDraft.trackedTelemetryEnabled = false
+        try check(model.hasUnsavedChanges, "Telemetry opt-out alone marks General preferences dirty.")
+        model.saveChanges()
+        let telemetrySave = bridge.lastRequest
+        try check(telemetrySave["method"] as? String == "settings.save" &&
+                  (telemetrySave["settings"] as? [String: Any])?["trackedTelemetryEnabled"] as? Bool == false,
+                  "General Save sends the telemetry opt-out across the native bridge.")
+        try bridge.enqueue("completed", id: telemetrySave["id"], values: ["error": "Synthetic telemetry save failure."])
+        model.poll()
+        try check(model.hasUnsavedChanges && !model.globalDraft.trackedTelemetryEnabled &&
+                  model.settings?.trackedTelemetryEnabled == true,
+                  "Failed telemetry saves preserve the draft without changing persisted consent.")
+        model.cancelChanges()
+        try check(model.globalDraft.trackedTelemetryEnabled && !model.hasUnsavedChanges,
+                  "Cancel restores saved telemetry consent.")
         model.globalDraft.startup = true
+        model.globalDraft.trackedTelemetryEnabled = false
         model.globalDraft.trayStyle = .percentage
         model.globalDraft.excludedAccounts.insert(account.key)
         try bridge.enqueue("state", id: nil, values: ["settings": try jsonObject(model.settings!)])
         model.poll()
-        try check(model.globalDraft.startup && model.globalDraft.trayStyle == .percentage && model.hasUnsavedChanges,
+        try check(model.globalDraft.startup && !model.globalDraft.trackedTelemetryEnabled &&
+                  model.globalDraft.trayStyle == .percentage && model.hasUnsavedChanges,
                   "Activation/background settings refresh cannot overwrite dirty toggles and selections.")
         var cancelled = 0
         try check(!model.requestLeaving({ closes += 1 }, cancelled: { cancelled += 1 }), "Closing/Quit protects global drafts.")

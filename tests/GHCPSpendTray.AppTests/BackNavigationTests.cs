@@ -27,6 +27,17 @@ internal static class BackNavigationTests
         }
 
         var account = session.Dashboard.Accounts[0];
+        var usagePage = SettingsPage.About;
+        session.OpenSettings = page => { usagePage = page; opens++; };
+        session.ViewUsage(account.Key);
+        Check(session.Page == SettingsPage.Usage && usagePage == SettingsPage.Usage &&
+            session.UsageAccountKey == account.Key && session.SelectedAccount is null && !session.ShowAddForm,
+            "popup Details opens Usage and targets the account without entering management");
+        int usageRevision = session.UsageNavigationRevision;
+        session.ViewUsage(account.Key);
+        Check(session.UsageNavigationRevision > usageRevision, "repeated Details can bring the same account back into view");
+        session.Navigate(SettingsPage.General);
+        Check(session.UsageAccountKey is null, "leaving Usage clears its navigation target");
         session.EditAccount(account.Key);
         session.ConfirmRemove = true;
         int presentations = opens;

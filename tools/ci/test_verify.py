@@ -126,6 +126,49 @@ class VerifyWorkflowTests(unittest.TestCase):
         self.assertNotIn("always()", job)
         self.assertNotIn("LINUX_SIGNING_KEY", self.jobs["linux"])
 
+    def test_windows_storage_setup_precedes_sdk_and_cache(self):
+        jobs = [self.jobs["tests"], self.jobs["package"]]
+        for workflow, job in (("release.yml", "windows"), ("store-package.yml", "package")):
+            text = (ROOT / ".github/workflows" / workflow).read_text()
+            jobs.append(re.search(
+                rf"^  {job}:\n(.*?)(?=^  \w+:\n|\Z)", text, re.MULTILINE | re.DOTALL,
+            ).group(1))
+        for job in jobs:
+            self.assertLess(job.index("actions/checkout@"), job.index("uses: ./.github/actions/setup-windows-storage"))
+            self.assertLess(job.index("uses: ./.github/actions/setup-windows-storage"), job.index("actions/setup-dotnet@"))
+        for name in ("tests", "package"):
+            self.assertIn("path: ${{ env.NUGET_PACKAGES }}", self.jobs[name])
+            self.assertLess(self.jobs[name].index("setup-windows-storage"), self.jobs[name].index("actions/cache@"))
+        for name in ("macos_tests", "macos"):
+            self.assertNotIn("setup-windows-storage", self.jobs[name])
+            self.assertIn("path: ~/.nuget/packages", self.jobs[name])
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required")
+class WindowsStorageSetupTests(unittest.TestCase):
+    def test_action_creates_and_exports_all_cache_paths(self):
+        action = (ROOT / ".github/actions/setup-windows-storage/action.yml").read_text()
+        script = "\n".join(line[8:] for line in action.split("      run: |\n", 1)[1].splitlines())
+        with tempfile.TemporaryDirectory() as directory:
+            environment_file = Path(directory) / "environment.txt"
+            result = subprocess.run(
+                ["pwsh", "-NoProfile", "-NonInteractive", "-Command", script],
+                env={**os.environ, "RUNNER_TEMP": directory, "GITHUB_ENV": str(environment_file)},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            exported = dict(line.split("=", 1) for line in environment_file.read_text().splitlines())
+            expected = {
+                "TEMP": "temp", "TMP": "temp", "NUGET_PACKAGES": r"nuget\packages",
+                "NUGET_HTTP_CACHE_PATH": r"nuget\http-cache", "NUGET_SCRATCH": r"nuget\scratch",
+                "NUGET_PLUGINS_CACHE_PATH": r"nuget\plugins-cache",
+            }
+            self.assertEqual(exported.keys(), expected.keys())
+            for name, relative_path in expected.items():
+                path = Path(directory) / "build-caches" / Path(relative_path.replace("\\", os.sep))
+                self.assertEqual(Path(exported[name]), path)
+                self.assertTrue(path.is_dir(), name)
+
 
 @unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for script routing tests")
 class WindowsVerificationShardTests(unittest.TestCase):

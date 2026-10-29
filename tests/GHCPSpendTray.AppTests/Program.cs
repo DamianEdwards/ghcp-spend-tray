@@ -137,6 +137,15 @@ try
 
     var credentialLogRoot = Path.Combine(root, "credential-diagnostics");
     Diagnostics.Initialize(credentialLogRoot);
+    Diagnostics.RecordFailure("Synthetic UI failure",
+        new System.Runtime.InteropServices.COMException("synthetic-secret-must-not-be-logged", unchecked((int)0x80004005)));
+    Diagnostics.RecordFailure("Synthetic native failure",
+        new InvalidOperationException("synthetic-secret-must-not-be-logged", new System.ComponentModel.Win32Exception(5)));
+    string failureLog = await File.ReadAllTextAsync(Path.Combine(credentialLogRoot, "logs", "diagnostics.log"));
+    Check(failureLog.Contains("Synthetic UI failure (COMException, HRESULT 0x80004005).") &&
+        failureLog.Contains("Synthetic native failure (InvalidOperationException, HRESULT 0x80131509, native error 5).") &&
+        !failureLog.Contains("synthetic-secret"),
+        "failure diagnostics preserve HRESULTs and native error codes without exception messages");
     credentials.WriteError = new CredentialVaultException(8, "write", "synthetic-secret-must-not-be-logged");
     try
     {
@@ -207,15 +216,21 @@ try
     await Until(() => Volatile.Read(ref view)?.Tray?.RollUp.IncludedAccounts == 2);
     await app.SaveSettingsAsync(app.Settings with
         { TrayStyle = TrayIconStyle.Pie, TrayMode = TrayDisplayMode.RollUp, ExcludedTrayAccounts = [] });
-    using (var draft = new AppSession(app, action => action()))
+    var draftCallbacks = new ConcurrentQueue<Action>();
+    using (var draft = new AppSession(app, draftCallbacks.Enqueue))
     {
+        void DrainDraftCallbacks()
+        {
+            while (draftCallbacks.TryDequeue(out var callback)) callback();
+        }
         draft.Initialize();
-        await Until(() => draft.Initialized && !draft.Busy);
+        await Until(() => draft.Initialized && !draft.Busy, DrainDraftCallbacks);
         await app.RefreshAsync();
-        await Until(() => draft.Dashboard.Tray?.RollUp.IncludedAccounts == 3);
+        await Until(() => draft.Dashboard.Tray?.RollUp.IncludedAccounts == 3, DrainDraftCallbacks);
         Check(draft.ExpandedUsageAccounts.Count == 0, "usage account disclosures start collapsed");
         draft.ExpandedUsageAccounts.Add("github.com:1");
         await app.RefreshAsync();
+        DrainDraftCallbacks();
         Check(draft.ExpandedUsageAccounts.SetEquals(["github.com:1"]),
             "refresh preserves the open account disclosure without expanding other accounts");
         int shellCalls = 0;
@@ -223,6 +238,9 @@ try
         using var installed = new TrayIconSet(0, root, (uint _, ref Win32.NOTIFYICONDATA _) => { shellCalls++; return 1; });
         void UpdateInstalled() => installed.Update(draft.Dashboard.Tray!, _ => 16, palette);
         draft.DashboardChanged += UpdateInstalled;
+        await app.ResumeAsync();
+        Check(!draftCallbacks.IsEmpty && shellCalls == 0,
+            "dashboard callbacks wait for explicit dispatch before initial icon installation");
         UpdateInstalled();
         int beforeCalls = shellCalls;
         nint originalIcon = installed.Primary.ImageHandle;
@@ -257,14 +275,17 @@ try
         draft.ExcludedTrayAccounts.Add("github.com:2");
         draft.Thresholds = "invalid";
         draft.SaveGlobal();
-        await Until(() => !draft.Busy);
-        Check(draft.Error is not null && draft.PreviewTray().Style == TrayIconStyle.Percentage &&
+        Check(!draft.Busy && draft.Error is not null && draft.PreviewTray().Style == TrayIconStyle.Percentage &&
             draft.PreviewTray().Icons.Count == 2 && shellCalls == beforeCalls &&
             await File.ReadAllTextAsync(Path.Combine(root, "config.json")) == beforeSettings,
             "failed settings save preserves draft preview but notifies no Shell or persistence changes");
+        DrainDraftCallbacks();
+        Check(shellCalls == beforeCalls && installed.Icons.Count == 1 && installed.Primary.ImageHandle == originalIcon &&
+            draft.PreviewTray().Icons.Count == 2,
+            "delayed unchanged dashboards neither reinstall icons nor overwrite the unsaved preview");
         draft.Thresholds = app.Settings.Thresholds;
         draft.SaveGlobal();
-        await Until(() => !draft.Busy);
+        await Until(() => !draft.Busy, DrainDraftCallbacks);
         Check(draft.Error is null && shellCalls > beforeCalls && installed.Icons.Count == 2 &&
             (await Load()).TrayStyle == TrayIconStyle.Percentage &&
             draft.PreviewTray().Icons.SequenceEqual(draft.Dashboard.Tray!.Icons),
@@ -274,7 +295,8 @@ try
         draft.Notify();
         handler.FailUsage = true;
         await app.RefreshAsync("github.com:1");
-        await Until(() => draft.Dashboard.Tray!.Accounts.First(a => a.Key == "github.com:1").Percent is null);
+        await Until(() => draft.Dashboard.Tray!.Accounts.First(a => a.Key == "github.com:1").Percent is null,
+            DrainDraftCallbacks);
         Check(draft.PreviewTray().RollUp.IsPartial && draft.PreviewTray().RollUp.SelectedAccounts == 3 &&
             draft.Dashboard.Tray!.RollUp.SelectedAccounts == 2,
             "underlying failure refreshes partial preview while preserving unsaved account selection");
@@ -283,7 +305,7 @@ try
             "per-account preview uses unavailable rather than failed last-known percentages");
         handler.FailUsage = false;
         await app.RefreshAsync("github.com:1");
-        await Until(() => draft.Dashboard.Tray!.RollUp.IncludedAccounts == 2);
+        await Until(() => draft.Dashboard.Tray!.RollUp.IncludedAccounts == 2, DrainDraftCallbacks);
         var expiredAt = draft.Dashboard.TrayStates!.Max(s => s.Snapshot!.FetchedAtUtc).AddHours(1).AddTicks(1);
         Check(draft.PreviewTray(expiredAt).Icons.All(i => i.Percent is null) &&
             draft.PreviewTray().Icons.All(i => i.Percent is not null),
@@ -486,10 +508,11 @@ try
             () => { }, default, clientId);
     }
     async Task<AppSettings> Load() => (await new JsonStore(root).LoadSettingsAsync()).Value;
-    static async Task Until(Func<bool> predicate)
+    static async Task Until(Func<bool> predicate, Action? dispatch = null)
     {
         for (int i = 0; i < 100; i++)
         {
+            dispatch?.Invoke();
             if (predicate()) return;
             await Task.Delay(20);
         }

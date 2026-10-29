@@ -52,6 +52,8 @@ final class AppModel: ObservableObject {
     @Published var reconnectClientId: String?
     @Published var page: SettingsPage = .usage
     @Published var selectedAccount: String?
+    @Published var usageAccount: String?
+    @Published var usageNavigationRevision = 0
     @Published var notificationPermission: NotificationPermission?
     @Published var notificationBusy = false
     @Published var accountDraft = AccountDraft() { didSet { draftChanged() } }
@@ -96,12 +98,16 @@ final class AppModel: ObservableObject {
         self.updates = updates
     }
 
-    func start(empty: Bool, unlimited: Bool = false) {
+    func start(empty: Bool, unlimited: Bool = false, usageStates: Bool = false) {
+        let os = ProcessInfo.processInfo.operatingSystemVersion
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
         perform("initialize", fields: ["directory": directory.path, "demo": demo, "empty": empty,
-                                       "unlimited": unlimited]) { [weak self] event in
+                                       "unlimited": unlimited, "usageStates": usageStates,
+                                       "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
+                                       "osVersion": "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+                                       "releaseChannel": Bundle.main.object(forInfoDictionaryKey: "GHCPReleaseChannel") as? String ?? "Development"]) { [weak self] event in
             self?.initialized = event.error == nil
             Task { await self?.refreshNotificationPermission() }
         }
@@ -201,6 +207,18 @@ final class AppModel: ObservableObject {
     func openSettings(_ page: SettingsPage = .usage, accountKey: String? = nil) {
         navigate {
             self.setPage(page, accountKey: accountKey)
+            self.showSettings?()
+        }
+    }
+    func viewUsage(_ key: String) {
+        guard dashboard?.accounts.contains(where: { $0.key == key }) == true else {
+            error = "That account is no longer configured."
+            return
+        }
+        navigate {
+            self.setPage(.usage, accountKey: nil)
+            self.usageAccount = key
+            self.usageNavigationRevision += 1
             self.showSettings?()
         }
     }
@@ -550,6 +568,7 @@ final class AppModel: ObservableObject {
                     guard let minutes = result.pollMinutes else { throw AppError.message("Missing validated refresh interval.") }
                     value.pollMinutes = minutes
                     value.startup = globalDraft.startup
+                    value.trackedTelemetryEnabled = globalDraft.trackedTelemetryEnabled
                     value.trayStyle = globalDraft.trayStyle
                     value.trayMode = globalDraft.trayMode
                     value.excludedTrayAccounts = globalDraft.excludedAccounts.sorted()

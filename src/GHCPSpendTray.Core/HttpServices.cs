@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -15,6 +16,7 @@ public static class HttpTransport
     {
         AllowAutoRedirect = false,
         UseCookies = false,
+        ActivityHeadersPropagator = DistributedContextPropagator.CreateNoOutputPropagator(),
         PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         ConnectTimeout = TimeSpan.FromSeconds(20)
     }) { Timeout = TimeSpan.FromSeconds(60) };
@@ -304,6 +306,7 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
 
     public async Task<UsageSnapshot> FetchAsync(Account account, CancellationToken cancellationToken = default)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("consumption.fetch");
         TokenSet tokens = await tokenManager.GetAsync(account, cancellationToken: cancellationToken).ConfigureAwait(false);
         try { return await FetchWithTokenAsync(account, tokens, cancellationToken).ConfigureAwait(false); }
         catch (ServiceException ex) when (ex.Status == AccountStatus.SignInRequired)
@@ -343,12 +346,12 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         PremiumWire? quota = wire.QuotaSnapshots?.PremiumInteractions;
         if (quota is null || quota.TokenBasedBilling is null || quota.Unlimited is null ||
             quota.HasQuota is null || quota.CreditsUsed is null || quota.CreditsUsed < 0 || quota.Entitlement < 0)
-            throw new ServiceException(AccountStatus.InvalidData, "Required quota fields are missing or invalid.");
+            throw new ServiceException(AccountStatus.InvalidData, "Required usage or limit fields are missing or invalid.");
         if (!quota.TokenBasedBilling.Value)
             throw new ServiceException(AccountStatus.Unsupported, "Dollar accounting is unsupported for premium-request billing.");
         // has_quota can be false after exhaustion; validated observed consumption is still meaningful.
-        DateTimeOffset? reset = Timestamp(wire.QuotaResetDateUtc, "quota reset") ??
-            Timestamp(wire.QuotaResetDate, "quota reset");
+        DateTimeOffset? reset = Timestamp(wire.QuotaResetDateUtc, "limit reset") ??
+            Timestamp(wire.QuotaResetDate, "limit reset");
         DateTimeOffset? source = Timestamp(quota.TimestampUtc, "source timestamp");
         if (reset <= fetched)
             throw new ServiceException(AccountStatus.InvalidData, "The service returned an expired billing period.");
@@ -356,9 +359,11 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
         {
             var result = new UsageSnapshot
             {
+                MicrosoftEnterprise = MicrosoftEnterprise(wire.EnterpriseList),
                 AccountKey = accountKey, FetchedAtUtc = fetched.ToUniversalTime(),
                 SourceTimestampUtc = source, ResetAtUtc = reset,
                 PeriodId = BillingPeriods.Resolve(fetched, reset),
+                EnterpriseIds = EnterpriseIds(wire.EnterpriseList),
                 CreditsUsed = quota.CreditsUsed.Value, Entitlement = quota.Entitlement,
                 Unlimited = quota.Unlimited.Value,
                 ConsumptionUsd = CreditPolicy.ToUsd(quota.CreditsUsed.Value),
@@ -369,7 +374,36 @@ public sealed class CopilotUsageProvider(HttpClient httpClient, TokenManager tok
             return result;
         }
         catch (Exception ex) when (ex is OverflowException or ArgumentException)
-        { throw new ServiceException(AccountStatus.InvalidData, "Quota values are outside the supported range."); }
+        { throw new ServiceException(AccountStatus.InvalidData, "Usage or limit values are outside the supported range."); }
+    }
+
+    private static long[] EnterpriseIds(JsonElement enterprises)
+    {
+        if (enterprises.ValueKind != JsonValueKind.Array) return [];
+        var ids = new HashSet<long>();
+        foreach (var enterprise in enterprises.EnumerateArray())
+            if (enterprise.ValueKind == JsonValueKind.Object && enterprise.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out var value) && value > 0)
+                ids.Add(value);
+        return ids.ToArray();
+    }
+
+    private static bool? MicrosoftEnterprise(JsonElement enterprises)
+    {
+        if (enterprises.ValueKind != JsonValueKind.Array) return null;
+        bool unknown = false;
+        foreach (JsonElement enterprise in enterprises.EnumerateArray())
+        {
+            if (enterprise.ValueKind != JsonValueKind.Object ||
+                !enterprise.TryGetProperty("id", out var id) ||
+                id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out long number) || number <= 0)
+            {
+                unknown = true;
+                continue;
+            }
+            if (number is 134482 or 1578 or 13213) return true;
+        }
+        return unknown ? null : false;
     }
 
     private static DateTimeOffset? Timestamp(JsonElement element, string name)

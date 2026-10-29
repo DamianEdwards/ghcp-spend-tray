@@ -58,7 +58,7 @@ internal sealed class ReactorShell : IDisposable
         };
         _session.HideFlyout = () => _flyout?.Hide();
         _session.TestNotification = () => _tray.Notify(new(null, "GHCPSpendTray test",
-            "Synthetic example: 50% of allocation consumed.", PercentConsumed: 50m));
+            "Synthetic example: 50% of limit consumed.", PercentConsumed: 50m));
         _tray.OpenRequested += key => _session.Post(() =>
         {
             if (key is not null) _session.EditAccount(key);
@@ -85,6 +85,9 @@ internal sealed class ReactorShell : IDisposable
                 Diagnostics.RecordFailure("Tray display update failed", ex);
                 _session.ReportTrayError();
             }
+            if (!_exiting && _flyout is { } window &&
+                Win32.IsWindowVisible(WinRT.Interop.WindowNative.GetWindowHandle(window.NativeWindow)) != 0)
+                PlaceFlyout(window);
         };
         controller.SetNotificationHandler(notification =>
         {
@@ -129,17 +132,23 @@ internal sealed class ReactorShell : IDisposable
                     if (e.Key == VirtualKey.Escape) { _flyout?.Hide(); e.Handled = true; }
                 };
         }
-        var (anchor, work, dpi) = _tray.Placement();
-        double scale = dpi / 96d;
-        int height = _session.Initialized && _session.Dashboard.Accounts.Count == 0 ? 410 : 590;
-        var placement = FlyoutPlacement.AboveIcon(anchor, work, (int)(400 * scale), (int)(height * scale), (int)(10 * scale));
-        _flyout.AppWindow.MoveAndResize(new RectInt32(placement.X, placement.Y, placement.Width, placement.Height));
+        PlaceFlyout(_flyout);
         _flyout.Show(); _flyout.Activate();
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_flyout.NativeWindow);
         if (Win32.SetForegroundWindow(hwnd) == 0 && Win32.GetForegroundWindow() != hwnd)
             Diagnostics.Record("Windows declined foreground activation of the tray flyout.");
         // Invalidate dismissals raised before or reentrantly during this presentation.
         _flyoutPresentation++;
+    }
+    private void PlaceFlyout(ReactorWindow window)
+    {
+        var (anchor, work, dpi) = _tray.Placement();
+        double scale = dpi / 96d;
+        var accounts = _session.Dashboard.Accounts;
+        int height = _session.Initialized && accounts.Count == 0 ? 410 :
+            accounts.Count > 1 && accounts[0].EnterpriseConsumption?.Bars is { Length: > 0 } ? 640 : 590;
+        var placement = FlyoutPlacement.AboveIcon(anchor, work, (int)(400 * scale), (int)(height * scale), (int)(10 * scale));
+        window.AppWindow.MoveAndResize(new RectInt32(placement.X, placement.Y, placement.Width, placement.Height));
     }
     private void ToggleFlyout()
     {

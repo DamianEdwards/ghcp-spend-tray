@@ -37,7 +37,7 @@ public sealed class BridgeRuntime : IDisposable
                     string text = result.CustomBudgetUsd is not { } budget
                         ? "Enter a positive USD amount with up to two decimal places."
                         : account is { Freshness: "Fresh", ConsumptionUsd: { } used } && account.Details.IsCurrentPeriod
-                            ? FormattableString.Invariant($"Preview: ${used:0.00} consumed = {UsageBudget.Percentage(used, budget):0.##}% of ${budget:0.00} custom budget")
+                            ? FormattableString.Invariant($"Preview: ${used:0.00} consumed = {UsageFormatting.Percentage(UsageBudget.Percentage(used, budget))} of {UsageFormatting.BudgetMoney(budget)} custom budget")
                             : "Preview unavailable until fresh current-period consumption is available.";
                     result = result with { Text = text };
                 }
@@ -108,6 +108,8 @@ public sealed class BridgeRuntime : IDisposable
 
     private async Task ExecuteAsync(Command command)
     {
+        using var activity = command.Method == "initialize" ? null :
+            AppInstrumentation.Activities.StartActivity("ui." + command.Method);
         string? error = null;
         bool cancelled = false;
         try
@@ -117,18 +119,30 @@ public sealed class BridgeRuntime : IDisposable
                 case "initialize":
                     if (_controller is not null) throw new AppOperationException("The application is already initialized.");
                     _directory = Path.GetFullPath(Required(command.Directory));
-                    _controller = command.Demo ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited) :
+                    TelemetryConfiguration? telemetry = command.AppVersion is { } version
+                        ? new(version, command.Demo ? "demo" :
+                                command.ReleaseChannel is "Stable" or "Preview" ? "github-release" : "development",
+                            !command.Demo && command.ReleaseChannel is "Stable" or "Preview", command.OsVersion)
+                        : null;
+                    _controller = command.Demo
+                        ? new DemoController(_directory, command.Empty, unlimited: command.Unlimited, telemetry: telemetry,
+                            usageStates: command.UsageStates) :
                         new ApplicationController(_directory, false, _platform,
-                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic);
+                            createStartup: _platform.InitializeAsync, recordDiagnostic: RecordDiagnostic,
+                            telemetry: telemetry);
                     _controller.Changed += OnDashboard;
                     _controller.SetNotificationHandler(_platform.NotifyAsync);
-                    await _controller.InitializeAsync();
+                    using (AppInstrumentation.Activities.StartActivity("ui.initialize"))
+                        await _controller.InitializeAsync();
                     break;
                 case "refresh":
                     await Controller.RefreshAsync(command.Key);
                     break;
                 case "account.refresh":
                     await Controller.RefreshAccountAsync(Required(command.Key));
+                    break;
+                case "consumption.connect":
+                    await Controller.ConnectConsumptionAsync(Required(command.Key), command.Confirm);
                     break;
                 case "resume":
                     await Controller.ResumeAsync();
@@ -201,6 +215,7 @@ public sealed class BridgeRuntime : IDisposable
 
     private void RecordDiagnostic(string category)
     {
+        System.Diagnostics.Trace.TraceWarning(category);
         lock (_stateGate)
         {
             try

@@ -3,4 +3,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+  <ItemGroup Condition="'$(GHCP_CONSUMPTION_API_URL)' != ''">
+    <AssemblyMetadata Include="EnterpriseConsumptionApiUrl" Value="$(GHCP_CONSUMPTION_API_URL)" />
+  </ItemGroup>
+  <Target Name="ValidateConsumptionApiUrl" BeforeTargets="GenerateAssemblyInfo"
+          Condition="'$(GHCP_CONSUMPTION_API_URL)' != ''">
+    <Error Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(GHCP_CONSUMPTION_API_URL)', '^https://[A-Za-z0-9.-]+(:443)?/[^?#@\s]*$')) != 'True'"
+           Text="GHCP_CONSUMPTION_API_URL must be an absolute HTTPS base URL without credentials, query, fragment, or a non-default port." />
+  </Target>
 </Project>

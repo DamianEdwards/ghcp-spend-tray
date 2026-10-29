@@ -21,7 +21,9 @@ internal static partial class Program
         try
         {
             await DomainTests();
+            await EnterpriseConsumptionTests();
             await BudgetTests();
+            await UsageForecastTests();
             await PeriodEstimateTests();
             await TrayTests();
             await HttpTests();
@@ -205,10 +207,10 @@ internal static partial class Program
                             True(icon.IsUnlimited && !icon.IsPartial && !icon.IsOverAllocation);
                             Equal<double?>(null, icon.Percent);
                             Equal("\u221e", icon.NumericText);
-                            Equal("Unlimited allocation", icon.ValueText);
+                            Equal("Unlimited", icon.ValueText);
                             Equal(1, icon.IncludedAccounts);
-                            True(icon.Tooltip.Contains("Unlimited allocation") && !icon.Tooltip.Contains("Unavailable"));
-                            True(icon.Details.Contains("Unlimited allocation") && !icon.Details.Contains("Unavailable"));
+                            True(icon.Tooltip.Contains("Unlimited") && !icon.Tooltip.Contains("Unavailable"));
+                            True(icon.Details.Contains("Unlimited") && !icon.Details.Contains("Unavailable"));
                         }
                         True(result.Accounts.Single().IsUnlimited);
                         Equal(50m, UsageAggregation.Total([state], Now, TimeSpan.FromMinutes(10)).ConsumptionUsd);
@@ -224,7 +226,7 @@ internal static partial class Program
             result = TrayUsage.Create(settings, [unlimited, unlimited2 with { Status = AccountStatus.NetworkError }], Now);
             True(result.RollUp.IsUnlimited && result.RollUp.IsPartial);
             Equal(1, result.RollUp.IncludedAccounts);
-            True(result.RollUp.Tooltip.StartsWith("Partial ! | Unlimited allocation") &&
+            True(result.RollUp.Tooltip.StartsWith("Partial ! | Unlimited") &&
                 result.RollUp.Tooltip.Contains("refresh failed"));
             result = TrayUsage.Create(settings with { TrayMode = TrayDisplayMode.PerAccount }, [first, unlimited2], Now);
             Equal<double?>(50, result.RollUp.Percent);
@@ -284,7 +286,17 @@ internal static partial class Program
                 True(result.Tooltip.Contains(result.ValueText));
             }
             var tiny = TrayUsage.Create(Settings(Account), [State(Account, .001m)], Now).RollUp;
-            Equal("<0.01%", tiny.ValueText);
+            Equal("0%", tiny.ValueText);
+            foreach (var (percent, text) in new (double, string)[]
+                { (0, "0%"), (.49, "0%"), (.5, "1%"), (33.333333333333, "33%"),
+                  (52.5, "53%"), (99.5, "100%"), (125.6, "126%"), (1500.5, "1501%") })
+            {
+                Equal(text, TrayIndicator.FormatPercent(percent));
+                Equal(text, UsageFormatting.Percentage((decimal)percent));
+            }
+            Equal("$1,500", UsageFormatting.BudgetMoney(1500.00m));
+            Equal("$1,500.50", UsageFormatting.BudgetMoney(1500.50m));
+            Equal("$1,500.05", UsageFormatting.BudgetMoney(1500.05m));
             var huge = State(Account, decimal.MaxValue, decimal.MaxValue);
             var huge2 = State(second, decimal.MaxValue, decimal.MaxValue);
             Equal<double?>(100, TrayUsage.Create(settings, [huge, huge2], Now).RollUp.Percent);

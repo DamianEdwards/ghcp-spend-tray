@@ -15,6 +15,7 @@ public sealed record Account
     public decimal? SpendIncrementUsd { get; init; }
     public bool ExcludeFromTray { get; init; }
     public bool ShowPeriodEstimate { get; init; }
+    public EnterpriseIdentity? ConsumptionIdentity { get; init; }
     public decimal? CustomBudgetUsd { get; init; }
     public string Key => HostResolver.Resolve(Host).Host + ":" + UserId;
 
@@ -29,6 +30,7 @@ public sealed record Account
         if (ThresholdOverrides is not null)
             AppSettings.ValidateThresholds(ThresholdOverrides);
         AppSettings.ValidateSpendIncrement(SpendIncrementUsd);
+        ConsumptionIdentity?.Validate();
         UsageBudget.Validate(CustomBudgetUsd);
     }
 }
@@ -97,6 +99,8 @@ public sealed record AppSettings
     [JsonRequired] public int Version { get; set; } = 1;
     public int PollIntervalMinutes { get; set; } = 10;
     public bool NotificationsEnabled { get; set; } = true;
+    public bool TrackedTelemetryEnabled { get; set; } = true;
+    public Guid? TelemetryId { get; set; }
     public decimal[] AlertThresholds { get; set; } = [50m, 80m, 100m];
     public decimal? SpendIncrementUsd { get; set; }
     public Account[] Accounts { get; set; } = [];
@@ -168,6 +172,8 @@ public interface ICredentialStore
 
 public sealed record UsageSnapshot
 {
+    // Optional response metadata, not part of the persisted consumption history.
+    [JsonIgnore] public bool? MicrosoftEnterprise { get; init; }
     [JsonRequired] public string AccountKey { get; init; } = "";
     [JsonRequired] public DateTimeOffset FetchedAtUtc { get; init; }
     public DateTimeOffset? SourceTimestampUtc { get; init; }
@@ -179,6 +185,7 @@ public sealed record UsageSnapshot
     [JsonRequired] public decimal ConsumptionUsd { get; init; }
     public decimal? AllocationUsd { get; init; }
     public decimal? PercentConsumed { get; init; }
+    public long[] EnterpriseIds { get; init; } = [];
     [JsonRequired] public int ConversionPolicyVersion { get; init; } = 1;
 
     public void Validate()

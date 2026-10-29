@@ -9,12 +9,13 @@ internal static class Diagnostics
     {
         var native = exception as System.ComponentModel.Win32Exception ??
             exception.InnerException as System.ComponentModel.Win32Exception;
-        Record($"{category} ({exception.GetType().Name}" +
+        Record($"{category} ({exception.GetType().Name}, HRESULT 0x{exception.HResult:X8}" +
             (native is null ? ")." : $", native error {native.NativeErrorCode})."));
     }
     // Callers provide only fixed diagnostic categories, never server responses or exception messages.
     internal static void Record(string category)
     {
+        System.Diagnostics.Trace.TraceWarning(category);
         lock (Gate)
         {
             try

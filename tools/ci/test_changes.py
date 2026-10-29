@@ -18,6 +18,7 @@ class ChangesTests(unittest.TestCase):
                      "packaging/AppxManifest.xml", "packaging/priconfig.xml", "tools/publish.ps1",
                      "tools/get-windows-app-runtime.ps1", "tools/test-windows-app-runtime.ps1",
                      "tools/test-package-deployment.ps1", ".github/workflows/store-package.yml",
+                     ".github/actions/setup-windows-storage/action.yml",
                      "GHCPSpendTray.slnx"):
             self.assertEqual(classify([path]), dict(windows=True, macos=False, linux=False, markdown=False), path)
         for path in ("src/GHCPSpendTray.Linux/Program.cs", "packaging/linux/install.py",

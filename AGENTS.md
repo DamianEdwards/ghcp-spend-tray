@@ -90,4 +90,7 @@ public release. See `docs/RELEASING.md` for production packaging and signing.
 Use synthetic accounts and data in tests and issue reports. Do not commit
 tokens, device codes, or real account/consumption data. Keep authentication
 host-specific and treat unsupported or stale consumption as unavailable, not
-zero. See `docs/VALIDATION.md` for current evidence and limitations.
+zero. See `docs/VALIDATION.md` for verification procedures and limitations.
+Update it only when those procedures, enduring limitations, or release acceptance
+gates change; keep per-change test results and investigation narratives in PR
+descriptions and CI artifacts, not a running journal in that document.

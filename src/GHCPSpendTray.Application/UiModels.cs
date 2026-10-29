@@ -11,7 +11,14 @@ public sealed record AccountDiagnostics(decimal? CreditsUsed, decimal? ObservedC
 public sealed record AccountView(string Key, string Name, string Login, string Host, AccountDiagnostics Details,
     decimal? Percent,
     decimal? ConsumptionUsd = null, decimal? AllocationUsd = null, string Freshness = "", DateTimeOffset? UpdatedAt = null,
-    string? AvatarUrl = null, PeriodEstimate? PeriodEstimate = null, decimal? CustomBudgetUsd = null);
+    string? AvatarUrl = null, PeriodEstimate? PeriodEstimate = null, EnterpriseConsumptionView? EnterpriseConsumption = null,
+    decimal? CustomBudgetUsd = null)
+{
+    public UsagePosition? ActualUsage => Percent is null ? null :
+        UsagePosition.Create(ConsumptionUsd, CustomBudgetUsd ?? AllocationUsd);
+    public UsageForecast? Forecast => Percent is null ? null :
+        UsageForecast.Create(ConsumptionUsd, CustomBudgetUsd ?? AllocationUsd, PeriodEstimate);
+}
 public sealed record DashboardView(string Total, string Status, string Tooltip, IReadOnlyList<AccountView> Accounts,
     decimal? ConsumptionUsd = null, bool IsComplete = false, bool IsLastKnown = false,
     TrayPresentation? Tray = null, IReadOnlyList<AccountState>? TrayStates = null);
@@ -19,7 +26,7 @@ public sealed record SettingsView(int PollMinutes, string Thresholds, bool Notif
     decimal? SpendIncrementUsd = null, bool CanChangeStartup = false,
     string StartupDescription = "Unavailable in isolated portable mode.",
     TrayIconStyle TrayStyle = TrayIconStyle.Pie, TrayDisplayMode TrayMode = TrayDisplayMode.RollUp,
-    string[]? ExcludedTrayAccounts = null);
+    string[]? ExcludedTrayAccounts = null, bool TrackedTelemetryEnabled = true);
 public sealed record NotificationView(string? AccountKey, string Title, string Message,
     decimal? PercentConsumed = null, decimal? SpendMilestoneUsd = null);
 public sealed record DevicePrompt(string Code, Uri VerificationUri, DateTimeOffset Expires)
@@ -44,6 +51,8 @@ public interface IApplicationController : IDisposable
     Task InitializeAsync();
     Task RefreshAsync(string? accountKey = null);
     Task RefreshAccountAsync(string accountKey);
+    Task ConnectConsumptionAsync(string accountKey, bool confirm = false) =>
+        Task.FromException(new AppOperationException("Corporate consumption is unavailable in this controller."));
     Task SaveSettingsAsync(SettingsView settings);
     Task SaveAccountAsync(string key, string displayName, string thresholds, decimal? spendIncrementUsd = null,
         bool? showPeriodEstimate = null, decimal? customBudgetUsd = null, bool updateCustomBudget = false);

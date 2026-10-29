@@ -1,6 +1,6 @@
 # GHCPSpendTray privacy policy
 
-Last updated: October 5, 2026.
+Last updated: October 15, 2026.
 
 GHCPSpendTray is an independent Windows and macOS desktop application maintained by
 Damian Edwards. It displays GitHub Copilot AI-credit consumption for accounts you
@@ -16,7 +16,7 @@ and requested, refresh tokens.
 
 The app retrieves account information such as your login, account ID, host and
 avatar URL, as well as Copilot consumption information such as credits used,
-allocation, billing period, reset dates and observation timestamps. It also
+limit, billing period, reset dates and observation timestamps. It also
 stores preferences you choose, including account display names, refresh
 intervals and alert thresholds.
 This information is used to display consumption, maintain history and generate
@@ -58,19 +58,32 @@ codes, account identities or consumption amounts.
 
 ## Network requests and third parties
 
+For eligible enterprise accounts, you can optionally connect Microsoft's
+corporate daily-consumption service. The app invokes your installed Azure CLI
+to obtain an Entra access token and, after you confirm the corporate identity,
+sends that token and corporate alias to the corporate API endpoint configured at
+build time. Builds without an endpoint do not offer or invoke this integration.
+Azure CLI manages its own credentials and token renewal; the app does not save
+these access tokens or daily responses to disk. Confirmed corporate usernames, aliases,
+tenant IDs, and object IDs are saved in account settings until you remove the
+account or replace its connection. Daily data is displayed only for the eligible
+enterprises associated with the GitHub account. The service receives ordinary
+network information such as your IP address.
+
 GHCPSpendTray communicates directly over HTTPS with the GitHub host and API
 associated with each connected account for authorization, identity lookup, token
 refresh and consumption updates. Those services receive the information needed
 for the request, including applicable authorization tokens and ordinary network
 information such as your IP address.
 
-GHCPSpendTray does not operate a developer-hosted account or consumption backend,
-and the app does not send account information, consumption history or diagnostic
-logs to the developer automatically. Showing an avatar loads an image over HTTPS
+GHCPSpendTray does not operate a developer-hosted account or consumption backend.
+The app does not send account identities, consumption history or local diagnostic
+logs to the developer automatically. Basic app telemetry is described below.
+Showing an avatar loads an image over HTTPS
 from the connected GitHub host or its avatar service (for github.com,
 `avatars.githubusercontent.com`); that service receives the image request and
 ordinary network information such as your IP address. The app does not include
-app-operated advertising or analytics tracking.
+advertising.
 
 Public macOS builds use Sparkle to check a signed update feed on GitHub Pages
 and download updates from this repository's GitHub Releases. Sparkle asks
@@ -92,6 +105,60 @@ are governed separately by [Apple's privacy policy](https://www.apple.com/legal/
 Operating-system diagnostics, backups or synchronization you configure may handle
 local app data independently of GHCPSpendTray.
 
+## Basic app telemetry (tracked)
+
+Builds configured with the maintainer's Application Insights connection string
+send limited startup, refresh, and error events to Microsoft Azure Application
+Insights for the maintainer to understand adoption, platform compatibility and
+reliability. This is enabled by default. You can turn off **Share basic app
+telemetry** in **Settings > General** and save your changes. Your saved choice
+is read before startup events are collected.
+
+Events contain a random identifier saved in your local app data, app and OS
+versions, OS platform, OS and process architectures, installation source, configured
+account count, Microsoft enterprise classification, and fixed refresh/error
+categories. The identifier is not derived from your GitHub accounts, username,
+computer name, or hardware. It identifies an app data profile, not a person
+across devices. Clearing that profile creates a new identifier.
+
+Microsoft enterprise classification is computed locally from configured hosts
+and enterprise IDs in GitHub's Copilot response. Only yes, no, or unknown is
+sent, not the underlying hosts, enterprise IDs, organization memberships or
+account identities. This is an affiliation heuristic, not proof of employment.
+
+Tracked events exclude access/refresh tokens, authorization codes, GitHub
+identities, account display names, consumption amounts/history, arbitrary
+exception messages, stack traces, and local paths. Events are not joined to
+developer diagnostic traces. Azure receives ordinary network information such
+as your IP address when receiving telemetry. Azure data handling is subject to
+[Microsoft's privacy statement](https://privacy.microsoft.com/privacystatement).
+Remote events are retained according to the configured Application Insights
+retention policy; disabling telemetry does not delete previously received data.
+
+Disabling telemetry stops new tracked events and discards pending in-memory
+events. A request already in flight may finish. There is no tracked telemetry
+disk backlog. Delivery is best-effort; offline events may be lost. Demonstration,
+smoke-test, isolated Windows portable, and unconfigured development builds do
+not send tracked telemetry by default. The explicit Windows
+`--demo --verify-telemetry` developer mode sends only synthetic demo events,
+marks them as synthetic, and still honors the saved telemetry preference.
+
+## Developer diagnostics (untracked)
+
+Developer diagnostics are a separate, independently configured OpenTelemetry
+pipeline. They are off unless an `OTEL_EXPORTER_OTLP_ENDPOINT` or a signal-specific
+OTLP endpoint is explicitly supplied in the app's environment. These diagnostics
+can include UI/application operation timings, HTTP spans, runtime/network
+metrics, and structured technical logs with trace correlation. They do not
+include the tracked app-profile identifier. GitHub request credentials and
+request/response bodies are not collected; HTTP span URLs are removed before
+export.
+
+The endpoint may be local, such as an Aspire dashboard, or remote. Whoever
+configures it controls the destination, access and retention. The basic app
+telemetry switch does not disable this explicitly configured diagnostic
+pipeline. Do not enable diagnostics against a destination you do not trust.
+
 ## Notifications
 
 If enabled, operating-system notifications can display account labels and consumption
@@ -104,6 +171,7 @@ previews and Focus/Do Not Disturb.
 
 - Connecting accounts is optional. You can cancel sign-in before completing it.
 - You can change refresh and notification preferences in the app.
+- You can disable basic app telemetry in **Settings > General** and save.
 - Removing an account stops monitoring it and deletes its app-managed credential.
   Account removal does not necessarily immediately erase every historical,
   recovery or backup file.

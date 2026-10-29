@@ -36,6 +36,7 @@ jobs:
       id-token: write
     env:
       RELEASE_VERSION: ${{ inputs.version }}
+      GHCP_CONSUMPTION_API_URL: ${{ secrets.GHCP_CONSUMPTION_API_URL }}
       STORE_ID: ${{ vars.STORE_ID }}
       STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
       STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
@@ -46,6 +47,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - uses: ./.github/actions/setup-windows-storage
 
       - name: Validate Store configuration and select immutable release
         id: source
@@ -82,6 +85,8 @@ jobs:
 
       - name: Build with the Partner Center identity
         shell: pwsh
+        env:
+          GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ vars.GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING }}
         working-directory: release-source
         run: |
           if (-not (Get-Command .\tools\package.ps1).Parameters.ContainsKey('Store')) {
@@ -106,7 +111,7 @@ jobs:
 
       - name: Upload Store submission artifacts
         id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: GHCPSpendTray-${{ steps.source.outputs.version }}-store
           path: artifacts/store/${{ steps.source.outputs.version }}/

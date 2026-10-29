@@ -12,6 +12,10 @@ public sealed record Command
     public bool Demo { get; init; }
     public bool Empty { get; init; }
     public bool Unlimited { get; init; }
+    public bool UsageStates { get; init; }
+    public string? AppVersion { get; init; }
+    public string? ReleaseChannel { get; init; }
+    public string? OsVersion { get; init; }
     public string? Key { get; init; }
     public string? Host { get; init; }
     public string? ClientId { get; init; }
@@ -20,6 +24,7 @@ public sealed record Command
     public string? Thresholds { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public bool? ShowPeriodEstimate { get; init; }
+    public bool Confirm { get; init; }
     public decimal? CustomBudgetUsd { get; init; }
     public bool UpdateCustomBudget { get; init; }
     public FormInput? Form { get; init; }

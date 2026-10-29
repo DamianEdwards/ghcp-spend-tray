@@ -20,6 +20,7 @@ public sealed class MonitorService : IAsyncDisposable
 
     public event Action<AccountState>? StateChanged;
     public event Action<string>? DiagnosticReported;
+    public event Action<AccountState>? RefreshCompleted;
 
     public MonitorService(ICopilotUsageProvider provider, JsonStore store, AlertService alerts,
         AppSettings settings, TimeProvider? timeProvider = null, int maxConcurrency = 3)
@@ -211,6 +212,7 @@ public sealed class MonitorService : IAsyncDisposable
 
     private async Task RefreshEntryAsync(Entry entry)
     {
+        using var activity = AppInstrumentation.Activities.StartActivity("account.refresh");
         CancellationToken removed = entry.Cancellation.Token;
         bool entered = false;
         try
@@ -306,6 +308,11 @@ public sealed class MonitorService : IAsyncDisposable
         }
         finally
         {
+            if (entered && !removed.IsCancellationRequested)
+            {
+                try { RefreshCompleted?.Invoke(CopyState(entry.State)); }
+                catch (Exception) { ReportDiagnostic("A refresh observer failed; monitoring continues."); }
+            }
             if (entered) _parallelism.Release();
             Wake();
         }
