@@ -3,498 +3,187 @@
 [![Install from the Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Install-0078D4?logo=microsoftstore&logoColor=white)](https://www.microsoft.com/store/productId/9PMX96TSF295)
 [![Download for macOS](https://img.shields.io/badge/macOS-Download-000000?logo=apple&logoColor=white)](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos)
 
-GHCPSpendTray is an independent Windows 11 tray and macOS menu-bar app for
-keeping an eye on GitHub Copilot AI-credit consumption. It shows per-account
-usage and limits and offers optional spending alerts without a browser tab
-or a hosted service.
+**Keep an eye on your GitHub Copilot usage without opening a browser.**
+See personal and work accounts from your Windows tray or Mac menu bar, set
+your own budgets, and spot when you're on course to go over them.
 
-[Install from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295)
-&middot; [Download the latest macOS release](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos)
-&middot; [All releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases)
-&middot; [Report an issue](https://github.com/DamianEdwards/ghcp-spend-tray/issues)
-
-Both apps share their C# domain and application logic, compiled with .NET 10
-Native AOT. Windows uses WinUI 3 and
-[Microsoft UI Reactor](https://microsoft.github.io/microsoft-ui-reactor/main/);
-macOS uses native SwiftUI and AppKit.
-It does not require a separate .NET runtime, `gh`, WebView, or backend service.
+[Install](#install) &middot; [Add accounts](#add-your-accounts) &middot;
+[Set budgets](#set-your-own-budget) &middot; [Read your usage](#understand-your-usage-at-a-glance) &middot;
+[Updates](#keep-the-app-up-to-date)
 
 <p>
-  <img src="docs/images/windows-flyout.png" alt="GHCPSpendTray Windows tray flyout showing synthetic demo accounts and usage" width="310" align="top">
-  <img src="docs/images/macos-popup.png" alt="GHCPSpendTray macOS menu-bar popup showing synthetic demo accounts and usage" width="412" align="top">
+  <img src="docs/images/user-guide/windows-flyout.png" alt="Windows tray popup with actual usage, a custom budget, an end-of-period estimate, and a daily chart" width="310" align="top">
+  <img src="docs/images/macos-popup.png" alt="macOS menu-bar popup showing personal github.com and work ghe.com accounts" width="340" align="top">
 </p>
 
-## Features
-
-- A tray flyout with per-account consumption and limit meters.
-  With one account, its card is the summary; the aggregate total appears only
-  with multiple accounts, leaving room for the daily chart.
-  **Details** opens that account's panel on Usage; account preferences remain
-  available through **Manage account**.
-- Configurable pie-chart or percentage tray icons: one weighted roll-up by
-  default, or one icon per selected account.
-- Multiple accounts, including different identities on the same GitHub host.
-- Account avatars in the flyout and account settings when available, with
-  initials when an image cannot be shown.
-- Configurable refresh intervals and percentage or per-account USD-increment
-  notifications.
-- Local history and settings, with OAuth tokens in Windows Credential Manager
-  or the macOS login Keychain.
-- Opt-in launch at login on either platform.
-- Optional corporate daily-consumption charts for eligible Microsoft enterprise
-  accounts, using Azure CLI authentication and explicit corporate-identity confirmation.
+*App screenshots use synthetic accounts and amounts. Settings screenshots below
+are from Windows unless labeled otherwise; the same core settings are available on Mac.*
 
 ## Install
 
-### Windows
+### Windows: Microsoft Store (recommended)
 
-Requires Windows 11 22H2 (build 22621) or newer on x64 or ARM64.
+1. [Get GHCPSpendTray from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295).
+2. Launch it from **Start**.
+3. Click its notification-area icon to open your usage; the gear opens **Settings**.
 
-Install [GHCPSpendTray from the Microsoft Store](https://www.microsoft.com/store/productId/9PMX96TSF295),
-then start it from the Start menu. It stays in the notification area.
+Requires **Windows 11 22H2 or newer**, x64 or ARM64. No separate .NET runtime is
+needed. Can't use the Store? See [standalone installation](docs/WINDOWS-INSTALL.md).
 
-Store-installed copies automatically check for updates. Click an update
-notification to open **Settings > About**, then select **Update** to install
-and restart the app. If no update is available, About shows that you're running
-the latest version.
+<img src="docs/images/user-guide/windows-install.png" alt="GHCPSpendTray's Microsoft Store listing with the Install button" width="610">
 
-Alternatively, download `GHCPSpendTray-<version>.msixbundle` from
-[GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases),
-open the signed bundle in Windows App Installer, and select **Install**.
-The bundle contains both architectures; the symbols archive is for debugging,
-not installation. Do not bypass Windows trust or organization-policy warnings.
+### macOS: download and drag to Applications
 
-To update a GitHub-installed copy, exit the app from its tray menu and install a
-newer signed bundle from Releases. GitHub-distributed builds do not check for
-updates automatically. An update with the same package identity preserves
-settings and history. The Microsoft Store package has a separate identity and
-is **not** an in-place upgrade from the GitHub package.
+1. Open the [macOS releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos)
+   and download `GHCPSpendTray-macOS-<version>.dmg`.
+2. Open the disk image and drag **GHCPSpendTray** to **Applications**.
+3. Launch it and click its menu-bar icon. It doesn't keep a Dock icon.
+
+Requires **Apple silicon** and the latest patches of **macOS 26 or 15**.
+Use signed, notarized public releases; don't bypass macOS security warnings.
+
+<img src="docs/images/user-guide/macos-download.png" alt="macOS release assets: choose the GHCPSpendTray-macOS-version.dmg download, not the source archives; version shown is an example" width="500">
+
+## Add your accounts
+
+Open **Settings > Accounts > Add account**. Repeat to track both personal and
+work identities, including multiple accounts on the same host.
+
+### GitHub.com
+
+A sign-in code is generated and copied automatically. Choose **Open browser**
+(**Open Authorization Page** on Mac), paste the code on GitHub, and authorize
+the app. Return here: your account is added automatically.
+
+<img src="docs/images/user-guide/sign-in.png" alt="GitHub.com sign-in with a nonworking DEMO-CODE, Open browser, Copy code, and Change host controls" width="490">
+
+### Work accounts on a custom `ghe.com` host
+
+Choose **Change host**, select **Custom...**, and enter your organization's
+hostname, such as `example.ghe.com`. Check the displayed sign-in and API
+destinations, then choose **Start sign-in**.
+
+`msft.ghe.com` has a built-in OAuth registration. Other custom hosts need an
+approved, host-specific **OAuth Client ID** with Device Flow enabled.
+Your administrator may need to approve access.
+[More about enterprise sign-in](docs/USER-GUIDE.md#enterprise-sign-in).
+
+<img src="docs/images/user-guide/custom-host.png" alt="Custom host setup with example.ghe.com, an OAuth Client ID field, destination URLs, and Start sign-in" width="490">
+
+## Set your own budget
+
+Want to track against $100 rather than the limit GitHub reports?
+
+1. Open **Settings > Accounts**, then **Manage** (**Manage account** on Mac).
+2. Under **Usage budget**, choose **Use a custom budget** and enter a USD amount.
+3. Choose **Save account** (**Save** on Mac).
+
+<img src="docs/images/user-guide/custom-budget.png" alt="Usage budget set to a custom $100 target, previewing $40.25 consumed as 40 percent" width="610">
+
+Your budget drives the usage percentage, tray icon, estimated excess, and
+percentage alerts for that account. **It's a tracking target, not a spending
+cap**: it doesn't change your GitHub quota or stop consumption. Choose the API
+limit option and save to remove the override.
+
+## Enable end-of-period estimates
+
+In the same account settings, enable **Show estimated period consumption** and
+save. It's off by default and is enabled separately for each account.
+
+<img src="docs/images/user-guide/enable-estimate.png" alt="Show estimated period consumption enabled in account preferences" width="490">
+
+The **solid line and "used" amount are actual usage**. The **dashed extension
+and "est. total" amount are the forecast** at reset, assuming your usage pace
+continues. The target on the right is labeled **budget** or **API limit**.
+Estimates don't change actual usage or trigger forecast-based alerts.
+
+## Understand your usage at a glance
+
+The same meter appears in the popup, Usage page, and account details. These
+examples all have a $100 target; click an image for a closer look.
+
+| Actual usage | Estimates off | Estimates on |
+|---|---|---|
+| **Under target: below 95%.** No actual-usage warning. | <img src="docs/images/user-guide/usage-under.png" alt="Under budget without estimates: $40.25 used, 40 percent of a $100 budget, solid line only" width="360"> | <img src="docs/images/user-guide/usage-under-estimate.png" alt="Under budget with estimates: $40.25 used and a blue dashed extension to approximately $75" width="360"> |
+| **Near target: 95% to below 100%.** Warning icon beside the used amount. | <img src="docs/images/user-guide/usage-near.png" alt="Near the API limit without estimates: warning icon beside $96 used, 96 percent of $100" width="360"> | <img src="docs/images/user-guide/usage-near-estimate.png" alt="Near the API limit with estimates: $96 actually used and a red forecast of approximately $130" width="360"> |
+| **At or over target: 100% or more.** Error icon; the full amount remains visible even though the marker stops at the end. | <img src="docs/images/user-guide/usage-over.png" alt="Over budget without estimates: error icon beside $110.50 used, 111 percent of a $100 budget" width="360"> | <img src="docs/images/user-guide/usage-over-estimate.png" alt="Over budget with estimates: $110.50 used, approximately $160 forecast, and about $60 estimated excess" width="360"> |
+
+**A risky forecast doesn't mean you've already overspent.** Its dashed line
+has its own status: accent below 95%, amber from 95% to below 100%, and red at
+100% or more. Notice the absence of an actual-usage warning in both examples:
+
+| Still under budget, forecast near budget | Still under budget, forecast over budget |
+|---|---|
+| <img src="docs/images/user-guide/forecast-near.png" alt="Only $65.50 actually used, but the amber dashed forecast reaches approximately $97 of a $100 budget" width="420"> | <img src="docs/images/user-guide/forecast-over.png" alt="Only $70 actually used, but the red dashed forecast reaches approximately $125 and shows estimated excess" width="420"> |
+
+Estimates need enough valid current-period data; **unavailable isn't zero**.
+Unlimited accounts have no percentage target unless you set a custom budget.
+[See unavailable/unlimited examples and how estimates work](docs/USER-GUIDE.md#estimates-and-unavailable-data).
+
+## Get alerts before you lose track
+
+Open **Settings > Notifications** to enable alerts and save your choices.
+The default percentage thresholds are **50%, 80%, and 100%**. Set a USD
+increment, such as `50`, for alerts at $50, $100, $150, and so on.
+Account settings can override the defaults.
+
+<img src="docs/images/user-guide/notifications.png" alt="Notification preferences with percentage thresholds, USD spending increments, and a test notification button" width="490">
+
+Alerts follow **actual usage**, not forecasts. On Mac, use **Enable
+Notifications** to grant permission; Focus or Do Not Disturb can suppress
+delivery on either platform.
+
+## Keep the app up to date
+
+### Windows (Microsoft Store)
+
+Store copies check automatically. To check now, open **Settings > About**.
+When an update is available, choose **Update**, approve the Windows prompt,
+and let the app install and restart. If **Restart** appears, select it to finish.
+An update notification also takes you directly to About.
+
+| Ready to update | Downloading and applying |
+|---|---|
+| <img src="docs/images/user-guide/updates-available.png" alt="About page showing an available Microsoft Store update and the Update button" width="360"> | <img src="docs/images/user-guide/updates-progress.png" alt="About page showing a Store update download at 45 percent, with progress and a disabled Update button" width="360"> |
 
 ### macOS
 
-Supports **macOS 26 and macOS 15**, on their latest patch releases, on
-**Apple silicon only** (M-series Macs, arm64). Intel Macs are not supported
-by current builds. Previously published universal releases are historical
-artifacts and are not changed by this policy. We maintain a two-major-version
-support window and advance it when adopting a new stable macOS major release.
-macOS 14 Sonoma is no longer supported. Download
-`GHCPSpendTray-macOS-<version>.dmg` from a **macOS** release on
-[GitHub Releases](https://github.com/DamianEdwards/ghcp-spend-tray/releases?q=macos).
-Open the disk image, drag **GHCPSpendTray** to **Applications**, then launch it.
-The app lives in the menu bar, without a persistent Dock icon.
-Public macOS releases must be Developer ID signed and Apple notarized; do not
-bypass Gatekeeper or your organization's security policy. CI development
-artifacts are not public releases.
-
-Click the menu-bar icon to see consumption; secondary-click for **Open**,
-**Refresh Now**, **Settings**, and **Quit**. Settings has the same **Usage**,
-**Accounts**, **General**, **Notifications**, and **About** sections as Windows.
-With no accounts connected, the popup shows an **Add Account** prompt instead
-of unavailable totals, diagnostics, or refresh controls.
-Use **General > Launch at login** to opt in; macOS may require approval in
-**System Settings > General > Login Items**. Notifications also require macOS
-permission and can be suppressed by Focus.
-
-**Notifications > macOS Permission** shows whether notifications are allowed.
-Use **Enable Notifications** to request access at a time you choose. If access
-was previously denied, **Open Notification Settings** takes you to the macOS
-controls; enable **Allow Notifications** there and return to the app. The status
-refreshes automatically. Quiet delivery is identified separately from banners.
-Background refreshes never open permission prompts or System Settings.
-
-In **General > Menu Bar**, choose a pie or percentage, a single weighted roll-up
-or one icon per selected account, and the accounts to include. The live preview
-uses the shared limit rules; only **Save** applies it to the menu bar.
-The monochrome template graphics adapt to macOS light/dark menu-bar appearance.
-Per-account icons open account settings. If macOS hides icons on a crowded
-menu bar, reopening GHCPSpendTray brings its settings window forward.
-
-Public builds use [Sparkle](https://sparkle-project.org/) for in-app updates.
 Choose **Check for Updates...** from the menu-bar context menu or **Settings >
-About**. Sparkle asks permission to check automatically; automatic downloads
-and installation on quit are optional. An available update appears in the
-popup, and a downloaded update offers **Install and Relaunch...** without
-waiting for you to quit the app. Stable releases are the only automatic update
-channel, including for preview builds. Development and demonstration builds
-never check for updates. Older releases without Sparkle need one final manual
-upgrade: quit the app and replace it in Applications.
+About**. In About, enable **Automatically check for updates** if you'd like
+daily checks. **Automatically download and install updates on quit** is
+optional; closing Settings isn't quitting the app. A downloaded update offers
+**Install and Relaunch...** to apply it immediately. Automatic updates use
+stable releases, including when you're running a preview.
 
-The stable bundle identifier preserves access to local settings, history,
-and Keychain credentials. Windows (`v*`) and macOS
-(`macos-v*`) releases have independent versions; neither platform upgrades or
-migrates the other's local data. The Mac app does not use the App Store.
+Standalone Windows installs need a manual update:
+[installation and update instructions](docs/WINDOWS-INSTALL.md#update-a-standalone-install).
 
-Maintainers publish either or both platforms through **Actions > Release**.
-Each platform has `no release`, `Major`, `Minor`, or `Patch` choices (default
-`Minor`), calculated from its latest stable release. With none, the baseline
-is `0.0.0`, making the default first release `0.1.0`.
-See [release setup and retry rules](docs/RELEASING.md).
+## Make it work your way
 
-To preview unlimited quota on Windows without accessing real accounts, run a
-development build with an isolated data directory:
+In **Settings > General**, choose a pie-chart or percentage icon, a combined
+roll-up or individual account icons, and which accounts to include. Check the
+**Live preview**, then save. The combined percentage is weighted by each
+account's budget or limit, not a simple average.
 
-```powershell
-.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-unlimited --portable --data-dir C:\Temp\ghcp-unlimited-preview
-```
+<img src="docs/images/user-guide/tray-preview.png" alt="Live preview of the combined tray icon and percentage using the selected accounts" width="610">
 
-This starts one synthetic unlimited account, disables authentication and
-notifications, and keeps sample settings in memory.
+You can also enable **Start with Windows** (**Launch at login** on Mac) and change the refresh interval
+(10 minutes by default). [More settings, icon meanings, and daily charts](docs/USER-GUIDE.md).
 
-To review usage-track states together, use `--demo-usage-states` instead:
+## Help, privacy, and contributing
 
-```powershell
-.\artifacts\publish\win-x64\GHCPSpendTray.exe --demo-usage-states --portable --data-dir C:\Temp\ghcp-usage-states-preview
-```
+Usage is the USD value of Copilot AI credits consumed, **not an invoice**.
+The consumption API is undocumented and may be unavailable on some hosts.
+Stale or unsupported data is marked unavailable rather than shown as zero.
 
-Eight labeled sample accounts show under/near/over-budget forecasts, near/over
-actual usage, an estimate switched off, an unavailable estimate, and unlimited
-allocation. They include custom budgets, API limits, daily charts, and connected
-daily usage without reports. Forecast amounts are fixed synthetic examples for
-visual review, not live projections. Refresh and preference changes remain
-isolated and in memory; the ordinary two-account demo is unchanged.
+Settings and history stay local; tokens are kept in Windows Credential Manager
+or macOS Keychain. See the [privacy policy](PRIVACY.md), [troubleshooting and
+removal guide](docs/USER-GUIDE.md#troubleshooting), or
+[report an issue](https://github.com/DamianEdwards/ghcp-spend-tray/issues)
+without sharing tokens or private usage data.
 
-## Connect an account
+For source builds and synthetic demos, see [development](docs/DEVELOPMENT.md).
+[Validation](docs/VALIDATION.md) and [releasing](docs/RELEASING.md) cover
+maintainer workflows.
 
-1. Open the tray flyout and choose the connect button, or open
-   **Settings > Accounts > Add account**.
-2. A github.com sign-in code is generated immediately and copied to the clipboard.
-   Select **Open browser** (**Open Authorization Page** on Mac), paste the code
-   on GitHub, and authorize GHCPSpendTray.
-   Check the account and OAuth app shown on GitHub before approving. If copying
-   failed, use **Copy code** to retry or select and copy the displayed code yourself.
-3. Return to GHCPSpendTray. The account is verified and saved automatically after
-   browser authorization; a success message appears when setup finishes. There is no
-   additional in-app confirmation.
-
-The code panel identifies the active host above the code instructions, with
-**Change host** beside it. For an enterprise account, select it to cancel the github.com attempt,
-choose the host and its OAuth Client ID, check the displayed destinations, then
-select **Start sign-in**. New Add account actions always start with github.com.
-**Reconnect** starts immediately using the account's original host and registration;
-a different browser identity is rejected rather than overwriting that account.
-**Cancel sign-in** stops the current attempt, and **Try again** generates a new code.
-Sign-in failures are reported in the UI and diagnostic logs without logging
-device codes, tokens, or server response bodies. Clipboard failures are visible
-and can be retried without restarting sign-in.
-
-The app has built-in public OAuth registrations for `github.com` and
-`msft.ghe.com`; it does not use `gh` credentials or ask for a client secret.
-For another enterprise host, create an approved host-specific OAuth app with
-Device Flow enabled and enter its Client ID during onboarding. The ID is
-stored with that account and used for reconnect and token refresh; existing
-accounts on built-in hosts retain their registrations. Enterprise SSO,
-managed-user, IP, and application policies may require administrator approval. Successfully
-signing in to a host does not establish that its Copilot consumption API
-is available.
-
-The app downloads and caches avatars in its local data directory at sign-in,
-so signed image links can expire without making the picture disappear. The
-**Refresh** button on an account's management page fetches a new avatar as
-well as consumption. Existing accounts without a cached image can use that
-button to populate it; initials appear when no image is available.
-Removing an account also removes its cached image.
-
-GHCPSpendTray currently requests `read:user` for identity and optionally
-`offline_access` for refresh tokens where supported. Consumption comes from
-an **undocumented GitHub endpoint** that may change or be unavailable on some
-hosts; the minimum OAuth scope for it has not been established. The app reports
-unavailable data rather than treating it as zero. See
-[validation and known limitations](docs/VALIDATION.md).
-
-## Use and notifications
-
-On Windows, left-click the tray icon to toggle the flyout immediately. Open
-**Settings > Usage** with the flyout's gear or the right-click **Settings** action.
-There is no double-click shortcut; rapid clicks remain ordinary selections.
-The popup uses a compact total and footer so the first account's usage, daily
-chart, and **Details** action fit together. With multiple accounts and
-daily data for the first account, it allows up to 640 DIPs of height, bounded by
-the monitor work area, and adapts when daily data arrives. Later accounts remain
-scrollable; smaller work areas can still require scrolling.
-Right-click the icon for **Open**,
-**Refresh now**, **Settings**, and **Exit**. Settings opens on **Usage**, with the
-current total, per-account consumption and diagnostics, availability status,
-and a manual refresh action. With no accounts connected, Usage instead shows a
-simple **Add account** prompt without empty totals, diagnostics, or refresh controls.
-**Accounts** manages connections and
-per-account preferences; **General** and **Notifications** configure refresh
-and alerts. **About** shows the running app's version, including preview labels.
-The default refresh interval
-is 10 minutes (configurable from 5 to 1440), and the default limit alerts
-are 50%, 80%, and 100%.
-
-Open **Settings > Accounts > Manage > Usage budget** (or **Manage account** on macOS) to choose
-**Use a custom budget** and enter a positive USD amount (up to two decimal
-places). **Save account** (**Save** on macOS) applies it to that account's usage percentage, tray
-icon, estimated excess, and percentage alerts. The draft shows a preview before
-saving. Budgets follow the API billing period (or the calendar-month fallback);
-they are tracking targets, not spending caps or changes to your GitHub quota.
-Displayed usage percentages round to whole numbers. Custom budgets omit `.00`
-but retain nonzero cents; observed consumption amounts keep their cents.
-The API limit remains available in **Advanced details**. Select **Use API
-limit** and save to remove the override. Accounts without overrides behave
-as before. Changing the budget rearms
-percentage alerts for the new target on the next successful refresh, without
-repeating already-notified dollar milestones.
-Invalid settings inputs are outlined in red with a message immediately
-below the field and a reminder beside Save. Correcting a value clears its error;
-invalid drafts are never saved.
-Account, General, and Notifications forms keep **Save** and **Cancel**
-visible in a fixed footer, with an **Unsaved changes** indicator. Cancel restores
-the saved values. Leaving a changed form with Back, switching pages or accounts,
-closing Settings, or quitting prompts **Save**, **Discard**, or **Keep editing**.
-Failed or invalid saves retain the draft and keep the form open.
-On macOS the same native sheet protects Add/Reconnect and account links from the
-menu bar or notifications. Background refreshes do not replace dirty preferences;
-logout, restart, and shutdown do not wait for an interactive draft decision.
-
-In Windows **Settings > General > System tray** (Mac: **General > Menu Bar**), choose **Pie chart** or **Percentage
-number**, one roll-up or per-account icons, and the connected accounts to include.
-Choose **Save changes** to apply and persist the preferences. By default all
-accounts, including newly connected accounts, contribute to a single pie.
-The **Live preview** updates immediately as you change the draft style, icon mode,
-or included accounts. It uses current usage and the same native-size pixels as
-the real icons, with labels identifying each account. Previewing does not change
-the notification area or save anything; a failed save leaves the existing tray
-configuration unchanged. Freshness and availability updates also reach the preview.
-Per-account icons open their account details on click; **Open GHCPSpendTray**
-in any icon's context menu still opens the flyout. Double-click, keyboard access,
-refresh, Settings, notifications and Exit remain available. If no accounts are
-selected or connected, a neutral access icon remains.
-
-The roll-up percentage is **eligible consumption divided by the same accounts'
-eligible limit (or custom budget)**, not an average of account percentages. Only valid, fresh,
-current-period observations with known, finite positive limits qualify.
-Stale, failed, unsupported, unknown/zero-limit and unlimited accounts are
-excluded from both sides unless a custom budget supplies a finite positive
-target. A budget never makes stale or unavailable consumption eligible.
-A warning badge marks a partial roll-up: an amber triangle on Windows, or `!`
-on macOS. Windows High Contrast uses a system-colored triangle instead of amber.
-The warning identifies incomplete account coverage, not a projected budget
-overrun. `?` means no percentage is
-available, not zero. Fresh unlimited accounts show an infinity sign in either
-icon style, with an **Unlimited** tooltip. A roll-up shows infinity
-when its usable accounts are all unlimited; unavailable accounts still cause a
-partial warning badge. Mixed finite/unlimited roll-ups retain the finite accounts'
-weighted percentage and identify unlimited accounts in the details. Stale or
-failed unlimited observations remain unavailable, never infinity.
-On macOS, an unavailable pie stays an empty outline with
-an `!` badge; percentage mode still shows `?`. The badged empty pie does not
-mean 0% usage. Hover for the percentage and included/selected counts;
-**Settings > Usage** lists every selected account and its inclusion or exclusion
-reason. These preferences do not filter or change the existing dollar totals.
-
-Numbers are rounded to whole percentages, with `<1` below 1% and `999+` above
-999%. Numbers use native font glyphs rather than a pixel font; the percentage
-unit is shown in the tooltip and preview label instead of a tiny extra glyph.
-Both styles are antialiased at the taskbar's pixel size on a transparent canvas.
-The settings preview places them on a taskbar-colored swatch so they remain
-readable when the app and taskbar themes differ.
-Pies fill to 100%; a `+` on either style marks over-limit usage. Tooltips show the
-uncapped percentage rounded to a whole number and label over-limit usage.
-Rounding affects display only, not usage calculations or alert thresholds.
-Eligibility is reevaluated at least every
-minute and on refresh/resume, including billing rollover. Windows controls
-notification-area overflow and icon visibility; the app cannot force icons to
-remain unhidden.
-
-In **Settings > Notifications**, you can also set a USD increment (for example,
-`50` for alerts at $50, $100, and so on). An account can inherit that value,
-override it, or disable it. Unknown limits or unlimited accounts can still use
-dollar alerts, but not percentage alerts. Windows may suppress a notification
-even when the app submits it.
-
-Displayed USD consumption is `credits_used / 100` from GitHub's token-billing
-usage data. It is **not** an invoice, a finance budget, or total spend across all
-GitHub products. Stale or partial observations are identified; previous billing
-periods are not counted as current spend. GitHub's usage snapshot does not
-provide a verified per-day consumption breakdown, so the app does not chart
-daily usage from its locally sampled refreshes.
-
-On either platform, **Settings > Accounts > select an account > Show estimated
-period consumption** enables an optional end-of-period forecast in that
-account's tray flyout/menu-bar popup, Usage summary, and details. It is off by
-default; choose **Save account** on Windows or **Save** on macOS to apply it.
-For a finite custom budget (or API limit), a dashed segment continues the
-solid actual-usage line to the forecast endpoint. A callout beneath
-the endpoint stacks the approximate whole-dollar amount above a smaller
-**est. total** subtitle, centered on the marker and kept within panel bounds.
-Forecast dashes are three times as long as their gaps. The dashed segment and
-marker use the accent color below 95% of the target, amber at
-95% to below 100%, and red at 100% or above. The track remains fixed at 100%:
-over-target forecasts pin the marker to the right edge and show the full amount
-and projected percentage in the callout. The label stays inside the account
-panel on resize, separate from the actual-usage label.
-The estimated amount uses normal theme text; its slightly larger subtitle
-and projected percentage use secondary theme text rather than the accent or
-risk colors. This keeps small text readable while the line and icons carry
-the status colors.
-
-The exact current amount moves with its solid-line endpoint in a larger neutral
-callout above the line, labeled **used**, rather than being repeated in the
-account header. A warning icon marks actual usage at 95% to below 100% of the
-tracking target; an error icon marks 100% or above. These icons reflect actual
-usage, not the forecast. Current and projected labels are clamped within panel
-bounds; above-target amounts retain their full values while their markers stay
-at 100%. Accounts with no finite target keep their existing amount display.
-
-A fixed column immediately after the line shows the tracking target, with a
-medium-sized amount above a centered **budget** or **API limit** label. Tooltips
-identify user-set targets as **custom budget**. Whole-dollar
-targets omit redundant cents; fractional targets retain two decimal places.
-The percentage caption is simply **% used** rather than repeating that amount.
-The fixed column has its own space: the solid/dashed track is scaled to the
-remaining width, and both moving callouts stay inside that track area.
-
-The early/reset/method context remains below the usage line. Unknown or
-unlimited targets and unavailable forecasts keep the text-only presentation.
-The setting remains opt-in. There is no combined forecast, forecast-based alert,
-or change to actual usage calculations or tray/menu-bar icons.
-
-Accounts rows use the same shaded panels as Usage and show an explicit
-**Manage account** action; clicking anywhere in the card opens that account's
-settings. Clicking the menu-bar icon gives the popup keyboard focus and
-normal active control colors. On Usage and account details,
-click anywhere across the **Advanced Details** heading to expand or collapse
-the diagnostics, not just the disclosure arrow.
-
-When suitable daily reports are available for the same account and enterprises,
-the estimate uses the latest seven consecutive complete reported UTC days.
-Early in the month it uses fewer complete days if the reporting period contains
-fewer than seven. Today's partial usage and derived/estimated chart bars are
-never used in that average. The forecast is **current period usage + recent
-daily average multiplied by the exact time remaining until reset**; it does not
-apply the recent pace retroactively to usage already incurred.
-
-The averaging window must end within three UTC dates of the current usage
-observation. Missing days in that window, stale reports, incompatible periods,
-incomplete enterprise scope, or daily totals exceeding the current usage cause a
-fallback to the existing period-to-date calculation. Accounts without daily
-reports always use that existing calculation, unchanged. The compact forecast
-identifies recent reported-day estimates; Advanced Details shows their actual
-date range and calculation method. Both approaches assume the selected pace
-continues and are not an invoice. A supplied reset must match the next first
-of the month at midnight UTC; a missing reset uses the calendar-month
-fallback. Estimates remain unavailable for the first 24 hours, are labeled
-early before 72 hours, and show a reason when data is stale, failed, expired,
-or inconsistent with that period. Estimates are rounded to whole USD
-(`<$1` for small nonzero values); actual consumption retains cents.
-An unknown limit or unlimited account still allows a dollar forecast without an
-over-limit comparison. Advanced Details explains the method and shows
-the average per day, period boundaries, and observation time. On Windows these
-fields are in the existing **Advanced information** disclosure on Usage and
-**Advanced details** on account settings. Estimate boundaries explicitly use
-UTC; other account diagnostics retain their existing local-time formatting.
-
-## Privacy and removal
-
-GHCPSpendTray talks directly to your GitHub host over HTTPS. It does not send
-account data or diagnostic logs to a developer-operated backend. Settings and
-history are stored locally; access and refresh tokens are held in Windows
-Credential Manager or the macOS Keychain. Use **Settings > General > Open data folder** to find your
-local files. See the [privacy policy](PRIVACY.md) for retention and data handling.
-
-Before uninstalling, remove accounts in the app to delete their locally stored
-credentials. To revoke an OAuth grant, use **Manage OAuth grants** in account
-details or the host's application settings; removing an account or uninstalling
-does not necessarily revoke it. Then exit the app and uninstall through
-**Windows Settings > Apps > Installed apps**. Windows normally removes
-package-local data, but generic Credential Manager entries may remain.
-
-On macOS, disable **Launch at login**, remove accounts, quit the app, and move
-it from Applications to the Trash. Deleting the app does not delete
-`~/Library/Application Support/GHCPSpendTray` or its Keychain items. Remove
-that data directory separately if desired. If credentials remain, remove only
-the app's `com.damianedwards.GHCPSpendTray` service items in Keychain Access.
-
-If sign-in or consumption fails, check the displayed host destinations and
-error, your organization's policy, and the app's bounded `logs` directory in
-the data folder. Do not post tokens, device codes, unredacted configuration or
-history, or private consumption details in public issues.
-
-## Build and contribute
-
-### Windows development
-
-Install the .NET SDK pinned in [`global.json`](global.json), Visual Studio
-C++ build tools, the Windows SDK, and ARM64 native tools. From PowerShell:
-
-```powershell
-git clone https://github.com/DamianEdwards/ghcp-spend-tray.git
-Set-Location ghcp-spend-tray
-.\tools\verify.ps1
-.\tools\package.ps1
-```
-
-`verify.ps1 -NativeTests` also runs the test suites under executed x64 Native
-AOT. Run build and publish commands sequentially because they share
-intermediates. CI runs `-TestShard Application` and `-TestShard CorePlatformShared`
-on separate runners; together they retain all four harnesses and the full
-solution build. Omitting `-TestShard` still runs all checks locally.
-Self-contained and Store packaging also run independently, each publishing
-and validating both architectures and exercising populated/empty packaged x64
-startup. Local `package.ps1` output is an **unsigned development bundle**,
-not the signed public release. For isolated synthetic UI checks, see
-[`VALIDATION.md`](docs/VALIDATION.md); for release and signing details, see
-[`RELEASING.md`](docs/RELEASING.md).
-
-### macOS development
-
-Use an Apple-silicon Mac running a supported macOS version, with native arm64
-tools (not under Rosetta). Install the SDK pinned in `global.json` and stable
-Xcode Command Line Tools
-with Swift 6 (`xcode-select --install` if missing). A separate .NET macOS
-workload, MAUI, or Xcode project is not required. Python 3 is used by build and
-release checks. From the repository root:
-
-```bash
-bash tools/macos/verify.sh
-open artifacts/macos/GHCPSpendTray.app
-```
-
-Verification runs managed and native shared tests, builds an arm64-only
-app and Native AOT bridge, rejects Intel/universal binaries, exercises synthetic
-Keychain items, and launches populated
-and empty SwiftUI smoke scenarios. The Keychain test deletes its own uniquely
-named synthetic item; it never reads account credentials or enables login
-startup. The resulting app is ad-hoc signed for local development only.
-`bash tools/macos/build.sh` builds without running tests. If using a preview
-toolchain, select a stable SDK with `SDKROOT`; see [release documentation](docs/RELEASING.md).
-CI runs `verify.sh --shared-tests` and `verify.sh --app` on separate macOS 26 /
-Apple silicon runners. The app lane builds once and exercises native platform/UI
-tests; macOS 15 tests that exact artifact without rebuilding or waiting for the
-independent shared-test lane. Both lanes and the runtime check are required.
-Omitting the flag still runs complete local verification sequentially.
-
-To run an empty, isolated preview alongside an installed release:
-
-```bash
-preview_dir="$(mktemp -d -t ghcp-preview)"
-open -n artifacts/macos/GHCPSpendTray.app --args --demo-empty --data-dir "$preview_dir"
-```
-
-**Add Example Account** adds synthetic usage to the open popup so you can
-check its live resizing and position without signing in. The button appears
-only in sample mode, both before and after adding examples. Each click adds
-one account; examples last only for that process and are not saved. Use
-`--demo` instead of `--demo-empty` to start with the existing sample accounts,
-or `--demo-unlimited` for one synthetic account with unlimited allocation and
-an infinity menu-bar indicator. `--demo-usage-states` starts the eight-account
-usage and forecast showcase described above.
-All demo modes require a separate data directory and disable authentication,
-notifications, and launch-at-login changes; they do not access saved accounts
-or credentials.
-
-The Windows solution is [`GHCPSpendTray.slnx`](GHCPSpendTray.slnx).
-`Core` contains domain, HTTP, and storage code; `Application` contains the
-shared controller and view models; `App` contains Windows UI/platform
-integration; `MacBridge` exports the Native AOT C ABI, and `Mac` contains
-SwiftUI/AppKit UI and native services. Build platforms sequentially when using
-the same checkout. Use synthetic data in tests and issue reports.
-
-## License
-
-[MIT](LICENSE). Copyright (c) 2026 Damian Edwards.
-
-GHCPSpendTray is not affiliated with or endorsed by GitHub. Included .NET,
-Windows App SDK, and Reactor components retain their own applicable licenses.
+[MIT licensed](LICENSE). Independent project; not affiliated with or endorsed by GitHub.
