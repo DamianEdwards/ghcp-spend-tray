@@ -172,7 +172,7 @@ export default class GHCPSpendTrayExtension extends Extension {
         heading.add_child(identity);
         card.add_child(heading);
         if (account.actualUsage) {
-            const track = new St.Widget({style_class: 'ghcp-demo-track', height: account.forecast ? 88 : 64, x_expand: true,
+            const track = new St.Widget({style_class: 'ghcp-demo-track', height: account.forecast ? 110 : 76, x_expand: true,
                 accessible_name: account.forecast ? forecastText(account) :
                     `${account.name} current usage ${formatPercent(account.actualUsage.percent)}`});
             const baseline = new St.Widget({style_class: 'ghcp-demo-baseline', height: 4});
@@ -210,23 +210,35 @@ export default class GHCPSpendTrayExtension extends Extension {
             }
             const resize = () => {
                 const preferred = actor => actor.get_preferred_width(-1)[1];
+                const size = actor => {
+                    const width = preferred(actor);
+                    actor.set_width(width);
+                    return width;
+                };
+                const lineY = 52;
                 const targetWidth = Math.max(preferred(targetAmount), preferred(targetLabel));
                 const origin = 2;
-                const lineWidth = Math.max(0, track.width - targetWidth - 18);
+                const targetGap = 12;
+                const rightPadding = 4;
+                const lineWidth = Math.max(0, track.width - targetWidth - targetGap - rightPadding - origin);
                 const lineEnd = origin + lineWidth;
                 const actual = origin + lineWidth * account.actualUsage.fraction;
                 const place = (position, width) => Math.min(Math.max(0, lineEnd - width),
                     Math.max(0, position - width / 2));
-                baseline.set_position(origin, 42);
+                baseline.set_position(origin, lineY);
                 baseline.set_width(lineWidth);
-                fill.set_position(origin, 42);
+                fill.set_position(origin, lineY);
                 fill.set_width(Math.max(0, actual - origin));
-                currentMarker.set_position(Math.min(lineEnd, Math.max(origin, actual)), 34);
-                const currentWidth = preferred(currentAmount);
+                currentMarker.set_position(Math.min(lineEnd, Math.max(origin, actual)), lineY - 8);
+                const currentWidth = size(currentAmount);
+                const currentUsedWidth = size(currentUsed);
                 currentAmount.set_position(place(actual, currentWidth), 0);
-                currentUsed.set_position(place(actual, preferred(currentUsed)), 25);
-                targetAmount.set_position(track.width - preferred(targetAmount), 26);
-                targetLabel.set_position(track.width - targetWidth / 2 - preferred(targetLabel) / 2, 49);
+                currentUsed.set_position(place(actual, currentUsedWidth), 28);
+                const targetAmountWidth = size(targetAmount);
+                const targetLabelWidth = size(targetLabel);
+                const targetX = lineEnd + targetGap;
+                targetAmount.set_position(targetX + (targetWidth - targetAmountWidth) / 2, 18);
+                targetLabel.set_position(targetX + (targetWidth - targetLabelWidth) / 2, lineY + 7);
                 if (!account.forecast) return;
                 const end = origin + lineWidth * account.forecast.forecastFraction;
                 const available = Math.max(0, end - actual);
@@ -236,14 +248,15 @@ export default class GHCPSpendTrayExtension extends Extension {
                 projected.forEach((dash, index) => {
                     dash.visible = index < dashCount;
                     if (dash.visible) {
-                        dash.set_position(actual + index * (dashWidth + gap), 42);
+                        dash.set_position(actual + index * (dashWidth + gap), lineY);
                         dash.set_width(dashWidth);
                     }
                 });
-                forecastMarker.set_position(Math.min(lineEnd, Math.max(origin, end)), 38);
-                const estimateWidth = preferred(estimateAmount);
-                estimateAmount.set_position(place(end, estimateWidth), 58);
-                estimateLabel.set_position(place(end, preferred(estimateLabel)), 77);
+                forecastMarker.set_position(Math.min(lineEnd, Math.max(origin, end)), lineY - 4);
+                const estimateWidth = size(estimateAmount);
+                const estimateLabelWidth = size(estimateLabel);
+                estimateAmount.set_position(place(end, estimateWidth), 68);
+                estimateLabel.set_position(place(end, estimateLabelWidth), 88);
             };
             track.connect('notify::width', resize);
             card.add_child(track);
