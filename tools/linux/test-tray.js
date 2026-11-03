@@ -72,14 +72,14 @@ async function run() {
     check(pixbuf.width === 32 && pixbuf.height === 32 && pixbuf.has_alpha &&
         rgba.every((value, index) => value === pixels[2][Math.floor(index / 4) * 4 + (index % 4 + 1) % 4]),
         'Decoded frontend PNG is pixel-identical to the native tray pixmap');
-    check(initial.ToolTip[3].includes('34.2%') && initial.Status === 'Active', 'Tray tooltip uses the shared weighted total');
+    check(initial.ToolTip[3].includes('34%') && initial.Status === 'Active', 'Tray tooltip uses the shared weighted total');
     await execute({kind: 'settings', settings: {pollMinutes: 60, thresholds: '50, 80', notifications: false,
         startup: false, trayStyle: 'Percentage', trayMode: 'PerAccount'}});
     await waitFor(() => registrations.length === 3);
     const first = registrations[1];
     const numeric = await properties(first);
-    check(numeric.ToolTip[3].includes('105%') && numeric.ToolTip[3].includes('Over allocation'),
-        'Per-account indicators retain over-allocation qualifiers');
+    check(numeric.ToolTip[3].includes('105%') && numeric.ToolTip[3].includes('Over limit'),
+        'Per-account indicators retain over-limit qualifiers');
     check(JSON.stringify(numeric.IconPixmap) !== JSON.stringify(initial.IconPixmap), 'Percentage and pie render differently');
     const [exists] = await call(bus, 'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
         'NameHasOwner', new GLib.Variant('(s)', [rollup.owner]));
