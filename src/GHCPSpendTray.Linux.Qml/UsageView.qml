@@ -173,7 +173,7 @@ ScrollView {
                             }
                             Label {
                                 objectName: "target-caption"
-                                text: card.modelData.targetLabel === "custom budget" ? "budget" : card.modelData.targetLabel
+                                text: "budget"
                                 anchors.horizontalCenter: parent.horizontalCenter
                             }
                         }

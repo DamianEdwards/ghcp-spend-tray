@@ -162,7 +162,7 @@ TestCase {
         compare(findChild(card, "current-amount").text, "$26.25")
         compare(findChild(card, "current-caption").text, "used")
         compare(findChild(card, "target-amount").text, "$25")
-        compare(findChild(card, "target-caption").text, "API limit")
+        compare(findChild(card, "target-caption").text, "budget")
         compare(findChild(card, "forecast-amount").text, "$30")
         compare(findChild(card, "forecast-caption").text, "est. total")
         compare(findChild(card, "allocation-label").text, "105% used")

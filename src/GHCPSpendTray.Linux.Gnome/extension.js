@@ -184,8 +184,7 @@ export default class GHCPSpendTrayExtension extends Extension {
             const currentAmount = label(account.consumption, 'ghcp-demo-amount');
             const currentUsed = label('used', 'ghcp-demo-track-caption');
             const targetAmount = label(account.trackingTarget, 'ghcp-demo-target-amount');
-            const targetLabel = label(account.targetLabel === 'custom budget' ? 'budget' : account.targetLabel,
-                'ghcp-demo-track-caption');
+            const targetLabel = label('budget', 'ghcp-demo-track-caption');
             for (const child of [currentAmount, currentUsed, targetAmount, targetLabel]) track.add_child(child);
             const projected = [];
             let forecastMarker = null;
@@ -212,8 +211,9 @@ export default class GHCPSpendTrayExtension extends Extension {
                 const preferred = actor => actor.get_preferred_width(-1)[1];
                 const size = actor => {
                     const width = preferred(actor);
-                    actor.set_width(width);
-                    return width;
+                    const height = actor.get_preferred_height(width)[1];
+                    actor.set_size(width, height);
+                    return [width, height];
                 };
                 const lineY = 52;
                 const targetWidth = Math.max(preferred(targetAmount), preferred(targetLabel));
@@ -230,14 +230,15 @@ export default class GHCPSpendTrayExtension extends Extension {
                 fill.set_position(origin, lineY);
                 fill.set_width(Math.max(0, actual - origin));
                 currentMarker.set_position(Math.min(lineEnd, Math.max(origin, actual)), lineY - 8);
-                const currentWidth = size(currentAmount);
-                const currentUsedWidth = size(currentUsed);
+                const [currentWidth, currentHeight] = size(currentAmount);
+                const [currentUsedWidth] = size(currentUsed);
                 currentAmount.set_position(place(actual, currentWidth), 0);
-                currentUsed.set_position(place(actual, currentUsedWidth), 28);
-                const targetAmountWidth = size(targetAmount);
-                const targetLabelWidth = size(targetLabel);
+                currentUsed.set_position(place(actual, currentUsedWidth), currentHeight + 1);
+                const [targetAmountWidth, targetAmountHeight] = size(targetAmount);
+                const [targetLabelWidth] = size(targetLabel);
                 const targetX = lineEnd + targetGap;
-                targetAmount.set_position(targetX + (targetWidth - targetAmountWidth) / 2, 18);
+                targetAmount.set_position(targetX + (targetWidth - targetAmountWidth) / 2,
+                    lineY - targetAmountHeight - 3);
                 targetLabel.set_position(targetX + (targetWidth - targetLabelWidth) / 2, lineY + 7);
                 if (!account.forecast) return;
                 const end = origin + lineWidth * account.forecast.forecastFraction;
@@ -253,8 +254,8 @@ export default class GHCPSpendTrayExtension extends Extension {
                     }
                 });
                 forecastMarker.set_position(Math.min(lineEnd, Math.max(origin, end)), lineY - 4);
-                const estimateWidth = size(estimateAmount);
-                const estimateLabelWidth = size(estimateLabel);
+                const [estimateWidth] = size(estimateAmount);
+                const [estimateLabelWidth] = size(estimateLabel);
                 estimateAmount.set_position(place(end, estimateWidth), 68);
                 estimateLabel.set_position(place(end, estimateLabelWidth), 88);
             };
