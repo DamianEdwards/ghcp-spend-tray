@@ -15,6 +15,23 @@ function timestamp(value) {
     return value === null || (text(value) && Number.isFinite(Date.parse(value)));
 }
 
+function band(value) {
+    return ['Under', 'Near', 'Over'].includes(value);
+}
+
+function usagePosition(value) {
+    return value == null || (typeof value === 'object' &&
+        typeof value.fraction === 'number' && value.fraction >= 0 && value.fraction <= 1 &&
+        percent(value.percent) && band(value.band));
+}
+
+function forecast(value) {
+    return value == null || (typeof value === 'object' && percent(value.percent) && band(value.band) &&
+        typeof value.actualFraction === 'number' && value.actualFraction >= 0 && value.actualFraction <= 1 &&
+        typeof value.forecastFraction === 'number' && value.forecastFraction >= value.actualFraction &&
+        value.forecastFraction <= 1);
+}
+
 export function parseSnapshot(json) {
     requireValue(typeof json === 'string' && json.length <= 1024 * 1024, 'payload size');
     const value = JSON.parse(json);
@@ -33,6 +50,11 @@ export function parseSnapshot(json) {
             percent(account.spendIncrementUsd) && typeof account.showPeriodEstimate === 'boolean' &&
             (account.clientId === null || text(account.clientId)) &&
             (account.message === null || text(account.message)), 'account settings');
+        requireValue(usagePosition(account.actualUsage) && forecast(account.forecast) &&
+            (account.customBudgetUsd === undefined || percent(account.customBudgetUsd)) &&
+            (account.trackingTarget === undefined || text(account.trackingTarget)) &&
+            (account.targetLabel === undefined || ['API limit', 'custom budget'].includes(account.targetLabel)),
+        'account forecast');
         requireValue(account.key.length > 0 && !keys.has(account.key), 'duplicate or empty account key');
         keys.add(account.key);
     }
@@ -70,6 +92,16 @@ export function estimateText(estimate) {
         (estimate.overAllocationUsd > 0 ? ` (~${amount(estimate.overAllocationUsd)} over allocation)` : '') +
         (estimate.isEarly ? ' - Early estimate' : '') +
         '\nAverage pace so far this UTC calendar month; assumes the same pace continues. Not an invoice.';
+}
+
+export function forecastText(account) {
+    if (!account?.forecast || !account.periodEstimate) return '';
+    const status = account.forecast.band === 'Near' ? 'Near target' :
+        account.forecast.band === 'Over' ? 'At or over target' : 'Under target';
+    return `Estimated at reset: ~${amount(account.periodEstimate.estimatedConsumptionUsd)} ` +
+        `(${formatPercent(account.forecast.percent)} of ${account.targetLabel || 'target'}). ${status}.` +
+        (account.periodEstimate.isEarly ? ' Early estimate.' : '') +
+        ' Average pace so far this UTC calendar month; assumes the same pace continues. Not an invoice.';
 }
 
 export function diagnosticsText(account) {

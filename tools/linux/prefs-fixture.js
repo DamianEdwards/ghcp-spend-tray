@@ -18,6 +18,7 @@ const snapshot = {
     accounts: [{
         key: 'synthetic-account', name: 'Synthetic account', login: 'synthetic', host: 'github.com',
         displayName: '', thresholds: '', spendIncrementUsd: null, clientId: null, showPeriodEstimate: false,
+        customBudgetUsd: null,
     }],
     settings: {
         pollMinutes: 15, notifications: true, thresholds: '50, 80, 100', spendIncrementUsd: null,

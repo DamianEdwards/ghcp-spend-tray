@@ -49,6 +49,7 @@ ScrollView {
                 required property var modelData
                 readonly property bool detailsOpen: view.expandedKeys.indexOf(modelData.key) >= 0
                 Layout.fillWidth: true
+                Layout.maximumWidth: view.availableWidth
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
@@ -79,30 +80,83 @@ ScrollView {
                         }
                         Label { text: card.modelData.consumption; font.bold: true; font.pixelSize: 22 }
                     }
-                    ProgressBar {
-                        objectName: "allocation-progress"
-                        visible: card.modelData.percent !== null
-                        value: Math.min(100, card.modelData.percent || 0)
-                        from: 0
-                        to: 100
+                    Item {
+                        id: forecastTrack
+                        objectName: "forecast-track"
+                        visible: card.modelData.actualUsage !== null && card.modelData.actualUsage !== undefined
                         Layout.fillWidth: true
-                        Accessible.name: card.modelData.name + " allocation consumed"
+                        implicitHeight: 14
+                        clip: true
+                        Accessible.name: card.modelData.forecast ? Snapshot.forecastText(card.modelData) :
+                            card.modelData.name + " current usage " + Snapshot.formatPercent(card.modelData.actualUsage.percent)
+                        Rectangle {
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            height: 4; radius: 2; color: view.palette.mid
+                        }
+                        Rectangle {
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            height: 4; radius: 2; color: "#ff7a2f"
+                            width: parent.width * card.modelData.actualUsage.fraction
+                        }
+                        Item {
+                            visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
+                            x: parent.width * card.modelData.forecast.actualFraction
+                            width: parent.width * (card.modelData.forecast.forecastFraction - card.modelData.forecast.actualFraction)
+                            height: parent.height
+                            clip: true
+                            Row {
+                                anchors.fill: parent; spacing: 3
+                                Repeater {
+                                    model: Math.ceil(parent.width / 7)
+                                    Rectangle {
+                                        required property int index
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 4
+                                        height: 4; radius: 2
+                                        color: card.modelData.forecast.band === "Over" ? "#e01b24" :
+                                            card.modelData.forecast.band === "Near" ? "#e5a50a" : "#3584e4"
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            x: Math.min(parent.width - width,
+                                Math.max(0, parent.width * card.modelData.actualUsage.fraction - width / 2))
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 9; height: 9; radius: 5; color: "#ff7a2f"
+                        }
+                        Rectangle {
+                            visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
+                            x: Math.min(parent.width - width,
+                                Math.max(0, parent.width * card.modelData.forecast.forecastFraction - width / 2))
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 9; height: 9; radius: 5
+                            color: card.modelData.forecast && card.modelData.forecast.band === "Over" ? "#e01b24" :
+                                card.modelData.forecast && card.modelData.forecast.band === "Near" ? "#e5a50a" : "#3584e4"
+                        }
                     }
                     Label {
                         objectName: "allocation-label"
-                        text: card.modelData.percent === null ? "Allocation percentage unavailable" :
-                            card.modelData.percent + "% of " + card.modelData.allocation + " allocation"
+                        text: card.modelData.actualUsage === null || card.modelData.actualUsage === undefined ?
+                            "Tracking target unavailable" :
+                            Snapshot.formatPercent(card.modelData.actualUsage.percent) + " current of " +
+                            card.modelData.trackingTarget + " " + card.modelData.targetLabel
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
+                        Layout.maximumWidth: view.availableWidth - 32
                     }
                     Label {
-                        visible: card.modelData.periodEstimate !== null && card.modelData.periodEstimate !== undefined
-                        text: Snapshot.estimateText(card.modelData.periodEstimate)
+                        objectName: "forecast-label"
+                        visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
+                        text: Snapshot.forecastText(card.modelData)
                         textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true
+                        Layout.maximumWidth: view.availableWidth - 32
                     }
                     RowLayout {
                         Label {
-                            text: card.modelData.freshness + (card.modelData.percent > 100 ? " - Over allocation" : "")
+                            text: card.modelData.freshness +
+                                (card.modelData.actualUsage && card.modelData.actualUsage.band === "Over" ?
+                                    " - At or over " + card.modelData.targetLabel : "")
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }

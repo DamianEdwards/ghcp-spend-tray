@@ -29,7 +29,12 @@ TestCase {
                 key: "personal", name: "Personal", login: "synthetic", host: "github.com",
                 percent: 105, consumption: "$26.25", allocation: "$25.00",
                 freshness: "Current", updatedAt: null, displayName: "Personal", thresholds: "", spendIncrementUsd: null,
-                showPeriodEstimate: false, clientId: null, message: null
+                showPeriodEstimate: true, clientId: null, message: null, customBudgetUsd: null,
+                trackingTarget: "$25.00", targetLabel: "API limit",
+                actualUsage: {fraction: 1, percent: 105, band: "Over"},
+                forecast: {actualFraction: 1, forecastFraction: 1, percent: 120, band: "Over"},
+                periodEstimate: {estimatedConsumptionUsd: 30, averageDailyConsumptionUsd: 1,
+                    isEarly: false, unavailableReason: null}
             }]
         }
     }
@@ -70,9 +75,12 @@ TestCase {
         compare(findChild(manager, "device-code").text, "")
         manager.selectAccount(value.accounts[0])
         findChild(manager, "account-name").text = "Renamed"
+        findChild(manager, "custom-budget").text = "50"
         findChild(manager, "save-account").clicked()
         compare(JSON.parse(requests.signalArguments[1][1][0]).displayName, "Renamed")
         compare(JSON.parse(requests.signalArguments[1][1][0]).spendIncrementUsd, null)
+        compare(JSON.parse(requests.signalArguments[1][1][0]).customBudgetUsd, 50)
+        compare(JSON.parse(requests.signalArguments[1][1][0]).updateCustomBudget, true)
         manager.snapshot = {accounts: [], demo: false}
         compare(manager.selectedKey, "")
     }
@@ -101,6 +109,11 @@ TestCase {
         verify(rejected)
         value.version = 4
         value.demo = true
+        value.accounts[0].forecast.forecastFraction = 0.5
+        rejected = false
+        try { Snapshot.parseSnapshot(JSON.stringify(value)) } catch (error) { rejected = true }
+        verify(rejected)
+        value.accounts[0].forecast.forecastFraction = 1
         value.accounts.push(value.accounts[0])
         rejected = false
         try { Snapshot.parseSnapshot(JSON.stringify(value)) } catch (error) { rejected = true }
@@ -134,14 +147,25 @@ TestCase {
         const card = findChild(usage, "account-personal")
         verify(card !== null)
         verify(card.height > 100)
-        verify(card.width <= usage.width)
-        compare(findChild(card, "allocation-progress").value, 100)
+        verify(card.width <= usage.width, "card " + card.width + " usage " + usage.width)
+        verify(findChild(card, "forecast-track").visible)
         verify(findChild(card, "allocation-label").text.indexOf("105%") >= 0)
+        verify(findChild(card, "forecast-label").text.indexOf("~$30.00") >= 0)
         const details = findChild(card, "account-details")
         compare(details.visible, false)
         mouseClick(findChild(card, "details-button"))
         tryCompare(details, "visible", true)
         verify(details.text.indexOf("synthetic @ github.com") >= 0)
+        const near = sample()
+        near.accounts[0].forecast.band = "Near"
+        near.accounts[0].forecast.percent = 97
+        usage.snapshot = Snapshot.parseSnapshot(JSON.stringify(near))
+        verify(findChild(usage, "forecast-label").text.indexOf("Near target") >= 0)
+        const under = sample()
+        under.accounts[0].forecast.band = "Under"
+        under.accounts[0].forecast.percent = 80
+        usage.snapshot = Snapshot.parseSnapshot(JSON.stringify(under))
+        verify(findChild(usage, "forecast-label").text.indexOf("Under target") >= 0)
     }
 
     function test_unavailable_and_empty() {

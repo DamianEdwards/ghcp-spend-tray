@@ -116,7 +116,8 @@ public sealed class LinuxSession : IDisposable
             "remove" => MutateAsync(() => _controller.RemoveAsync(RequireKey(request))),
             "refresh" => MutateAsync(() => _controller.RefreshAccountAsync(RequireKey(request))),
             "save" => MutateAsync(() => _controller.SaveAccountAsync(RequireKey(request),
-                request.DisplayName ?? "", request.Thresholds ?? "", request.SpendIncrementUsd, request.ShowPeriodEstimate)),
+                request.DisplayName ?? "", request.Thresholds ?? "", request.SpendIncrementUsd, request.ShowPeriodEstimate,
+                request.CustomBudgetUsd, request.UpdateCustomBudget)),
             "settings" => MutateAsync(() => _controller.SaveSettingsAsync(request.Settings ??
                 throw new ArgumentException("Settings are required."))),
             "testNotification" => TestNotificationAsync(),

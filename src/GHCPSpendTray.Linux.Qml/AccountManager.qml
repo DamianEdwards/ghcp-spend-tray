@@ -27,6 +27,7 @@ ScrollView {
         displayName.text = account.displayName
         thresholds.text = account.thresholds
         spend.text = account.spendIncrementUsd === null ? "" : String(account.spendIncrementUsd)
+        budget.text = account.customBudgetUsd === null ? "" : String(account.customBudgetUsd)
         clientId.text = account.clientId || ""
         estimate.checked = account.showPeriodEstimate
         confirmRemoval.checked = false
@@ -126,6 +127,12 @@ ScrollView {
             TextField { id: displayName; objectName: "account-name"; placeholderText: "Display name"; Layout.fillWidth: true }
             TextField { id: thresholds; placeholderText: "Alert percentages (blank inherits)"; Layout.fillWidth: true }
             TextField { id: spend; placeholderText: "USD alert increment (blank inherits; 0 disables)"; Layout.fillWidth: true }
+            TextField {
+                id: budget
+                objectName: "custom-budget"
+                placeholderText: "Custom tracking budget (blank uses API limit)"
+                Layout.fillWidth: true
+            }
             CheckBox { id: estimate; objectName: "show-estimate"; text: "Show estimated period consumption" }
             Label {
                 text: "Average pace so far this UTC calendar month. Assumes the same pace continues; not an invoice."
@@ -141,9 +148,16 @@ ScrollView {
                             view.validation = "Enter a nonnegative USD amount or leave it blank."
                             return
                         }
+                        const customBudget = budget.text.trim() === "" ? null : Number(budget.text)
+                        if (customBudget !== null && (!Number.isFinite(customBudget) || customBudget <= 0 ||
+                                Math.abs(Math.round(customBudget * 100) - customBudget * 100) > 0.00000001)) {
+                            view.validation = "Custom budgets must be positive USD amounts with at most two decimal places."
+                            return
+                        }
                         view.validation = ""
                         view.execute({kind: "save", key: view.selectedKey, displayName: displayName.text,
-                            thresholds: thresholds.text, spendIncrementUsd: amount, showPeriodEstimate: estimate.checked})
+                            thresholds: thresholds.text, spendIncrementUsd: amount, showPeriodEstimate: estimate.checked,
+                            customBudgetUsd: customBudget, updateCustomBudget: true})
                     }
                 }
                 Button { text: "Refresh"; onClicked: view.execute({kind: "refresh", key: view.selectedKey}) }

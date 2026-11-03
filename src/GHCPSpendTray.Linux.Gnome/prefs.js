@@ -235,6 +235,7 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
         const renderAccounts = snapshot => {
             const signature = JSON.stringify(snapshot.accounts.map(a => [
                 a.key, a.name, a.displayName, a.thresholds, a.spendIncrementUsd, a.clientId, a.showPeriodEstimate,
+                a.customBudgetUsd,
             ]));
             if (signature === accountSignature) return;
             accountSignature = signature;
@@ -247,10 +248,12 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
                 const thresholds = new Adw.EntryRow({title: 'Alert percentages (blank inherits)', text: account.thresholds});
                 const spend = new Adw.EntryRow({title: 'USD alert increment (blank inherits; 0 disables)',
                     text: account.spendIncrementUsd === null ? '' : String(account.spendIncrementUsd)});
+                const budget = new Adw.EntryRow({title: 'Custom tracking budget (blank uses API limit)',
+                    text: account.customBudgetUsd === null ? '' : String(account.customBudgetUsd)});
                 const estimate = new Adw.SwitchRow({title: 'Show estimated period consumption',
                     subtitle: 'Average pace this UTC month; assumes the same pace continues, not an invoice.',
                     active: account.showPeriodEstimate});
-                for (const entry of [name, thresholds, spend, estimate]) row.add_row(entry);
+                for (const entry of [name, thresholds, spend, budget, estimate]) row.add_row(entry);
                 const actions = actionButtons();
                 const addAction = (label, callback) => {
                     const button = new Gtk.Button({label, valign: Gtk.Align.CENTER});
@@ -263,8 +266,15 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
                         error('Enter a nonnegative USD amount or leave it blank.');
                         return;
                     }
+                    const customBudget = budget.text.trim() === '' ? null : Number(budget.text);
+                    if (customBudget !== null && (!Number.isFinite(customBudget) || customBudget <= 0 ||
+                        Math.abs(Math.round(customBudget * 100) - customBudget * 100) > 0.00000001)) {
+                        error('Custom budgets must be positive USD amounts with at most two decimal places.');
+                        return;
+                    }
                     execute({kind: 'save', key: account.key, displayName: name.text,
-                        thresholds: thresholds.text, spendIncrementUsd: amount, showPeriodEstimate: estimate.active});
+                        thresholds: thresholds.text, spendIncrementUsd: amount, showPeriodEstimate: estimate.active,
+                        customBudgetUsd: customBudget, updateCustomBudget: true});
                 });
                 addAction('Refresh', () => execute({kind: 'refresh', key: account.key}));
                 addAction('Reconnect', () => execute({kind: 'signin', key: account.key,

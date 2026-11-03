@@ -137,7 +137,8 @@ async function run() {
     await settle();
     checkLayout();
     click('Save');
-    assert(fixture.requests.some(r => r.kind === 'save' && r.key === 'synthetic-account'), 'Account editing lost its command.');
+    assert(fixture.requests.some(r => r.kind === 'save' && r.key === 'synthetic-account' &&
+        r.customBudgetUsd === null && r.updateCustomBudget === true), 'Account editing lost its command or budget semantics.');
     await scrollToBottom();
     screenshot('accounts');
 

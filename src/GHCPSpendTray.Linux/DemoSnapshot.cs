@@ -10,7 +10,9 @@ public sealed record DemoAccount(string Key, string Name, string Login, string H
     string Consumption, string Allocation, string Freshness, string? UpdatedAt,
     string DisplayName = "", string Thresholds = "", decimal? SpendIncrementUsd = null,
     bool ShowPeriodEstimate = false, string? ClientId = null, string? Message = null,
-    AccountDiagnostics? Details = null, PeriodEstimate? PeriodEstimate = null, string? AvatarUri = null);
+    AccountDiagnostics? Details = null, PeriodEstimate? PeriodEstimate = null, string? AvatarUri = null,
+    UsagePosition? ActualUsage = null, UsageForecast? Forecast = null, decimal? CustomBudgetUsd = null,
+    string TrackingTarget = "Unavailable", string TargetLabel = "API limit");
 
 public sealed record SignInView(string Phase, string? Code = null, string? VerificationUri = null,
     DateTimeOffset? Expires = null, string? Message = null)
@@ -38,6 +40,8 @@ public sealed record AccountRequest
     public string? Thresholds { get; init; }
     public decimal? SpendIncrementUsd { get; init; }
     public bool? ShowPeriodEstimate { get; init; }
+    public decimal? CustomBudgetUsd { get; init; }
+    public bool UpdateCustomBudget { get; init; }
     public SettingsView? Settings { get; init; }
 }
 
@@ -60,7 +64,10 @@ public sealed record DemoSnapshot(int Version, bool Demo, long Revision, string 
                 a.UpdatedAt?.ToString("O", CultureInfo.InvariantCulture), Message: a.Details.Message,
                 Details: a.Details, PeriodEstimate: a.PeriodEstimate,
                 AvatarUri: a.AvatarUrl is { } avatar && Path.IsPathFullyQualified(avatar)
-                    ? new Uri(avatar).AbsoluteUri : null)).ToArray(),
+                    ? new Uri(avatar).AbsoluteUri : null,
+                ActualUsage: a.ActualUsage, Forecast: a.Forecast, CustomBudgetUsd: a.CustomBudgetUsd,
+                TrackingTarget: Money(a.AllocationUsd),
+                TargetLabel: a.CustomBudgetUsd is not null ? "custom budget" : "API limit")).ToArray(),
             Tray: tray, IsComplete: dashboard.IsComplete, IsLastKnown: dashboard.IsLastKnown,
             Icons: TrayPreview.Create(tray).Icons);
     }

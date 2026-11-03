@@ -19,6 +19,11 @@
 .ghcp-demo-amount { font-weight: bold; font-size: 1.35em; }
 .ghcp-demo-track { background-color: rgba(128, 128, 128, 0.4); border-radius: 2px; }
 .ghcp-demo-fill { background-color: #ff7a2f; border-radius: 2px; }
+.ghcp-demo-current-marker { background-color: #ff7a2f; border-radius: 5px; }
+.ghcp-demo-forecast, .ghcp-demo-forecast-marker { background-color: #3584e4; border-radius: 2px; }
+.ghcp-demo-forecast-marker { border-radius: 5px; }
+.ghcp-demo-forecast-near { background-color: #e5a50a; }
+.ghcp-demo-forecast-over { background-color: #e01b24; }
 .ghcp-demo-button {
     border-radius: 6px; padding: 7px 10px;
     background-color: rgba(128, 128, 128, 0.2);

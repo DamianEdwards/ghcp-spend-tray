@@ -6,7 +6,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {DemoClient} from './client.js';
-import {formatPercent, updatedText, diagnosticsText, estimateText} from './snapshot.js';
+import {formatPercent, updatedText, diagnosticsText, forecastText} from './snapshot.js';
 
 function column(styleClass = '') {
     return new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: styleClass});
@@ -172,23 +172,65 @@ export default class GHCPSpendTrayExtension extends Extension {
         heading.add_child(identity);
         heading.add_child(label(account.consumption, 'ghcp-demo-amount'));
         card.add_child(heading);
-        if (account.percent !== null) {
-            const track = new St.Widget({style_class: 'ghcp-demo-track', height: 4, x_expand: true});
+        if (account.actualUsage) {
+            const track = new St.Widget({style_class: 'ghcp-demo-track', height: 10, x_expand: true,
+                accessible_name: account.forecast ? forecastText(account) :
+                    `${account.name} current usage ${formatPercent(account.actualUsage.percent)}`});
             const fill = new St.Widget({style_class: 'ghcp-demo-fill', height: 4});
             track.add_child(fill);
-            track.connect('notify::width', () => fill.set_width(track.width * Math.min(account.percent / 100, 1)));
+            const currentMarker = new St.Widget({style_class: 'ghcp-demo-current-marker', width: 9, height: 9});
+            track.add_child(currentMarker);
+            const projected = [];
+            let forecastMarker = null;
+            if (account.forecast) {
+                for (let index = 0; index < 10; index++) {
+                    const dash = new St.Widget({style_class: `ghcp-demo-forecast ghcp-demo-forecast-${account.forecast.band.toLowerCase()}`,
+                        height: 4});
+                    track.add_child(dash);
+                    projected.push(dash);
+                }
+                forecastMarker = new St.Widget({
+                    style_class: `ghcp-demo-forecast-marker ghcp-demo-forecast-${account.forecast.band.toLowerCase()}`,
+                    width: 9, height: 9,
+                });
+                track.add_child(forecastMarker);
+            }
+            const resize = () => {
+                const actual = track.width * account.actualUsage.fraction;
+                fill.set_position(0, 3);
+                fill.set_width(actual);
+                currentMarker.set_position(Math.min(track.width - 9, Math.max(0, actual - 4)), 0);
+                if (!account.forecast) return;
+                const end = track.width * account.forecast.forecastFraction;
+                const available = Math.max(0, end - actual);
+                const gap = 3;
+                const dashCount = Math.min(projected.length, Math.floor((available + gap) / (1 + gap)));
+                const dashWidth = dashCount ? (available - gap * (dashCount - 1)) / dashCount : 0;
+                projected.forEach((dash, index) => {
+                    dash.visible = index < dashCount;
+                    if (dash.visible) {
+                        dash.set_position(actual + index * (dashWidth + gap), 3);
+                        dash.set_width(dashWidth);
+                    }
+                });
+                forecastMarker.set_position(Math.min(track.width - 9, Math.max(0, end - 4)), 0);
+            };
+            track.connect('notify::width', resize);
             card.add_child(track);
         }
-        card.add_child(label(account.percent === null ? 'Allocation percentage not available' :
-            `${formatPercent(account.percent)} of ${account.allocation} allocation`, 'ghcp-demo-caption'));
-        if (account.periodEstimate) {
-            const estimate = label(estimateText(account.periodEstimate), 'ghcp-demo-caption');
-            estimate.clutter_text.line_wrap = true;
-            card.add_child(estimate);
+        card.add_child(label(!account.actualUsage ? 'Tracking target unavailable' :
+            `${formatPercent(account.actualUsage.percent)} current of ${account.trackingTarget} ${account.targetLabel}`,
+        'ghcp-demo-caption'));
+        if (account.forecast) {
+            const forecast = label(forecastText(account),
+                account.forecast.band === 'Under' ? 'ghcp-demo-caption' : 'ghcp-demo-warning');
+            forecast.clutter_text.line_wrap = true;
+            card.add_child(forecast);
         }
         const status = new St.BoxLayout();
-        const freshness = label(account.percent > 100 ? `${account.freshness} - Over allocation` : account.freshness,
-            account.percent > 100 ? 'ghcp-demo-warning' : 'ghcp-demo-caption');
+        const overTarget = account.actualUsage?.band === 'Over';
+        const freshness = label(overTarget ? `${account.freshness} - At or over ${account.targetLabel}` : account.freshness,
+            overTarget ? 'ghcp-demo-warning' : 'ghcp-demo-caption');
         freshness.x_expand = true;
         status.add_child(freshness);
         const details = column('ghcp-demo-details');

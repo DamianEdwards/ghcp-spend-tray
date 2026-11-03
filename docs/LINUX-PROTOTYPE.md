@@ -159,9 +159,12 @@ The same renderer supplies PNG images to GNOME/Qt Quick and ARGB pixels to the
 native tray. Legacy desktop-local style preferences no longer override the
 shared settings.
 
-Account preferences include opt-in period estimates with early/unavailable
-caveats. Details include observed credits, consumption, allocation, percentage,
-source/reset/next-refresh timestamps, period identity, and estimate inputs.
+Account preferences include opt-in period forecasts and an optional custom
+tracking budget. GNOME, Plasma, and Hyprland render the shared current position
+and estimated-at-reset position against that effective target, including
+under/near/over status and early/unavailable caveats. Details include observed
+credits, consumption, allocation, percentage, source/reset/next-refresh
+timestamps, period identity, and estimate inputs.
 Last-known and partial totals are labeled; cached avatars are local files.
 Controls also provide copy-code, host-specific OAuth grant management, data and
 startup folders, project/privacy/support links, and Quit. On systemd desktops,
