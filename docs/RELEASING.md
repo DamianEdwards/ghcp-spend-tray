@@ -10,9 +10,12 @@ numbers need not match.
 
 ## Telemetry build configuration
 
-Configure `GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` as a repository or
-environment Actions **variable**, available to both `production` and
-`microsoft-store`. The Windows, macOS, and Store packaging steps pass it to
+Configure `GHCP_APPLICATIONINSIGHTS_CONNECTION_STRING` as a repository Actions
+**variable** when Linux tracked telemetry is required. It may instead be an
+environment variable only for Windows/macOS release builds, but must be
+repository-scoped for the Linux verification job because protected signing uses
+that exact previously tested artifact. The Windows, macOS, Store, and eligible
+Linux packaging steps pass it to
 MSBuild, which embeds it in the shared application assembly's
 `ApplicationInsightsConnectionString` metadata. It is readable ingestion
 configuration, not an Azure management credential. Do not put the value in
@@ -24,6 +27,9 @@ Do not pass a semicolon-separated connection string directly as a `-p:` argument
 macOS Preview/Stable builds use the native bundle version and `github-release`
 installation source; Development builds never send tracked events. Windows
 reports Microsoft Store, sideload, or unpackaged installation context.
+Linux reports `appimage`; its PR/local builds compile tracked export out, while
+applicable `main` pushes set `GHCP_LINUX_TRACKED_TELEMETRY_ALLOWED=true` before
+building the artifact later consumed by the protected signing job.
 Demo/smoke/isolated portable modes do not export tracked events by default.
 Windows offers an explicit synthetic verification exception described below.
 

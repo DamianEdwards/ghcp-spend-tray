@@ -15,25 +15,37 @@ ScrollView {
     ColumnLayout {
         width: view.availableWidth
         spacing: 12
-        Label { text: "This month's consumption" }
-        Label {
-            objectName: "consumption"
-            text: view.snapshot ? view.snapshot.consumption : "Unavailable"
-            font.pixelSize: 40
-            font.bold: true
-        }
-        Label {
-            text: view.snapshot ? view.snapshot.accounts.length + " connected account(s)" : "No current observations"
-        }
-        Label {
-            text: view.snapshot ? (view.snapshot.isComplete ? "" :
-                view.snapshot.isLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable") : ""
-            wrapMode: Text.Wrap; Layout.fillWidth: true
-        }
-        Label { text: view.snapshot ? view.snapshot.status : ""; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
-        Label {
-            text: view.snapshot && view.snapshot.tray ? view.snapshot.tray.rollUp.details : ""
-            textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true
+        Frame {
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 6
+                RowLayout {
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        Label { text: "This month's usage" }
+                        Label {
+                            objectName: "consumption"
+                            text: view.snapshot ? view.snapshot.consumption : "Unavailable"
+                            font.pixelSize: 40
+                            font.bold: true
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: view.snapshot ? view.snapshot.accounts.length + " connected account(s)" : "No current observations"
+                    }
+                }
+                Label {
+                    text: view.snapshot ? (view.snapshot.isComplete ? "" :
+                        view.snapshot.isLastKnown ? "Last-known / partial total" : "Partial total - some accounts unavailable") : ""
+                    wrapMode: Text.Wrap; Layout.fillWidth: true
+                }
+                Label {
+                    text: view.snapshot ? view.snapshot.status : ""
+                    textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true
+                }
+            }
         }
         Button { visible: view.selectedKey.length > 0; text: "All accounts"; onClicked: view.clearSelection() }
         Label {
@@ -78,30 +90,35 @@ ScrollView {
                             Label { text: card.modelData.name; textFormat: Text.PlainText; font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             Label { text: card.modelData.host; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         }
-                        Label { text: card.modelData.consumption; font.bold: true; font.pixelSize: 22 }
+                        Button { text: "Manage account"; onClicked: view.manageAccount(card.modelData.key) }
                     }
                     Item {
                         id: forecastTrack
                         objectName: "forecast-track"
                         visible: card.modelData.actualUsage !== null && card.modelData.actualUsage !== undefined
                         Layout.fillWidth: true
-                        implicitHeight: 14
+                        implicitHeight: card.modelData.forecast ? 88 : 64
                         clip: true
+                        readonly property real meterWidth: Math.max(0, width - target.width - 18)
+                        readonly property real markerLimit: Math.max(0, meterWidth - 7)
                         Accessible.name: card.modelData.forecast ? Snapshot.forecastText(card.modelData) :
                             card.modelData.name + " current usage " + Snapshot.formatPercent(card.modelData.actualUsage.percent)
                         Rectangle {
-                            anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            x: 2; width: forecastTrack.meterWidth
+                            y: 42
                             height: 4; radius: 2; color: view.palette.mid
                         }
                         Rectangle {
-                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            x: 2; y: 42
                             height: 4; radius: 2; color: "#ff7a2f"
-                            width: parent.width * card.modelData.actualUsage.fraction
+                            width: forecastTrack.meterWidth * card.modelData.actualUsage.fraction
                         }
                         Item {
                             visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
-                            x: parent.width * card.modelData.forecast.actualFraction
-                            width: parent.width * (card.modelData.forecast.forecastFraction - card.modelData.forecast.actualFraction)
+                            x: 2 + forecastTrack.meterWidth * card.modelData.forecast.actualFraction
+                            y: 39
+                            width: Math.max(0, forecastTrack.meterWidth *
+                                (card.modelData.forecast.forecastFraction - card.modelData.forecast.actualFraction))
                             height: parent.height
                             clip: true
                             Row {
@@ -110,7 +127,7 @@ ScrollView {
                                     model: Math.ceil(parent.width / 7)
                                     Rectangle {
                                         required property int index
-                                        anchors.verticalCenter: parent.verticalCenter
+                                        y: 3
                                         width: 4
                                         height: 4; radius: 2
                                         color: card.modelData.forecast.band === "Over" ? "#e01b24" :
@@ -120,27 +137,65 @@ ScrollView {
                             }
                         }
                         Rectangle {
-                            x: Math.min(parent.width - width,
-                                Math.max(0, parent.width * card.modelData.actualUsage.fraction - width / 2))
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 9; height: 9; radius: 5; color: "#ff7a2f"
+                            x: Math.min(forecastTrack.markerLimit, Math.max(0,
+                                2 + forecastTrack.meterWidth * card.modelData.actualUsage.fraction - width / 2))
+                            y: 34; width: 2; height: 20; color: view.palette.text
                         }
                         Rectangle {
                             visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
-                            x: Math.min(parent.width - width,
-                                Math.max(0, parent.width * card.modelData.forecast.forecastFraction - width / 2))
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 9; height: 9; radius: 5
+                            x: Math.min(forecastTrack.markerLimit, Math.max(0,
+                                2 + forecastTrack.meterWidth * card.modelData.forecast.forecastFraction - width / 2))
+                            y: 38; width: 2; height: 22
                             color: card.modelData.forecast && card.modelData.forecast.band === "Over" ? "#e01b24" :
                                 card.modelData.forecast && card.modelData.forecast.band === "Near" ? "#e5a50a" : "#3584e4"
+                        }
+                        Column {
+                            id: current
+                            x: Math.min(Math.max(0, forecastTrack.meterWidth - width - 2), Math.max(0,
+                                2 + forecastTrack.meterWidth * card.modelData.actualUsage.fraction - width / 2))
+                            y: 0
+                            Label {
+                                objectName: "current-amount"
+                                text: card.modelData.consumption; font.bold: true; font.pixelSize: 22
+                            }
+                            Label {
+                                objectName: "current-caption"
+                                text: "used"; anchors.horizontalCenter: parent.horizontalCenter
+                            }
+                        }
+                        Column {
+                            id: target
+                            anchors.right: parent.right
+                            y: 27
+                            Label {
+                                objectName: "target-amount"
+                                text: card.modelData.trackingTarget; font.bold: true; font.pixelSize: 18
+                            }
+                            Label {
+                                objectName: "target-caption"
+                                text: card.modelData.targetLabel === "custom budget" ? "budget" : card.modelData.targetLabel
+                                anchors.horizontalCenter: parent.horizontalCenter
+                            }
+                        }
+                        Column {
+                            visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
+                            x: Math.min(Math.max(0, forecastTrack.meterWidth - width - 2), Math.max(0,
+                                2 + forecastTrack.meterWidth * card.modelData.forecast.forecastFraction - width / 2))
+                            y: 58
+                            Label {
+                                objectName: "forecast-amount"
+                                text: card.modelData.estimateAmount || ""; font.bold: true; font.pixelSize: 16
+                            }
+                            Label {
+                                objectName: "forecast-caption"
+                                text: "est. total"; anchors.horizontalCenter: parent.horizontalCenter
+                            }
                         }
                     }
                     Label {
                         objectName: "allocation-label"
                         text: card.modelData.actualUsage === null || card.modelData.actualUsage === undefined ?
-                            "Tracking target unavailable" :
-                            Snapshot.formatPercent(card.modelData.actualUsage.percent) + " current of " +
-                            card.modelData.trackingTarget + " " + card.modelData.targetLabel
+                            "Tracking target unavailable" : card.modelData.usageCaption
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                         Layout.maximumWidth: view.availableWidth - 32
@@ -148,7 +203,8 @@ ScrollView {
                     Label {
                         objectName: "forecast-label"
                         visible: card.modelData.forecast !== null && card.modelData.forecast !== undefined
-                        text: Snapshot.forecastText(card.modelData)
+                        text: [card.modelData.estimateCaption, Snapshot.forecastStatus(card.modelData)]
+                            .filter(Boolean).join(" · ")
                         textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true
                         Layout.maximumWidth: view.availableWidth - 32
                     }
@@ -167,7 +223,6 @@ ScrollView {
                                 view.expandedKeys.filter(key => key !== card.modelData.key) :
                                 view.expandedKeys.concat([card.modelData.key])
                         }
-                        Button { text: "Manage"; onClicked: view.manageAccount(card.modelData.key) }
                     }
                     Label {
                         objectName: "account-details"

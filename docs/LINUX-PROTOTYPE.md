@@ -141,7 +141,8 @@ host desktop dependencies; Quickshell must match the host Qt installation.
 ## Presentation and contract
 
 All frontends use the shared controller's consumption totals and account cards:
-large monthly total, allocation progress, freshness, Details, and Refresh.
+large monthly total, labeled current/forecast/target callouts, freshness,
+reset context, account management, Details, and Refresh.
 KDE and Hyprland share a Qt Quick usage view. Errors clear usage to
 **Unavailable**, not zero. Over-allocation is retained in labels and only the
 visual progress bar is clamped.
@@ -152,15 +153,18 @@ USD alert increments, and confirmed removal. Blank overrides inherit global
 settings; zero disables USD increment alerts. Reconnect retains the original
 host, OAuth client, identity, and preferences. A wrong identity is rejected.
 All three desktops expose the shared global refresh interval, notifications,
-percentage/USD thresholds, test notification, and login startup settings.
+percentage/USD thresholds, test notification, login startup, and
+**Share basic app telemetry** settings.
 They support pie/percentage icons, weighted roll-up/per-account mode, account
 inclusion, and a draft preview computed by the shared backend without saving.
 The same renderer supplies PNG images to GNOME/Qt Quick and ARGB pixels to the
 native tray. Legacy desktop-local style preferences no longer override the
 shared settings.
 
-Account preferences include opt-in period forecasts and an optional custom
-tracking budget. GNOME, Plasma, and Hyprland render the shared current position
+Account preferences include opt-in period forecasts and an explicit choice
+between the account's API limit and a custom tracking budget. The editor shows
+a live percentage preview and explains that the target affects presentation
+and alerts but does not cap GitHub spending. GNOME, Plasma, and Hyprland render the shared current position
 and estimated-at-reset position against that effective target, including
 under/near/over status and early/unavailable caveats. Details include observed
 credits, consumption, allocation, percentage, source/reset/next-refresh
@@ -170,6 +174,13 @@ Controls also provide copy-code, host-specific OAuth grant management, data and
 startup folders, project/privacy/support links, and Quit. On systemd desktops,
 login1 resume signals invoke the shared resume refresh; ordinary polling remains
 active if that platform service is unavailable.
+
+Tracked telemetry reuses the shared Windows/macOS pipeline and remains subject
+to the saved consent setting. Local and pull-request AppImages do not export
+tracked events. Main-branch CI enables tracked export only for the exact
+verified artifact that proceeds to protected Linux signing, and only when the
+repository telemetry build variable is configured. Developer OTLP diagnostics
+remain independent.
 
 ### Credentials and sign-in
 

@@ -22,6 +22,7 @@ ScrollView {
         thresholds.text = settings.thresholds
         increment.text = settings.spendIncrementUsd === null ? "" : String(settings.spendIncrementUsd)
         startup.checked = settings.startup
+        telemetry.checked = settings.trackedTelemetryEnabled
         style.currentIndex = settings.trayStyle === "Pie" ? 0 : 1
         mode.currentIndex = settings.trayMode === "RollUp" ? 0 : 1
         excluded = (settings.excludedTrayAccounts || []).slice()
@@ -39,7 +40,8 @@ ScrollView {
         failure = ""
         return {pollMinutes: poll, thresholds: thresholds.text, notifications: notifications.checked,
             startup: startup.checked, spendIncrementUsd: spend, trayStyle: style.currentIndex === 0 ? "Pie" : "Percentage",
-            trayMode: mode.currentIndex === 0 ? "RollUp" : "PerAccount", excludedTrayAccounts: excluded}
+            trayMode: mode.currentIndex === 0 ? "RollUp" : "PerAccount", excludedTrayAccounts: excluded,
+            trackedTelemetryEnabled: telemetry.checked}
     }
     function showPreview() {
         if (!loaded) return
@@ -63,6 +65,15 @@ ScrollView {
         }
         Label {
             text: view.snapshot ? view.snapshot.settings.startupDescription : ""
+            wrapMode: Text.Wrap; Layout.fillWidth: true
+        }
+        CheckBox {
+            id: telemetry
+            objectName: "tracked-telemetry"
+            text: "Share basic app telemetry"
+        }
+        Label {
+            text: "Share app usage data and fixed-category error reports to help improve GHCPSpendTray."
             wrapMode: Text.Wrap; Layout.fillWidth: true
         }
         RowLayout {

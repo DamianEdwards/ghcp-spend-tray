@@ -5,7 +5,7 @@ import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import {DemoClient} from './client.js';
-import {parseSignIn, parsePreview} from './snapshot.js';
+import {amount, formatPercent, parseSignIn, parsePreview} from './snapshot.js';
 
 function actionButtons() {
     return new Gtk.FlowBox({
@@ -31,7 +31,11 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
         const thresholds = new Adw.EntryRow({title: 'Alert percentages, e.g. 50, 80, 100'});
         const increment = new Adw.EntryRow({title: 'USD increment (blank or 0 disables)'});
         const startup = new Adw.SwitchRow({title: 'Start monitoring at login'});
-        for (const row of [minutes, notifications, thresholds, increment, startup]) general.add(row);
+        const telemetry = new Adw.SwitchRow({
+            title: 'Share basic app telemetry',
+            subtitle: 'Share app usage data and fixed-category error reports to help improve GHCPSpendTray.',
+        });
+        for (const row of [minutes, notifications, thresholds, increment, startup, telemetry]) general.add(row);
         generalPage.add(general);
         const appearance = new Adw.PreferencesGroup({title: 'Panel indicators',
             description: '! means partial or over allocation; ? means unavailable. Only fresh, current-period, selected accounts contribute.'});
@@ -148,7 +152,8 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
                 throw new Error('Refresh must be 5 to 1440 whole minutes. USD increments must be nonnegative.');
             return {pollMinutes: poll, notifications: notifications.active, thresholds: thresholds.text,
                 spendIncrementUsd: spend, startup: startup.active, trayStyle: style.selected === 0 ? 'Pie' : 'Percentage',
-                trayMode: mode.selected === 0 ? 'RollUp' : 'PerAccount', excludedTrayAccounts: excluded};
+                trayMode: mode.selected === 0 ? 'RollUp' : 'PerAccount', excludedTrayAccounts: excluded,
+                trackedTelemetryEnabled: telemetry.active};
         };
         const preview = () => {
             if (!draftLoaded || closed) return;
@@ -184,6 +189,7 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
                 increment.text = s.spendIncrementUsd === null ? '' : String(s.spendIncrementUsd);
                 notifications.active = s.notifications;
                 startup.active = s.startup;
+                telemetry.active = s.trackedTelemetryEnabled;
                 style.selected = s.trayStyle === 'Pie' ? 0 : 1;
                 mode.selected = s.trayMode === 'RollUp' ? 0 : 1;
                 excluded = (s.excludedTrayAccounts || []).slice();
@@ -248,12 +254,37 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
                 const thresholds = new Adw.EntryRow({title: 'Alert percentages (blank inherits)', text: account.thresholds});
                 const spend = new Adw.EntryRow({title: 'USD alert increment (blank inherits; 0 disables)',
                     text: account.spendIncrementUsd === null ? '' : String(account.spendIncrementUsd)});
-                const budget = new Adw.EntryRow({title: 'Custom tracking budget (blank uses API limit)',
+                const budgetMode = new Adw.ComboRow({
+                    title: 'Usage budget',
+                    subtitle: "Choose what this account's usage percentage is measured against.",
+                    model: Gtk.StringList.new(['Use API limit', 'Use a custom budget']),
+                    selected: account.customBudgetUsd === null ? 0 : 1,
+                });
+                const budget = new Adw.EntryRow({title: 'Custom budget (USD)',
                     text: account.customBudgetUsd === null ? '' : String(account.customBudgetUsd)});
+                const budgetPreview = new Adw.ActionRow({title: 'Preview', use_markup: false});
+                const budgetHelp = new Adw.ActionRow({
+                    title: "Applies to this account's current billing period, usage meter, tray percentage, estimates, and percentage alerts. It does not cap spending or change your GitHub limit.",
+                    use_markup: false,
+                });
                 const estimate = new Adw.SwitchRow({title: 'Show estimated period consumption',
                     subtitle: 'Average pace this UTC month; assumes the same pace continues, not an invoice.',
                     active: account.showPeriodEstimate});
-                for (const entry of [name, thresholds, spend, budget, estimate]) row.add_row(entry);
+                const updateBudget = () => {
+                    budget.sensitive = budgetMode.selected === 1;
+                    const target = budgetMode.selected === 0 ? account.apiLimitUsd :
+                        (budget.text.trim() === '' ? null : Number(budget.text));
+                    budgetPreview.subtitle = target > 0 && account.consumptionUsd !== null
+                        ? `${account.consumption} consumed = ${formatPercent(account.consumptionUsd / target * 100)} of ` +
+                            `${budgetMode.selected === 0 ? account.apiLimit : amount(target)} ` +
+                            `${budgetMode.selected === 0 ? 'API limit' : 'custom budget'}`
+                        : 'Enter a valid target to preview the usage percentage.';
+                };
+                budgetMode.connect('notify::selected', updateBudget);
+                budget.connect('changed', updateBudget);
+                updateBudget();
+                for (const entry of [name, thresholds, spend, budgetMode, budget, budgetPreview, budgetHelp, estimate])
+                    row.add_row(entry);
                 const actions = actionButtons();
                 const addAction = (label, callback) => {
                     const button = new Gtk.Button({label, valign: Gtk.Align.CENTER});
@@ -266,8 +297,9 @@ export default class GHCPSpendTrayPreferences extends ExtensionPreferences {
                         error('Enter a nonnegative USD amount or leave it blank.');
                         return;
                     }
-                    const customBudget = budget.text.trim() === '' ? null : Number(budget.text);
-                    if (customBudget !== null && (!Number.isFinite(customBudget) || customBudget <= 0 ||
+                    const customBudget = budgetMode.selected === 0 ? null :
+                        (budget.text.trim() === '' ? null : Number(budget.text));
+                    if (budgetMode.selected === 1 && (customBudget === null || !Number.isFinite(customBudget) || customBudget <= 0 ||
                         Math.abs(Math.round(customBudget * 100) - customBudget * 100) > 0.00000001)) {
                         error('Custom budgets must be positive USD amounts with at most two decimal places.');
                         return;

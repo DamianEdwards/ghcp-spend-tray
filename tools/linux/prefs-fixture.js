@@ -18,11 +18,13 @@ const snapshot = {
     accounts: [{
         key: 'synthetic-account', name: 'Synthetic account', login: 'synthetic', host: 'github.com',
         displayName: '', thresholds: '', spendIncrementUsd: null, clientId: null, showPeriodEstimate: false,
-        customBudgetUsd: null,
+        customBudgetUsd: null, consumption: '$55.51', consumptionUsd: 55.51,
+        apiLimit: '$1,000', apiLimitUsd: 1000,
     }],
     settings: {
         pollMinutes: 15, notifications: true, thresholds: '50, 80, 100', spendIncrementUsd: null,
         startup: false, trayStyle: 'Pie', trayMode: 'RollUp', excludedTrayAccounts: [],
+        trackedTelemetryEnabled: true,
         canChangeStartup: true, startupDescription: 'Start monitoring when you sign in.',
     },
 };

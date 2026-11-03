@@ -75,15 +75,17 @@ internal static class BackendTests
                 Check(session.Snapshot.Accounts.Single().Key == "github.com:1" &&
                     session.Snapshot.Consumption == "$26.25", "Linux sign-in uses shared identity and consumption verification");
                 Check(session.Snapshot.Accounts[0] is { ActualUsage.Percent: 105, ActualUsage.Band: ForecastBand.Over,
-                    TrackingTarget: "$25", TargetLabel: "API limit" },
+                    TrackingTarget: "$25", TargetLabel: "API limit", UsageCaption: "105% used",
+                    ConsumptionUsd: 26.25m, ApiLimitUsd: 25m, ApiLimit: "$25" },
                     "Linux snapshots expose the shared current usage position and tracking target");
                 Check(credentials.Values.Count == 1, "Verified tokens go only to the injected credential store");
-                await Execute("""{"kind":"settings","settings":{"pollMinutes":15,"thresholds":"50, 80","notifications":false,"startup":false,"trayStyle":"Percentage","trayMode":"PerAccount","excludedTrayAccounts":[]}}""");
-                Check(session.Settings is { PollMinutes: 15, Notifications: false, TrayMode: TrayDisplayMode.PerAccount } &&
+                await Execute("""{"kind":"settings","settings":{"pollMinutes":15,"thresholds":"50, 80","notifications":false,"startup":false,"trayStyle":"Percentage","trayMode":"PerAccount","excludedTrayAccounts":[],"trackedTelemetryEnabled":false}}""");
+                Check(session.Settings is { PollMinutes: 15, Notifications: false, TrayMode: TrayDisplayMode.PerAccount,
+                        TrackedTelemetryEnabled: false } &&
                     session.Snapshot.Icons?.Single().Key == "github.com:1",
-                    "Global settings persist and drive independent account indicators");
+                    "Global settings and telemetry consent persist and drive independent account indicators");
                 string draft = await client.CallMethodAsync(Call("Preview",
-                    """{"kind":"preview","settings":{"pollMinutes":15,"thresholds":"50","notifications":false,"startup":false,"trayStyle":"Pie","trayMode":"RollUp","excludedTrayAccounts":["github.com:1"]}}"""),
+                    """{"kind":"preview","settings":{"pollMinutes":15,"thresholds":"50","notifications":false,"startup":false,"trayStyle":"Pie","trayMode":"RollUp","excludedTrayAccounts":["github.com:1"],"trackedTelemetryEnabled":false}}"""),
                     static (message, _) => message.GetBodyReader().ReadString());
                 using (var preview = JsonDocument.Parse(draft))
                     Check(preview.RootElement.GetProperty("tray").GetProperty("rollUp").GetProperty("percent").ValueKind == JsonValueKind.Null &&
@@ -103,7 +105,9 @@ internal static class BackendTests
                 await Execute("""{"kind":"save","key":"github.com:1","displayName":"Work","thresholds":"60, 90","spendIncrementUsd":0,"showPeriodEstimate":true}""");
                 Check(session.Snapshot.Accounts[0].PeriodEstimate is not null &&
                     session.Snapshot.Accounts[0].Forecast is { Band: ForecastBand.Over } &&
-                    session.Snapshot.Accounts[0].Details?.CreditsUsed == 2625,
+                    session.Snapshot.Accounts[0].Details?.CreditsUsed == 2625 &&
+                    session.Snapshot.Accounts[0].EstimateAmount?.StartsWith('$') == true &&
+                    !string.IsNullOrWhiteSpace(session.Snapshot.Accounts[0].EstimateCaption),
                     "Estimate opt-in exposes the shared forecast projection and full diagnostics");
                 await Execute("""{"kind":"save","key":"github.com:1","displayName":"Work","thresholds":"60, 90","spendIncrementUsd":0,"showPeriodEstimate":true,"customBudgetUsd":1000,"updateCustomBudget":true}""");
                 Check(session.Snapshot.Accounts[0] is { CustomBudgetUsd: 1000, ActualUsage.Percent: 2.625m,

@@ -47,9 +47,17 @@ public sealed class LinuxSession : IDisposable
         if (!Path.IsPathFullyQualified(config)) throw new PlatformOperationException("XDG_CONFIG_HOME must be an absolute path.");
         string? executable = Environment.ProcessPath;
         if (Path.GetFileName(executable) != "GHCPSpendTray.Linux") executable = null;
+        string version = typeof(LinuxSession).Assembly.GetName().Version?.ToString() ?? "unknown";
         return new(new ApplicationController(directory, false, new SecretServiceCredentials(),
             createStartup: () => Task.FromResult<IStartupRegistration>(new XdgStartupRegistration(config, executable, statusNotifier)),
-            recordDiagnostic: message => Console.Error.WriteLine(message)));
+            recordDiagnostic: message => Console.Error.WriteLine(message),
+            telemetry: new(version, "appimage",
+#if GHCP_LINUX_TRACKED_TELEMETRY
+                TrackedAllowed: true
+#else
+                TrackedAllowed: false
+#endif
+            )));
     }
 
     public Task StartAsync()

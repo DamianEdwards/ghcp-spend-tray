@@ -6,7 +6,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {DemoClient} from './client.js';
-import {formatPercent, updatedText, diagnosticsText, forecastText} from './snapshot.js';
+import {formatPercent, updatedText, diagnosticsText, forecastText, forecastStatus} from './snapshot.js';
 
 function column(styleClass = '') {
     return new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: styleClass});
@@ -170,18 +170,27 @@ export default class GHCPSpendTrayExtension extends Extension {
         identity.add_child(label(account.name, 'ghcp-demo-account-name'));
         identity.add_child(label(account.host, 'ghcp-demo-caption'));
         heading.add_child(identity);
-        heading.add_child(label(account.consumption, 'ghcp-demo-amount'));
         card.add_child(heading);
         if (account.actualUsage) {
-            const track = new St.Widget({style_class: 'ghcp-demo-track', height: 10, x_expand: true,
+            const track = new St.Widget({style_class: 'ghcp-demo-track', height: account.forecast ? 88 : 64, x_expand: true,
                 accessible_name: account.forecast ? forecastText(account) :
                     `${account.name} current usage ${formatPercent(account.actualUsage.percent)}`});
+            const baseline = new St.Widget({style_class: 'ghcp-demo-baseline', height: 4});
+            track.add_child(baseline);
             const fill = new St.Widget({style_class: 'ghcp-demo-fill', height: 4});
             track.add_child(fill);
-            const currentMarker = new St.Widget({style_class: 'ghcp-demo-current-marker', width: 9, height: 9});
+            const currentMarker = new St.Widget({style_class: 'ghcp-demo-current-marker', width: 2, height: 20});
             track.add_child(currentMarker);
+            const currentAmount = label(account.consumption, 'ghcp-demo-amount');
+            const currentUsed = label('used', 'ghcp-demo-track-caption');
+            const targetAmount = label(account.trackingTarget, 'ghcp-demo-target-amount');
+            const targetLabel = label(account.targetLabel === 'custom budget' ? 'budget' : account.targetLabel,
+                'ghcp-demo-track-caption');
+            for (const child of [currentAmount, currentUsed, targetAmount, targetLabel]) track.add_child(child);
             const projected = [];
             let forecastMarker = null;
+            let estimateAmount = null;
+            let estimateLabel = null;
             if (account.forecast) {
                 for (let index = 0; index < 10; index++) {
                     const dash = new St.Widget({style_class: `ghcp-demo-forecast ghcp-demo-forecast-${account.forecast.band.toLowerCase()}`,
@@ -191,17 +200,35 @@ export default class GHCPSpendTrayExtension extends Extension {
                 }
                 forecastMarker = new St.Widget({
                     style_class: `ghcp-demo-forecast-marker ghcp-demo-forecast-${account.forecast.band.toLowerCase()}`,
-                    width: 9, height: 9,
+                    width: 2, height: 22,
                 });
                 track.add_child(forecastMarker);
+                estimateAmount = label(account.estimateAmount || '', 'ghcp-demo-estimate-amount');
+                estimateLabel = label('est. total', 'ghcp-demo-track-caption');
+                track.add_child(estimateAmount);
+                track.add_child(estimateLabel);
             }
             const resize = () => {
-                const actual = track.width * account.actualUsage.fraction;
-                fill.set_position(0, 3);
-                fill.set_width(actual);
-                currentMarker.set_position(Math.min(track.width - 9, Math.max(0, actual - 4)), 0);
+                const preferred = actor => actor.get_preferred_width(-1)[1];
+                const targetWidth = Math.max(preferred(targetAmount), preferred(targetLabel));
+                const origin = 2;
+                const lineWidth = Math.max(0, track.width - targetWidth - 18);
+                const lineEnd = origin + lineWidth;
+                const actual = origin + lineWidth * account.actualUsage.fraction;
+                const place = (position, width) => Math.min(Math.max(0, lineEnd - width),
+                    Math.max(0, position - width / 2));
+                baseline.set_position(origin, 42);
+                baseline.set_width(lineWidth);
+                fill.set_position(origin, 42);
+                fill.set_width(Math.max(0, actual - origin));
+                currentMarker.set_position(Math.min(lineEnd, Math.max(origin, actual)), 34);
+                const currentWidth = preferred(currentAmount);
+                currentAmount.set_position(place(actual, currentWidth), 0);
+                currentUsed.set_position(place(actual, preferred(currentUsed)), 25);
+                targetAmount.set_position(track.width - preferred(targetAmount), 26);
+                targetLabel.set_position(track.width - targetWidth / 2 - preferred(targetLabel) / 2, 49);
                 if (!account.forecast) return;
-                const end = track.width * account.forecast.forecastFraction;
+                const end = origin + lineWidth * account.forecast.forecastFraction;
                 const available = Math.max(0, end - actual);
                 const gap = 3;
                 const dashCount = Math.min(projected.length, Math.floor((available + gap) / (1 + gap)));
@@ -209,20 +236,22 @@ export default class GHCPSpendTrayExtension extends Extension {
                 projected.forEach((dash, index) => {
                     dash.visible = index < dashCount;
                     if (dash.visible) {
-                        dash.set_position(actual + index * (dashWidth + gap), 3);
+                        dash.set_position(actual + index * (dashWidth + gap), 42);
                         dash.set_width(dashWidth);
                     }
                 });
-                forecastMarker.set_position(Math.min(track.width - 9, Math.max(0, end - 4)), 0);
+                forecastMarker.set_position(Math.min(lineEnd, Math.max(origin, end)), 38);
+                const estimateWidth = preferred(estimateAmount);
+                estimateAmount.set_position(place(end, estimateWidth), 58);
+                estimateLabel.set_position(place(end, preferred(estimateLabel)), 77);
             };
             track.connect('notify::width', resize);
             card.add_child(track);
         }
-        card.add_child(label(!account.actualUsage ? 'Tracking target unavailable' :
-            `${formatPercent(account.actualUsage.percent)} current of ${account.trackingTarget} ${account.targetLabel}`,
-        'ghcp-demo-caption'));
+        card.add_child(label(!account.actualUsage ? 'Tracking target unavailable' : account.usageCaption,
+            'ghcp-demo-caption'));
         if (account.forecast) {
-            const forecast = label(forecastText(account),
+            const forecast = label([account.estimateCaption, forecastStatus(account)].filter(Boolean).join(' · '),
                 account.forecast.band === 'Under' ? 'ghcp-demo-caption' : 'ghcp-demo-warning');
             forecast.clutter_text.line_wrap = true;
             card.add_child(forecast);

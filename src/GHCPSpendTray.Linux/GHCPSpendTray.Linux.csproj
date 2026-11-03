@@ -6,6 +6,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(GHCP_LINUX_TRACKED_TELEMETRY_ALLOWED)' == 'true'">
+    <DefineConstants>$(DefineConstants);GHCP_LINUX_TRACKED_TELEMETRY</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="GHCPSpendTray.LinuxTests" />
     <ProjectReference Include="../GHCPSpendTray.Application/GHCPSpendTray.Application.csproj" />

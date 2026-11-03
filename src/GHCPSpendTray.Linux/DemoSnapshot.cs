@@ -12,7 +12,9 @@ public sealed record DemoAccount(string Key, string Name, string Login, string H
     bool ShowPeriodEstimate = false, string? ClientId = null, string? Message = null,
     AccountDiagnostics? Details = null, PeriodEstimate? PeriodEstimate = null, string? AvatarUri = null,
     UsagePosition? ActualUsage = null, UsageForecast? Forecast = null, decimal? CustomBudgetUsd = null,
-    string TrackingTarget = "Unavailable", string TargetLabel = "API limit");
+    string TrackingTarget = "Unavailable", string TargetLabel = "API limit",
+    string UsageCaption = "", string? EstimateAmount = null, string? EstimateCaption = null,
+    decimal? ConsumptionUsd = null, decimal? ApiLimitUsd = null, string ApiLimit = "Unavailable");
 
 public sealed record SignInView(string Phase, string? Code = null, string? VerificationUri = null,
     DateTimeOffset? Expires = null, string? Message = null)
@@ -67,13 +69,28 @@ public sealed record DemoSnapshot(int Version, bool Demo, long Revision, string 
                     ? new Uri(avatar).AbsoluteUri : null,
                 ActualUsage: a.ActualUsage, Forecast: a.Forecast, CustomBudgetUsd: a.CustomBudgetUsd,
                 TrackingTarget: Money(a.AllocationUsd),
-                TargetLabel: a.CustomBudgetUsd is not null ? "custom budget" : "API limit")).ToArray(),
+                TargetLabel: a.CustomBudgetUsd is not null ? "custom budget" : "API limit",
+                UsageCaption: a.ActualUsage is { } usage ? UsageFormatting.Percentage(usage.Percent) + " used" : "",
+                EstimateAmount: a.Forecast is not null && a.PeriodEstimate?.EstimatedConsumptionUsd is { } estimate
+                    ? Money(estimate) : null,
+                EstimateCaption: EstimateCaption(a.PeriodEstimate),
+                ConsumptionUsd: a.ConsumptionUsd, ApiLimitUsd: a.Details.ObservedAllocationUsd,
+                ApiLimit: Money(a.Details.ObservedAllocationUsd))).ToArray(),
             Tray: tray, IsComplete: dashboard.IsComplete, IsLastKnown: dashboard.IsLastKnown,
             Icons: TrayPreview.Create(tray).Icons);
     }
 
     private static string Money(decimal? value) => value is null
         ? "Unavailable" : UsageFormatting.BudgetMoney(value.Value);
+
+    private static string? EstimateCaption(PeriodEstimate? estimate)
+    {
+        if (estimate is not { UnavailableReason: null }) return null;
+        string prefix = estimate.IsEarly ? "Early estimate" : "Estimate";
+        return estimate.ResetAtUtc is { } reset
+            ? $"{prefix} \u00b7 Resets {reset.UtcDateTime.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} UTC"
+            : prefix;
+    }
 
     public string ToJson() => JsonSerializer.Serialize(this, DemoJsonContext.Default.DemoSnapshot);
 }

@@ -53,14 +53,21 @@ export function parseSnapshot(json) {
         requireValue(usagePosition(account.actualUsage) && forecast(account.forecast) &&
             (account.customBudgetUsd === undefined || percent(account.customBudgetUsd)) &&
             (account.trackingTarget === undefined || text(account.trackingTarget)) &&
-            (account.targetLabel === undefined || ['API limit', 'custom budget'].includes(account.targetLabel)),
+            (account.targetLabel === undefined || ['API limit', 'custom budget'].includes(account.targetLabel)) &&
+            (account.usageCaption === undefined || text(account.usageCaption)) &&
+            (account.estimateAmount === undefined || account.estimateAmount === null || text(account.estimateAmount)) &&
+            (account.estimateCaption === undefined || account.estimateCaption === null || text(account.estimateCaption)) &&
+            (account.consumptionUsd === undefined || percent(account.consumptionUsd)) &&
+            (account.apiLimitUsd === undefined || percent(account.apiLimitUsd)) &&
+            (account.apiLimit === undefined || text(account.apiLimit)),
         'account forecast');
         requireValue(account.key.length > 0 && !keys.has(account.key), 'duplicate or empty account key');
         keys.add(account.key);
     }
     requireValue(value.settings && Number.isInteger(value.settings.pollMinutes) &&
         ['Pie', 'Percentage'].includes(value.settings.trayStyle) &&
-        ['RollUp', 'PerAccount'].includes(value.settings.trayMode), 'global settings');
+        ['RollUp', 'PerAccount'].includes(value.settings.trayMode) &&
+        typeof value.settings.trackedTelemetryEnabled === 'boolean', 'global settings');
     validateTray(value);
     return value;
 }
@@ -99,12 +106,16 @@ export function estimateText(estimate) {
 
 export function forecastText(account) {
     if (!account?.forecast || !account.periodEstimate) return '';
-    const status = account.forecast.band === 'Near' ? 'Near target' :
-        account.forecast.band === 'Over' ? 'At or over target' : 'Under target';
     return `Estimated at reset: ~${amount(account.periodEstimate.estimatedConsumptionUsd)} ` +
-        `(${formatPercent(account.forecast.percent)} of ${account.targetLabel || 'target'}). ${status}.` +
+        `(${formatPercent(account.forecast.percent)} of ${account.targetLabel || 'target'}). ${forecastStatus(account)}.` +
         (account.periodEstimate.isEarly ? ' Early estimate.' : '') +
         ' Average pace so far this UTC calendar month; assumes the same pace continues. Not an invoice.';
+}
+
+export function forecastStatus(account) {
+    if (!account?.forecast) return '';
+    return account.forecast.band === 'Near' ? 'Near target' :
+        account.forecast.band === 'Over' ? 'At or over target' : 'Under target';
 }
 
 export function diagnosticsText(account) {

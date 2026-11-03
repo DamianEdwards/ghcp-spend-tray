@@ -17,13 +17,16 @@
     text-align: center; font-weight: bold;
 }
 .ghcp-demo-amount { font-weight: bold; font-size: 1.35em; }
-.ghcp-demo-track { background-color: rgba(128, 128, 128, 0.4); border-radius: 2px; }
+.ghcp-demo-track { background-color: transparent; }
+.ghcp-demo-baseline { background-color: rgba(128, 128, 128, 0.55); border-radius: 2px; }
 .ghcp-demo-fill { background-color: #ff7a2f; border-radius: 2px; }
-.ghcp-demo-current-marker { background-color: #ff7a2f; border-radius: 5px; }
+.ghcp-demo-current-marker { background-color: white; }
 .ghcp-demo-forecast, .ghcp-demo-forecast-marker { background-color: #3584e4; border-radius: 2px; }
-.ghcp-demo-forecast-marker { border-radius: 5px; }
 .ghcp-demo-forecast-near { background-color: #e5a50a; }
 .ghcp-demo-forecast-over { background-color: #e01b24; }
+.ghcp-demo-track-caption { font-size: 0.8em; color: rgba(238, 238, 238, 0.75); }
+.ghcp-demo-target-amount { font-weight: bold; font-size: 1.15em; }
+.ghcp-demo-estimate-amount { font-weight: bold; font-size: 1em; }
 .ghcp-demo-button {
     border-radius: 6px; padding: 7px 10px;
     background-color: rgba(128, 128, 128, 0.2);

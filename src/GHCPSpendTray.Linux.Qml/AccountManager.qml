@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../snapshot.js" as Snapshot
 
 ScrollView {
     id: view
@@ -28,6 +29,7 @@ ScrollView {
         thresholds.text = account.thresholds
         spend.text = account.spendIncrementUsd === null ? "" : String(account.spendIncrementUsd)
         budget.text = account.customBudgetUsd === null ? "" : String(account.customBudgetUsd)
+        budgetMode.currentIndex = account.customBudgetUsd === null ? 0 : 1
         clientId.text = account.clientId || ""
         estimate.checked = account.showPeriodEstimate
         confirmRemoval.checked = false
@@ -127,11 +129,41 @@ ScrollView {
             TextField { id: displayName; objectName: "account-name"; placeholderText: "Display name"; Layout.fillWidth: true }
             TextField { id: thresholds; placeholderText: "Alert percentages (blank inherits)"; Layout.fillWidth: true }
             TextField { id: spend; placeholderText: "USD alert increment (blank inherits; 0 disables)"; Layout.fillWidth: true }
+            Label { text: "Usage budget"; font.bold: true }
+            Label {
+                text: "Choose what this account's usage percentage is measured against."
+                wrapMode: Text.Wrap; Layout.fillWidth: true
+            }
+            ComboBox {
+                id: budgetMode
+                objectName: "budget-mode"
+                model: ["Use API limit", "Use a custom budget"]
+                Layout.fillWidth: true
+            }
             TextField {
                 id: budget
                 objectName: "custom-budget"
-                placeholderText: "Custom tracking budget (blank uses API limit)"
+                placeholderText: "Custom budget (USD)"
+                enabled: budgetMode.currentIndex === 1
                 Layout.fillWidth: true
+            }
+            Label {
+                objectName: "budget-preview"
+                readonly property var account: view.snapshot ?
+                    view.snapshot.accounts.find(value => value.key === view.selectedKey) : null
+                readonly property var target: budgetMode.currentIndex === 0 ? (account ? account.apiLimitUsd : null) :
+                    (budget.text.trim() === "" ? null : Number(budget.text))
+                text: target > 0 && account && account.consumptionUsd !== null ?
+                    "Preview: " + account.consumption + " consumed = " +
+                    Snapshot.formatPercent(account.consumptionUsd / target * 100) + " of " +
+                    (budgetMode.currentIndex === 0 ? account.apiLimit : Snapshot.amount(target)) + " " +
+                    (budgetMode.currentIndex === 0 ? "API limit" : "custom budget") :
+                    "Enter a valid target to preview the usage percentage."
+                wrapMode: Text.Wrap; Layout.fillWidth: true
+            }
+            Label {
+                text: "Applies to this account's current billing period, usage meter, tray percentage, estimates, and percentage alerts. It does not cap spending or change your GitHub limit."
+                wrapMode: Text.Wrap; Layout.fillWidth: true
             }
             CheckBox { id: estimate; objectName: "show-estimate"; text: "Show estimated period consumption" }
             Label {
@@ -148,8 +180,10 @@ ScrollView {
                             view.validation = "Enter a nonnegative USD amount or leave it blank."
                             return
                         }
-                        const customBudget = budget.text.trim() === "" ? null : Number(budget.text)
-                        if (customBudget !== null && (!Number.isFinite(customBudget) || customBudget <= 0 ||
+                        const customBudget = budgetMode.currentIndex === 0 ? null :
+                            (budget.text.trim() === "" ? null : Number(budget.text))
+                        if (budgetMode.currentIndex === 1 && (customBudget === null ||
+                                !Number.isFinite(customBudget) || customBudget <= 0 ||
                                 Math.abs(Math.round(customBudget * 100) - customBudget * 100) > 0.00000001)) {
                             view.validation = "Custom budgets must be positive USD amounts with at most two decimal places."
                             return
