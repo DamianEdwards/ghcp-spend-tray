@@ -27,10 +27,10 @@ TestCase {
             icons: [{key: null, name: "Roll-up", tooltip: "105%", imageUri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4xkAAAAASUVORK5CYII="}],
             accounts: [{
                 key: "personal", name: "Personal", login: "synthetic", host: "github.com",
-                percent: 105, consumption: "$26.25", allocation: "$25.00",
+                percent: 105, consumption: "$26.25", allocation: "$25",
                 freshness: "Current", updatedAt: null, displayName: "Personal", thresholds: "", spendIncrementUsd: null,
                 showPeriodEstimate: true, clientId: null, message: null, customBudgetUsd: null,
-                trackingTarget: "$25.00", targetLabel: "API limit",
+                trackingTarget: "$25", targetLabel: "API limit",
                 actualUsage: {fraction: 1, percent: 105, band: "Over"},
                 forecast: {actualFraction: 1, forecastFraction: 1, percent: 120, band: "Over"},
                 periodEstimate: {estimatedConsumptionUsd: 30, averageDailyConsumptionUsd: 1,
@@ -99,6 +99,9 @@ TestCase {
     }
 
     function test_parser() {
+        compare(Snapshot.amount(1500), "$1,500")
+        compare(Snapshot.amount(1500.5), "$1,500.50")
+        compare(Snapshot.amount(1500.05), "$1,500.05")
         const value = sample()
         compare(Snapshot.parseSnapshot(JSON.stringify(value)).percent, 105)
         value.demo = false
@@ -150,7 +153,7 @@ TestCase {
         verify(card.width <= usage.width, "card " + card.width + " usage " + usage.width)
         verify(findChild(card, "forecast-track").visible)
         verify(findChild(card, "allocation-label").text.indexOf("105%") >= 0)
-        verify(findChild(card, "forecast-label").text.indexOf("~$30.00") >= 0)
+        verify(findChild(card, "forecast-label").text.indexOf("~$30") >= 0)
         const details = findChild(card, "account-details")
         compare(details.visible, false)
         mouseClick(findChild(card, "details-button"))

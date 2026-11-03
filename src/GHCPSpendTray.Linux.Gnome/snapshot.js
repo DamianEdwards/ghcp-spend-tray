@@ -82,7 +82,10 @@ export function parsePreview(json) {
 }
 
 export function amount(value) {
-    return value === null || value === undefined ? 'Unavailable' : '$' + Number(value).toFixed(2);
+    if (value === null || value === undefined) return 'Unavailable';
+    const [whole, cents] = Number(value).toFixed(2).split('.');
+    const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return '$' + grouped + (cents === '00' ? '' : '.' + cents);
 }
 
 export function estimateText(estimate) {

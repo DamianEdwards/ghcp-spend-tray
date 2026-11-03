@@ -75,7 +75,7 @@ internal static class BackendTests
                 Check(session.Snapshot.Accounts.Single().Key == "github.com:1" &&
                     session.Snapshot.Consumption == "$26.25", "Linux sign-in uses shared identity and consumption verification");
                 Check(session.Snapshot.Accounts[0] is { ActualUsage.Percent: 105, ActualUsage.Band: ForecastBand.Over,
-                    TrackingTarget: "$25.00", TargetLabel: "API limit" },
+                    TrackingTarget: "$25", TargetLabel: "API limit" },
                     "Linux snapshots expose the shared current usage position and tracking target");
                 Check(credentials.Values.Count == 1, "Verified tokens go only to the injected credential store");
                 await Execute("""{"kind":"settings","settings":{"pollMinutes":15,"thresholds":"50, 80","notifications":false,"startup":false,"trayStyle":"Percentage","trayMode":"PerAccount","excludedTrayAccounts":[]}}""");
@@ -107,7 +107,7 @@ internal static class BackendTests
                     "Estimate opt-in exposes the shared forecast projection and full diagnostics");
                 await Execute("""{"kind":"save","key":"github.com:1","displayName":"Work","thresholds":"60, 90","spendIncrementUsd":0,"showPeriodEstimate":true,"customBudgetUsd":1000,"updateCustomBudget":true}""");
                 Check(session.Snapshot.Accounts[0] is { CustomBudgetUsd: 1000, ActualUsage.Percent: 2.625m,
-                    Forecast.Band: ForecastBand.Under, TrackingTarget: "$1000.00", TargetLabel: "custom budget" },
+                    Forecast.Band: ForecastBand.Under, TrackingTarget: "$1,000", TargetLabel: "custom budget" },
                     "Linux account editing uses custom budgets as the shared forecast target");
                 await Execute("""{"kind":"signin","key":"github.com:1"}""");
                 await WaitFor("complete");

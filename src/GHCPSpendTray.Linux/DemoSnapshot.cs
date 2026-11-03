@@ -73,7 +73,7 @@ public sealed record DemoSnapshot(int Version, bool Demo, long Revision, string 
     }
 
     private static string Money(decimal? value) => value is null
-        ? "Unavailable" : "$" + value.Value.ToString("0.00", CultureInfo.InvariantCulture);
+        ? "Unavailable" : UsageFormatting.BudgetMoney(value.Value);
 
     public string ToJson() => JsonSerializer.Serialize(this, DemoJsonContext.Default.DemoSnapshot);
 }
