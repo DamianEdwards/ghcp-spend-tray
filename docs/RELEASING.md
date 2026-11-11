@@ -457,8 +457,11 @@ Native AOT data dehydration on Windows, with potential startup, throughput,
 and memory tradeoffs.
 
 Use `.\tools\package.ps1 -Store` for a framework-dependent Store build, with
-the assigned Partner Center identity arguments for submission. The conditional
-`Microsoft.WindowsAppSDK.Runtime` reference does not add the umbrella SDK.
+the assigned Partner Center identity arguments for submission. The unconditional
+`Microsoft.WindowsAppSDK.Runtime` reference keeps it discoverable alongside the
+component packages for grouped Dependabot updates without adding the umbrella
+SDK. `WindowsAppSDKSelfContained` selects the deployment mode; referencing the
+Runtime package does not make default GitHub/development builds framework-dependent.
 Packaging reads the resolved architecture-specific Microsoft framework's
 manifest to set its exact name, publisher and minimum version as a
 `PackageDependency`. The Store installs that dependency; no separate .NET
