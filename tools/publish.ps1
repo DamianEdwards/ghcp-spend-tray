@@ -59,11 +59,6 @@ try {
         if ($unwantedPackages.Count) {
             throw "The slim build must not reference optional SDK packages: $($unwantedPackages -join ', ')"
         }
-        if (-not $Store -and @($assets.libraries.PSObject.Properties.Name | Where-Object {
-            $_ -match '^Microsoft\.WindowsAppSDK\.Runtime/'
-        }).Count) {
-            throw 'The shared Windows App Runtime package reference must be limited to Store builds.'
-        }
         foreach ($library in $assets.libraries.PSObject.Properties) {
             if ($library.Value.type -ne 'package') { continue }
             $package = $null

@@ -364,7 +364,12 @@ are introduced.
 Keep dependency graph/submission, Dependabot alerts/security updates, secret
 scanning, push protection, and private vulnerability reporting enabled.
 [dependabot.yml](../.github/dependabot.yml) covers NuGet, the pinned .NET SDK,
-Actions, and npm tooling. Xcode/Apple SDK pins require manual updates and Mac
+Actions, and npm tooling. Keep Windows App SDK component and Runtime package
+references unconditional so Dependabot can discover and group them without
+Store-specific properties; `tools/ci/test_dependabot.py` checks this invariant.
+Select deployment mode with `WindowsAppSDKSelfContained` and verify both Store
+and self-contained packaging after SDK updates.
+Xcode/Apple SDK pins require manual updates and Mac
 verification; add Swift package coverage if external Swift packages are introduced.
 Preserve read-only default Actions permissions, full-SHA action pins, and the
 required aggregate Verification branch check.

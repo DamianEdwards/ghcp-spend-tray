@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 import unittest
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +25,24 @@ class DependabotTests(unittest.TestCase):
             directory = "/" + project.parent.relative_to(ROOT).as_posix()
             self.assertTrue(any(fnmatchcase(directory, pattern) for pattern in directories), directory)
         self.assertIn('"Microsoft.WindowsAppSDK.*"', nuget)
+
+    def test_windows_app_sdk_references_are_discoverable_without_store_properties(self):
+        project = ET.parse(ROOT / "src/GHCPSpendTray.App/GHCPSpendTray.App.csproj")
+        references = [
+            (group, reference)
+            for group in project.findall("ItemGroup")
+            for reference in group.findall("PackageReference")
+            if fnmatchcase(reference.get("Include", ""), "Microsoft.WindowsAppSDK.*")
+        ]
+        self.assertIn("Microsoft.WindowsAppSDK.Runtime", [
+            reference.get("Include") for _, reference in references
+        ])
+        for group, reference in references:
+            with self.subTest(package=reference.get("Include")):
+                self.assertNotIn("Condition", group.attrib,
+                                 "Dependabot must discover the whole SDK group without Store properties.")
+                self.assertNotIn("Condition", reference.attrib,
+                                 "Select deployment mode with WindowsAppSDKSelfContained, not package conditions.")
 
     def test_npm_covers_locked_artwork_tooling(self):
         npm = self.updates["npm"]

@@ -26,11 +26,11 @@
   <ItemGroup>
     <Using Include="GHCPSpendTray.Shared" />
     <ProjectReference Include="..\GHCPSpendTray.Application\GHCPSpendTray.Application.csproj" />
-    <!-- Component versions from Windows App SDK 2.5.1; the umbrella also brings AI/ML/Search/Widgets. -->
-    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.1.0" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.9" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" Condition="'$(StorePackage)' == 'true'" />
+    <!-- Keep component and Runtime references unconditional for grouped Dependabot updates; the umbrella also brings AI/ML/Search/Widgets. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.6.5" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.6.5" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.5" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.6.5" />
     <RuntimeHostConfigurationOption Include="Reactor.DevtoolsSupport" Value="false" Trim="true" />
     <PackageReference Include="Microsoft.UI.Reactor" Version="0.1.0-preview.16" />
     <ProjectReference Include="..\GHCPSpendTray.Core\GHCPSpendTray.Core.csproj" />
