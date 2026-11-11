@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export GHCP_APPDIR="$ROOT"
+exec "$ROOT/usr/ghcp-spend-tray-setup" "$@"

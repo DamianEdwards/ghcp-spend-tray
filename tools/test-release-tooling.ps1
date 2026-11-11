@@ -32,34 +32,37 @@ $gate = Join-Path $PSScriptRoot 'assert-verification.ps1'
 $results = @('success', 'failure', 'cancelled', 'skipped')
 foreach ($windows in @('true', 'false')) {
     foreach ($macos in @('true', 'false')) {
-        foreach ($markdown in @('true', 'false')) {
-            $needs = @{
-                changes = @{ result = 'success'; outputs = @{ windows = $windows; macos = $macos; markdown = $markdown } }
-                tests = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
-                package = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
-                macos_tests = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
-                macos = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
-                macos_runtime = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
-                markdown = @{ result = $(if ($markdown -eq 'true') { 'success' } else { 'skipped' }) }
-            }
-            foreach ($job in @('changes', 'tests', 'package', 'macos_tests', 'macos', 'macos_runtime', 'markdown')) {
-                $original = $needs[$job].result
-                foreach ($result in $results) {
-                    $needs[$job].result = $result
-                    $accepted = $true
-                    try { & $gate -NeedsJson ($needs | ConvertTo-Json -Depth 3) | Out-Null }
-                    catch { $accepted = $false }
-                    if ($accepted -ne ($result -eq $original)) {
-                        throw "Incorrect verification gate: windows=$windows macos=$macos markdown=$markdown job=$job result=$result"
-                    }
+        foreach ($linux in @('true', 'false')) {
+            foreach ($markdown in @('true', 'false')) {
+                $needs = @{
+                    changes = @{ result = 'success'; outputs = @{ windows = $windows; macos = $macos; linux = $linux; markdown = $markdown } }
+                    tests = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
+                    package = @{ result = $(if ($windows -eq 'true') { 'success' } else { 'skipped' }) }
+                    macos_tests = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                    macos = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                    macos_runtime = @{ result = $(if ($macos -eq 'true') { 'success' } else { 'skipped' }) }
+                    linux = @{ result = $(if ($linux -eq 'true') { 'success' } else { 'skipped' }) }
+                    markdown = @{ result = $(if ($markdown -eq 'true') { 'success' } else { 'skipped' }) }
                 }
-                $needs[$job].result = $original
-                $missing = $needs.Clone()
-                $missing.Remove($job)
-                $rejected = $false
-                try { & $gate -NeedsJson ($missing | ConvertTo-Json -Depth 3) | Out-Null }
-                catch { $rejected = $true }
-                if (-not $rejected) { throw "Missing verification job was accepted: $job" }
+                foreach ($job in @('changes', 'tests', 'package', 'macos_tests', 'macos', 'macos_runtime', 'linux', 'markdown')) {
+                    $original = $needs[$job].result
+                    foreach ($result in $results) {
+                        $needs[$job].result = $result
+                        $accepted = $true
+                        try { & $gate -NeedsJson ($needs | ConvertTo-Json -Depth 3) | Out-Null }
+                        catch { $accepted = $false }
+                        if ($accepted -ne ($result -eq $original)) {
+                            throw "Incorrect verification gate: windows=$windows macos=$macos linux=$linux markdown=$markdown job=$job result=$result"
+                        }
+                    }
+                    $needs[$job].result = $original
+                    $missing = $needs.Clone()
+                    $missing.Remove($job)
+                    $rejected = $false
+                    try { & $gate -NeedsJson ($missing | ConvertTo-Json -Depth 3) | Out-Null }
+                    catch { $rejected = $true }
+                    if (-not $rejected) { throw "Missing verification job was accepted: $job" }
+                }
             }
         }
     }

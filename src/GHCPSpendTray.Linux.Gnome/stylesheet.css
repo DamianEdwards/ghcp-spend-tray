@@ -1,0 +1,38 @@
+.ghcp-demo-popup { width: 360px; spacing: 12px; padding: 8px 12px; }
+.ghcp-demo-header { spacing: 10px; }
+.ghcp-demo-title { font-weight: bold; font-size: 1.15em; }
+.ghcp-demo-total { font-weight: bold; font-size: 2.6em; }
+.ghcp-demo-caption { font-size: 0.9em; }
+.ghcp-demo-scroll { max-height: 410px; }
+.ghcp-demo-accounts { spacing: 10px; }
+.ghcp-demo-card {
+    spacing: 12px; padding: 16px; border-radius: 10px;
+    background-color: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+}
+.ghcp-demo-account-name { font-weight: bold; }
+.ghcp-demo-avatar {
+    width: 32px; height: 32px; border-radius: 16px;
+    background-color: rgba(128, 128, 128, 0.2);
+    text-align: center; font-weight: bold;
+}
+.ghcp-demo-amount { font-weight: bold; font-size: 1.35em; }
+.ghcp-demo-track { background-color: transparent; }
+.ghcp-demo-baseline { background-color: rgba(128, 128, 128, 0.55); border-radius: 2px; }
+.ghcp-demo-fill { background-color: #ff7a2f; border-radius: 2px; }
+.ghcp-demo-current-marker { background-color: white; }
+.ghcp-demo-forecast, .ghcp-demo-forecast-marker { background-color: #3584e4; border-radius: 2px; }
+.ghcp-demo-forecast-near { background-color: #e5a50a; }
+.ghcp-demo-forecast-over { background-color: #e01b24; }
+.ghcp-demo-track-caption { font-size: 0.8em; color: rgba(238, 238, 238, 0.75); }
+.ghcp-demo-target-amount { font-weight: bold; font-size: 1.15em; }
+.ghcp-demo-estimate-amount { font-weight: bold; font-size: 1em; }
+.ghcp-demo-button {
+    border-radius: 6px; padding: 7px 10px;
+    background-color: rgba(128, 128, 128, 0.2);
+}
+.ghcp-demo-button:hover, .ghcp-demo-button:focus { background-color: rgba(128, 128, 128, 0.35); }
+.ghcp-demo-warning, .ghcp-demo-error { color: #e66100; }
+.ghcp-demo-details { spacing: 6px; }
+.ghcp-demo-footer { spacing: 12px; padding-top: 4px; }
+.ghcp-demo-indicator { min-width: 22px; text-align: center; }
