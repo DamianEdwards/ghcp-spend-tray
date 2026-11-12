@@ -216,10 +216,8 @@ internal sealed class ReactorShell : IDisposable
             };
             _settings.NativeWindow.Activated += (_, e) =>
             {
-                if (e.WindowActivationState != WindowActivationState.Deactivated && !_session.Busy)
-                {
-                    _session.RefreshStartup();
-                }
+                if (e.WindowActivationState != WindowActivationState.Deactivated)
+                    _session.Post(() => { if (!_session.Busy) _session.RefreshStartup(); });
             };
         }
         _settings.Show(); _settings.Activate();
