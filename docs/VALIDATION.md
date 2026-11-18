@@ -17,6 +17,7 @@ listed here is not a claim that it has passed for the current checkout.
 |---|---|
 | Windows | Windows 11, the SDK pinned in `global.json`, Windows SDK, and Visual Studio C++ tools. Packaging requires both x64 and ARM64 native tools. |
 | macOS | Native Apple silicon, the pinned .NET SDK, and stable Swift 6 Command Line Tools. CI/release toolchains are selected by `.github/actions/setup-macos`. Intel and Rosetta execution are unsupported. |
+| Linux | x86-64 or ARM64 Linux, the pinned .NET SDK, GJS/D-Bus/libsecret/GNOME Keyring, Qt 6 declarative test tools, GTK 4/libadwaita introspection data, Xvfb, GnuPG, and the pinned Python build requirements. CI currently runs Ubuntu 24.04 x86-64. |
 
 Support the latest patches of macOS 26 and 15, with a 15.0 deployment minimum.
 Advance this two-major-version window with each adopted stable major release.
@@ -152,6 +153,36 @@ the real completion-handler threading path. Render snapshots can omit
 GPU-composited SwiftUI text and do not establish pixel-perfect layout or VoiceOver
 correctness; screenshot/accessibility permissions are not changed by the tests.
 
+### Linux
+
+Run from the repository root:
+
+```bash
+PATH="$PWD/artifacts/linux/build-env/bin:$PATH" \
+QT_TOOLS_DIR="$PWD/artifacts/linux/qt-tools/usr/lib64/qt6/bin" \
+bash tools/linux/verify.sh
+```
+
+Create the Python build environment first when it is absent:
+
+```bash
+python3 -m venv artifacts/linux/build-env
+artifacts/linux/build-env/bin/python -m pip install -r tools/linux/requirements-build.txt
+```
+
+`QT_TOOLS_DIR` is optional when `qmlformat` and `qmltestrunner` are already on
+`PATH`. Verification runs the shared managed harnesses, executed Native AOT
+Linux tests, private D-Bus/keyring fixtures, GNOME parser and responsive
+preferences checks, QML interactions, native tray interoperability, AppImage
+signing fixtures, and isolated install/update/activation/removal smoke. It uses
+temporary HOME/XDG paths and must not enable extensions, modify the user's
+desktop session, or start/restart Waybar.
+
+The AppImage smoke deletes the original download, reinstalls from the stable
+copy, exercises all three frontend payloads, and removes owned files. This does
+not establish live GNOME Shell, Plasma, Hyprland, OAuth, KWallet, ARM64, or
+older-distribution behavior. Local artifacts and PR artifacts are unsigned.
+
 ### CI and release tooling
 
 For changes to platform routing or release orchestration:
@@ -175,6 +206,7 @@ Do not infer success for a skipped platform from another platform's passing job.
 | Windows platform/application harnesses | Portable path/ACL and singleton behavior, controller/UI contracts, synthetic credentials/HTTP, real HWND callbacks and HICON creation, resource ownership, and native theme policy. | Physical Explorer input, actual notification delivery, installed-package upgrades, or the complete display/theme matrix. |
 | Windows UI smoke | Actual WinUI creation and controls, rendering/layout readiness, account/settings flows, focus transitions, tray callbacks, synthetic notifications, and isolated Credential Manager CRUD. | Full accessibility acceptance, all foreground-permission behavior, or live OAuth/Store deployment. |
 | macOS native tests and UI smoke | Swift model/platform behavior, real Native AOT bridge interaction, Keychain isolation, popup attachment/resizing, settings drafts, and native close/Quit flows. | VoiceOver, real permission decisions, actual OS shutdown, production signing, or another OS generation unless its exact artifact is executed there. |
+| Linux native/frontend/AppImage lane | Shared-controller integration, Native AOT execution, private Secret Service CRUD, versioned token-free IPC, pixel-identical tray rendering, responsive synthetic GNOME preferences, QML interaction, reversible Waybar edits, and isolated AppImage lifecycle. | Live compositor acceptance, real OAuth/keyring prompts, exact Hyprland icon anchoring, ARM64 execution, older distributions, or publisher identity. |
 | Package and release tooling | Artifact architecture/resources, deployment contracts, signatures/metadata where configured, immutable-source selection, and synthetic release/Store failure handling. | Clean-machine installation, production distribution, Store certification, or execution on a cross-published architecture. |
 
 All fixtures and issue reports must use synthetic accounts and data.
@@ -261,6 +293,26 @@ without credential targets or account data. Remove only entries you recognize as
 unused in **Control Panel > Credential Manager > Windows Credentials**.
 The app does not delete other applications' credentials or use plaintext storage.
 
+### Linux desktop integration
+
+Validate the selected frontend on a real GNOME Shell 50, Plasma 6.3+, or
+Hyprland/Waybar/Quickshell 0.2.1+ session. Check sign-in, cancellation,
+reconnect, account editing/removal, notification permission and delivery,
+startup/resume refresh, light/dark and constrained layouts, tray modes/account
+selection, and clean update/removal. GNOME extension updates require logout/login
+because toggling an extension does not reload cached JavaScript.
+
+Credentials must remain in Secret Service with no plaintext fallback. Confirm
+GNOME Keyring and KWallet behavior separately, including locked/cancelled
+prompts. Device codes may appear only in direct sign-in replies, never snapshot
+broadcasts; tokens must never cross frontend IPC, command arguments, JSON files,
+or logs.
+
+Hyprland reuses or reversibly adds Waybar's tray without starting or restarting
+the bar. Its popup currently opens on the focused monitor rather than anchoring
+precisely to an arbitrary tray icon. Live frontend checks, ARM64 execution, and
+supported-distribution decisions remain release acceptance work.
+
 ### Updates
 
 **Microsoft Store:** native UI smoke holds a synthetic update open through
@@ -346,6 +398,23 @@ results with its PR, workflow run, or release evidence rather than in this file.
   close/Quit with Save, Discard, Keep Editing, invalid input, and failed saves.
 - Confirm uninstall guidance for residual application-support data and Keychain
   items. Mac releases do not imply App Store review or submission.
+
+### Linux distribution
+
+- Configure the protected `production` environment with the dedicated OpenPGP
+  key export, passphrase, and exact signing fingerprint documented in
+  [RELEASING.md](RELEASING.md). Missing credentials must fail closed.
+- Complete one successful main-branch signing run and verify its embedded and
+  detached signatures, checksum, workflow/ref/commit provenance, and unchanged
+  AppImage payload outside the reserved signature sections.
+- Exercise x86-64 and ARM64 artifacts on supported clean distributions and all
+  three live desktop environments before claiming production support.
+- Verify per-user install/update/removal, stable-copy behavior, reversible
+  Waybar changes, login opt-in, Secret Service ownership, and preservation of
+  settings/accounts across signed updates.
+- Establish a versioned Linux release/update channel before presenting signed
+  development artifacts as production releases. AppImage signatures are not
+  automatically enforced by the desktop.
 
 ## Repository verification controls
 

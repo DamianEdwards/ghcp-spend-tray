@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GHCP_LINUX_TRACKED_TELEMETRY_ALLOWED)' == 'true'">
+    <DefineConstants>$(DefineConstants);GHCP_LINUX_TRACKED_TELEMETRY</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GHCPSpendTray.LinuxTests" />
+    <ProjectReference Include="../GHCPSpendTray.Application/GHCPSpendTray.Application.csproj" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.1" />
+  </ItemGroup>
+</Project>

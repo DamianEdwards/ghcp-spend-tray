@@ -11,6 +11,16 @@ your own budgets, and spot when you're on course to go over them.
 [Set budgets](#set-your-own-budget) &middot; [Read your usage](#understand-your-usage-at-a-glance) &middot;
 [Updates](#keep-the-app-up-to-date)
 
+An experimental [native Linux prototype](docs/LINUX-PROTOTYPE.md) pairs native
+GNOME, KDE Plasma, and Hyprland/Waybar surfaces with a headless shared .NET helper.
+One AppImage opens graphical per-user setup for the selected desktop integration;
+it installs a stable copy, supports updates/removal, and starts the helper automatically.
+It uses the shared backend for real accounts and stores tokens in Secret Service.
+The native frontends still require live-desktop acceptance.
+Trusted main-branch builds produce a separate `linux-signed` artifact once the
+[protected Linux signing configuration](docs/RELEASING.md#linux-main-branch-signing)
+is provisioned. Local and PR development AppImages remain unsigned.
+
 <p>
   <img src="docs/images/user-guide/windows-flyout.png" alt="Windows tray popup with actual usage, a custom budget, an end-of-period estimate, and a daily chart" width="310" align="top">
   <img src="docs/images/macos-popup.png" alt="macOS menu-bar popup showing personal github.com and work ghe.com accounts" width="340" align="top">
