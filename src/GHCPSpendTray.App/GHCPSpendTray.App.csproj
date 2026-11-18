@@ -32,7 +32,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.7.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.7.0" />
     <RuntimeHostConfigurationOption Include="Reactor.DevtoolsSupport" Value="false" Trim="true" />
-    <PackageReference Include="Microsoft.UI.Reactor" Version="0.1.0-preview.16" />
+    <PackageReference Include="Microsoft.UI.Reactor" Version="0.1.0-preview.18" />
     <ProjectReference Include="..\GHCPSpendTray.Core\GHCPSpendTray.Core.csproj" />
     <Content Include="Assets\GHCPSpendTray.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\ghcpspendtray-logo.png" CopyToOutputDirectory="PreserveNewest" />
