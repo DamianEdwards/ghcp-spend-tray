@@ -57,7 +57,7 @@ jobs:
         if: matrix.language == 'swift'
         run: bash tools/macos/build.sh --bridge-only
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -68,7 +68,7 @@ jobs:
           xcrun swiftc -parse-as-library -swift-version 6 -warnings-as-errors \
             tools/macos/update-crypto.swift -o artifacts/sparkle/update-crypto
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
         with:
           category: /language:${{ matrix.language }}
       - name: Retain failed Swift extraction diagnostics
