@@ -1,0 +1,106 @@
+name: MSBuild multithreading experiment
+
+on:
+  push:
+    branches: [damianedwards-vigilant-garbanzo]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows-storage
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          global-json-file: global.json
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-tests-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-tests-
+      - name: Alternate clean solution builds
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet --version
+          $archive = Join-Path $env:RUNNER_TEMP 'source.tar'
+          git archive --format=tar -o $archive HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'git archive failed' }
+          $originalCache = $env:NUGET_PACKAGES
+          $modes = @('normal', 'mt', 'mt', 'normal', 'normal', 'mt')
+          for ($i = 0; $i -lt $modes.Count; $i++) {
+              $root = Join-Path $env:RUNNER_TEMP "trial-$i"
+              New-Item -ItemType Directory -Path $root | Out-Null
+              tar -xf $archive -C $root
+              if ($LASTEXITCODE -ne 0) { throw 'archive extraction failed' }
+              $env:NUGET_PACKAGES = Join-Path $env:RUNNER_TEMP "packages-$i"
+              New-Item -ItemType Directory -Path $env:NUGET_PACKAGES | Out-Null
+              if (Test-Path $originalCache) {
+                  Copy-Item -Path (Join-Path $originalCache '*') -Destination $env:NUGET_PACKAGES -Recurse -Force
+              }
+              Push-Location $root
+              try {
+                  $args = @('build', 'GHCPSpendTray.slnx', '-c', 'Release', '--nologo', '-v:q')
+                  if ($modes[$i] -eq 'mt') { $args += '-mt' }
+                  $watch = [Diagnostics.Stopwatch]::StartNew()
+                  & dotnet @args
+                  $exitCode = $LASTEXITCODE
+                  $watch.Stop()
+                  Write-Output "SAMPLE windows $i $($modes[$i]) $($watch.Elapsed.TotalSeconds)"
+                  if ($exitCode -ne 0) { throw "build failed: $exitCode" }
+                  foreach ($name in @('GHCPSpendTray.Tests', 'GHCPSpendTray.PlatformTests', 'GHCPSpendTray.AppTests', 'GHCPSpendTray.SharedTests')) {
+                      dotnet run --project "tests\$name\$name.csproj" -c Release --no-build | Select-Object -Last 1
+                      if ($LASTEXITCODE -ne 0) { throw "$name failed" }
+                  }
+              } finally { Pop-Location }
+          }
+
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-macos
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          global-json-file: global.json
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-macos-${{ hashFiles('global.json', '**/*.csproj', '**/*.props', '**/*.targets', '**/nuget.config', '**/packages.lock.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ runner.arch }}-macos-
+      - name: Alternate clean Native AOT test publishes
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet --version
+          git archive --format=tar -o "$RUNNER_TEMP/source.tar" HEAD
+          original_cache="$HOME/.nuget/packages"
+          modes=(normal mt mt normal normal mt)
+          for i in "${!modes[@]}"; do
+            root="$RUNNER_TEMP/trial-$i"
+            mkdir -p "$root" "$RUNNER_TEMP/packages-$i"
+            tar -xf "$RUNNER_TEMP/source.tar" -C "$root"
+            if [[ -d "$original_cache" ]]; then
+              cp -R "$original_cache/." "$RUNNER_TEMP/packages-$i/"
+            fi
+            export NUGET_PACKAGES="$RUNNER_TEMP/packages-$i"
+            cd "$root"
+            args=(publish tests/GHCPSpendTray.Tests -c Release -r osx-arm64 -p:PublishAot=true -p:IlcTreatWarningsAsErrors=true -o artifacts/tests/osx-arm64/GHCPSpendTray.Tests --nologo -v:q)
+            if [[ "${modes[$i]}" == mt ]]; then args+=(-mt); fi
+            start=$(python3 -c 'import time; print(time.monotonic())')
+            dotnet "${args[@]}"
+            end=$(python3 -c 'import time; print(time.monotonic())')
+            python3 -c 'import sys; print("SAMPLE macos", sys.argv[1], sys.argv[2], float(sys.argv[4])-float(sys.argv[3]))' "$i" "${modes[$i]}" "$start" "$end"
+            artifacts/tests/osx-arm64/GHCPSpendTray.Tests/GHCPSpendTray.Tests | tail -n 1
+          done
